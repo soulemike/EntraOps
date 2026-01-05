@@ -37,6 +37,10 @@ function Connect-EntraOps {
         [System.String]$GraphApiVersion = "beta"
         ,
         [Parameter(Mandatory = $False)]
+        [ValidateSet("Report", "Automation")]
+        [System.String]$Scope = "Report"
+        ,        
+        [Parameter(Mandatory = $False)]
         [System.String]$AccountId
         ,
         [Parameter(Mandatory = $True)]
@@ -71,14 +75,7 @@ function Connect-EntraOps {
             New-Variable -Name UseAzPwshOnly -Value $True -Scope Global -Force
         } else {
             New-Variable -Name UseAzPwshOnly -Value $False -Scope Global -Force
-
-            $RequiredCoreModules = @{
-                ModuleName    = 'Microsoft.Graph.Authentication'
-                ModuleVersion = '2.0.0'
-            }
-            $RequiredCoreModules | ForEach-Object { Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion }
-
-            $Scopes = @(
+            $MgGraphScopes = @(
                 "AdministrativeUnit.Read.All",
                 "Application.Read.All",
                 "CustomSecAttributeAssignment.Read.All",
@@ -97,6 +94,38 @@ function Connect-EntraOps {
                 "ThreatHunting.Read.All",
                 "User.Read.All"
             )
+
+            if ($Scope -eq "Report") {
+                $RequiredCoreModules = @(
+                    [PSCustomObject]@{ ModuleName = 'Microsoft.Graph.Authentication'; ModuleVersion = '2.0.0' }
+                )
+            } elseif ($Scope -eq "Automation") {
+                $RequiredCoreModules = @(
+                    [PSCustomObject]@{ ModuleName = 'Microsoft.Graph.Users'; ModuleVersion = '2.0.0' },
+                    [PSCustomObject]@{ ModuleName = 'Microsoft.Graph.Authentication'; ModuleVersion = '2.0.0' },
+                    [PSCustomObject]@{ ModuleName = 'Microsoft.Graph.Groups'; ModuleVersion = '2.0.0' },
+                    [PSCustomObject]@{ ModuleName = 'Microsoft.Graph.Identity.Governance'; ModuleVersion = '2.0.0' },
+                    [PSCustomObject]@{ ModuleName = 'Microsoft.Graph.Identity.SignIns'; ModuleVersion = '2.0.0' },
+                    [PSCustomObject]@{ ModuleName = 'Az.Accounts'; ModuleVersion = '2.8.0' },
+                    [PSCustomObject]@{ ModuleName = 'Az.Resources'; ModuleVersion = '6.5.0' }
+                ) 
+                $MgGraphScopesServiceEM = @(
+                    "Directory.AccessAsUser.All",
+                    "EntitlementManagement.ReadWrite.All",
+                    "RoleManagementPolicy.ReadWrite.AzureADGroup",
+                    "RoleManagementPolicy.ReadWrite.Directory",
+                    "RoleManagement.ReadWrite.Directory",
+                    "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+                    "PrivilegedAccess.ReadWrite.AzureADGroup"
+                )
+                $MgGraphScopes += $MgGraphScopesServiceEM         
+            } else {
+                throw "Scope $($Scope) is not supported. Valid options are 'Report' and 'Automation'."
+            }
+
+
+        $RequiredCoreModules | ForEach-Object { Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion }
+
         }
         #endregion
 
@@ -111,7 +140,7 @@ function Connect-EntraOps {
                     }
                     Write-Output "Succesfully logged in to Azure"
                     Write-Output "Logging in to Microsoft Graph..."
-                    Connect-MgGraph -TenantId $TenantId -NoWelcome -ErrorAction Stop -Scopes $Scopes
+                    Connect-MgGraph -TenantId $TenantId -NoWelcome -ErrorAction Stop -Scopes $MgGraphScopes
                     Write-Output "Succesfully logged in to Microsoft Graph"
                 } catch {
                     Write-Error -Message $_.Exception
@@ -127,7 +156,7 @@ function Connect-EntraOps {
                     }
                     Write-Output "Succesfully logged in to Azure"
                     Write-Output "Logging in to Microsoft Graph..."
-                    Connect-MgGraph -TenantId $TenantId -NoWelcome -ErrorAction Stop -Scopes $Scopes -UseDeviceAuthentication
+                    Connect-MgGraph -TenantId $TenantId -NoWelcome -ErrorAction Stop -Scopes $MgGraphScopes -UseDeviceAuthentication
                     Write-Output "Succesfully logged in to Microsoft Graph"
                 } catch {
                     Write-Error -Message $_.Exception
