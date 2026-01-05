@@ -30,7 +30,9 @@ function New-EntraOpsSubscriptionLandingZone {
 
         [switch]$SkipAzureResourceGroup,
 
-        [string]$AzureRegion = "eastus",
+        [switch]$SkipControlPlaneDelegation,
+
+        [string]$AzureRegion,
 
         [string]$DeploymentPrefix = "Default",
 
@@ -57,12 +59,15 @@ function New-EntraOpsSubscriptionLandingZone {
                 )
             }
         ),
-
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
     begin {
         $report = @()
+
+        if (-not $SkipAzureResourceGroup -and [string]::IsNullOrWhiteSpace($AzureRegion)) {
+            throw "Parameter -AzureRegion is required unless -SkipAzureResourceGroup is specified."
+        }
 
         if($smb){
             $i = [array]::IndexOf($LandingZoneComponents.Role,"Rg")
@@ -70,6 +75,10 @@ function New-EntraOpsSubscriptionLandingZone {
         }else{
             $i = [array]::IndexOf($LandingZoneComponents.Role,"Sub")
             $LandingZoneComponents[$i].ServiceRole += [pscustomobject]@{name = "Admins"; type = "Management"; groupType = ""}
+            if($SkipControlPlaneDelegation) {
+                Write-Verbose "$logPrefix Skipping Control Plane Delegation components"
+                $LandingZoneComponents[$i].ServiceRole = $LandingZoneComponents[$i].ServiceRole | Where-Object { $_.type -ne "Control"}
+            }
         }
     }
 

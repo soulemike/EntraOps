@@ -55,6 +55,9 @@ function New-EntraOpsServiceBootstrap {
 
         [string[]]$ServiceMembers,
 
+        [string]$GroupPrefix = "SG",
+        [string]$GroupNamingDelimiter = "-",
+
         [string]$ServiceOwner,
 
         [switch]$OwnerIsNotMember,  
@@ -63,7 +66,9 @@ function New-EntraOpsServiceBootstrap {
 
         [switch]$SkipAzureResourceGroup,
 
-        [string]$AzureRegion = "eastus",
+        [switch]$SkipControlPlaneDelegation,
+
+        [string]$AzureRegion,
 
         [psobject[]]$ServiceRoles,
 
@@ -71,14 +76,10 @@ function New-EntraOpsServiceBootstrap {
     )
 
     begin {
-        <#
-        $graphModules = "Users,Authentication,Groups,Identity.Governance,Identity.SignIns,Identity.Governance".Split(",")
-        $graphModules|%{Install-Module "Microsoft.Graph.$_"}
-        $azModules = "Accounts,Resources".Split(",")
-        $azModules|%{Install-Module "Az.$_"}
-        #Connect-MgGraph -UseDeviceCode -Scopes Directory.AccessAsUser.All, EntitlementManagement.ReadWrite.All, RoleManagementPolicy.ReadWrite.AzureADGroup, RoleManagementPolicy.ReadWrite.Directory, RoleManagement.ReadWrite.Directory, PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup, PrivilegedAccess.ReadWrite.AzureADGroup
-        #Connect-AzAccount -UseDeviceAuthentication
-        #>
+
+        if (-not $SkipAzureResourceGroup -and [string]::IsNullOrWhiteSpace($AzureRegion)) {
+            throw "Parameter -AzureRegion is required unless -SkipAzureResourceGroup is specified."
+        }
 
         #todo update all variables to just use this hashtable
         $report = @{}
@@ -161,11 +162,25 @@ Admins,Management,
     }
 
     process {
+
+        Write-Verbose "$logPrefix Removing Control Plane Delegation roles if specified"
+        if ($SkipControlPlaneDelegation) {
+            $filteredRoles = @()
+            foreach ($role in $ServiceRoles) {
+                if (-not ($role.name -eq "Admins" -and $role.type -eq "Control")) {
+                    $filteredRoles += $role
+                }
+            }
+            $ServiceRoles = $filteredRoles
+        }
+
         Write-Verbose "$logPrefix Processing Roles to Groups"
         $ServiceEntraGroupOptions = @{
             ServiceName             = $ServiceName
             ServiceOwner            = $owner
             ServiceRoles            = $ServiceRoles
+            GroupPrefix             = $GroupPrefix
+            GroupNamingDelimiter    = $GroupNamingDelimiter
             ProhibitDirectElevation = $ProhibitDirectElevation
         }
         $ServiceGroups = New-EntraOpsServiceEntraGroup @ServiceEntraGroupOptions
@@ -193,6 +208,7 @@ Admins,Management,
         $ServiceEMCatalogResourceRolesOptions = @{
             ServiceCatalogId = $ServiceEMCatalog.Id
             ServiceGroups    = $ServiceGroups
+            SkipControlPlaneDelegation = $SkipControlPlaneDelegation
         }
         $ServiceEMCatalogResourceRoles = New-EntraOpsServiceEMCatalogResourceRole @ServiceEMCatalogResourceRolesOptions
         $report.CatalogResourceRoles = $ServiceEMCatalogResourceRoles
@@ -254,6 +270,8 @@ Admins,Management,
             Write-Verbose "$logPrefix Processing PIM assignments"
             $ServicePIMAssignmentOptions = @{
                 ServiceGroups = $ServiceGroups
+                GroupPrefix = $GroupPrefix
+                GroupNamingDelimiter = $GroupNamingDelimiter
             }
             $ServicePIMAssignments = New-EntraOpsServicePIMAssignment @ServicePIMAssignmentOptions
             $report.PimAssignments = $ServicePIMAssignments
@@ -275,19 +293,3 @@ Admins,Management,
         return $report
     }
 }
-
-#Fix Docs
-#Fix Try/Catches
-#Add Bootstrap for LZ
-
-##Extras
-#Created KV
-#KV IAM Role Assignments
-#Created Bastion
-#Created VM
-#Set managed identity
-#Assign managed identity to member management and user workload
-#Reader on Sub
-#Peered Bastion and VM
-#Install pwsh
-#Set-AzKeyVaultSecret -VaultName "kv-Transacation" -Name "key-vm-Transaction" -SecretValue $(ConvertTo-SecureString (gc ./.key.pem -Raw) -AsPlainText -Force)

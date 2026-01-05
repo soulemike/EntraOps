@@ -28,9 +28,11 @@ function New-EntraOpsSubscriptionLandingZoneAlt {
 
         [switch]$ProhibitDirectElevation,
 
+        [switch]$SkipControlPlaneDelegation,        
+
         [switch]$SkipAzureResourceGroup,
 
-        [string]$AzureRegion = "eastus",
+        [string]$AzureRegion,
 
         [string]$DeploymentPrefix = "Default",
 
@@ -55,6 +57,17 @@ function New-EntraOpsSubscriptionLandingZoneAlt {
     }
 
     process {
+
+        if (-not $SkipAzureResourceGroup -and [string]::IsNullOrWhiteSpace($AzureRegion)) {
+            throw "Parameter -AzureRegion is required unless -SkipAzureResourceGroup is specified."
+        }
+
+        if ($SkipControlPlaneDelegation) {
+            Write-Verbose "$logPrefix Skipping Control Plane Delegation components"
+            $LandingZoneComponents = $LandingZoneComponents | Where-Object { $_.type -ne "Control"}
+        }        
+        Write-Verbose "$logPrefix Processing LZ"
+
         Write-Verbose "$logPrefix Processing LZ"
 
         $splatServiceBootstrap = @{
@@ -66,6 +79,7 @@ function New-EntraOpsSubscriptionLandingZoneAlt {
             ServiceMembers          = $ServiceMembers
             ServiceOwner            = $ServiceOwner
             SkipAzureResourceGroup  = $SkipAzureResourceGroup
+            SkipControlPlaneDelegation = $SkipControlPlaneDelegation
         }
         $report += New-EntraOpsServiceBootstrap @splatServiceBootstrap
 

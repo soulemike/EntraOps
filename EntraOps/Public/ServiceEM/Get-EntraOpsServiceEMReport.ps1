@@ -6,7 +6,7 @@
     Creates a reporting object that defines the objects and relationships.
 
 #>
-function Get-EntraOpsReport {
+function Get-EntraOpsServiceEMReport {
     [OutputType([psobject])]
     [cmdletbinding()]
     param()

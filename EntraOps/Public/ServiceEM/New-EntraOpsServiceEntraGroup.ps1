@@ -35,6 +35,9 @@ function New-EntraOpsServiceEntraGroup {
         [Parameter(Mandatory)]
         [string]$ServiceOwner,
 
+        [string]$GroupPrefix = "SG",
+        [string]$GroupNamingDelimiter = "-",
+
         [Parameter(Mandatory)]
         [psobject[]]$ServiceRoles,
 
@@ -86,7 +89,7 @@ function New-EntraOpsServiceEntraGroup {
             $unifiedParams.DisplayName = "$ServiceName $($ServiceRole.Name)"
             $unifiedParams.MailNickname = "$ServiceName.$($ServiceRole.Name)"
             $secParams.Description = "Team $(($ServiceRole.type +" "+ $ServiceRole.name).trim()) supporting $ServiceName"
-            $secParams.DisplayName = "SG-$ServiceName-$($ServiceRole.Name)-$($ServiceRole.type)"
+            $secParams.DisplayName = "$GroupPrefix$($GroupNamingDelimiter)$ServiceName$($GroupNamingDelimiter)$($ServiceRole.Name)$($GroupNamingDelimiter)$($ServiceRole.type)"
             $secParams.MailNickname = "$ServiceName.$($ServiceRole.Name +"."+ $ServiceRole.type)"
             try{
                 if($ServiceRole.groupType -eq "Unified" -and $groups.MailNickname -notcontains $unifiedParams.MailNickname){
@@ -96,7 +99,7 @@ function New-EntraOpsServiceEntraGroup {
                     Write-Verbose "$logPrefix $($secParams|ConvertTo-Json -Compress)"
                     $groups += New-MgGroup -BodyParameter $secParams
                     if($ServiceRole.type -eq "Management" -and $ServiceRole.name -eq "Admins" -and -not $ProhibitDirectElevation){
-                        $secParams.DisplayName = "SG-PIM-$ServiceName-$($ServiceRole.Name)-$($ServiceRole.type)"
+                        $secParams.DisplayName = "$($GroupPrefix)$($GroupNamingDelimiter)PIM$($GroupNamingDelimiter)$ServiceName$($GroupNamingDelimiter)$($ServiceRole.Name)$($GroupNamingDelimiter)$($ServiceRole.type)"
                         $secParams.MailNickname = "PIM.$ServiceName.$($ServiceRole.Name +"."+ $ServiceRole.type)"
                         $groups += New-MgGroup -BodyParameter $secParams
                     }

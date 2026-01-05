@@ -35,9 +35,11 @@ function New-EntraOpsServiceAZContainer {
         [ValidateSet("Azure","PIM","Both")]
         [string]$rbacModel = "PIM",
 
+        [switch]$SkipControlPlaneDelegation,
+
         [switch]$pimForGroups,
 
-        [string]$Location = "eastus",
+        [string]$Location,
 
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
@@ -82,7 +84,11 @@ function New-EntraOpsServiceAZContainer {
         }
         $pimAdmins  = $ServiceGroups|Where-Object{$_.DisplayName -like "*-PIM-*"}
         $members    = $ServiceGroups|Where-Object{$_.DisplayName -like "*-Members-Management"}
-        $control    = $ServiceGroups|Where-Object{$_.DisplayName -like "*-Admins-Control"}
+        if ($SkipControlPlaneDelegation) {
+            Write-Verbose "$logPrefix Skipping Control Plane delegation setup"
+        } else {
+            $control    = $ServiceGroups|Where-Object{$_.DisplayName -like "*-Admins-Control"}
+        }
         $management = $ServiceGroups|Where-Object{$_.DisplayName -like "*-Admins-Management"}
         $scheduleRequestParams = @{
             Name = ""
@@ -164,7 +170,7 @@ function New-EntraOpsServiceAZContainer {
                     PrincipalId = $management.Id
                 }
             }
-            if("$($userAccessAdmin.Name)_$($control.Id)" -notin $eligibleRbacSet){
+            if("$($userAccessAdmin.Name)_$($control.Id)" -notin $eligibleRbacSet -and -not $SkipControlPlaneDelegation){
                 $toAdd += @{
                     RoleDefinitionId = "$roleDefinitionPrefix/$($userAccessAdmin.Id)"
                     RoleId = $userAccessAdmin.Id

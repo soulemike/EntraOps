@@ -22,6 +22,9 @@ function New-EntraOpsServicePIMAssignment {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceGroups,
 
+        [string]$GroupPrefix = "SG",
+        [string]$GroupNamingDelimiter = "-",
+
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
@@ -53,7 +56,7 @@ function New-EntraOpsServicePIMAssignment {
             $pimEligibilities += Get-MgIdentityGovernancePrivilegedAccessGroupEligibilityScheduleRequest @pimEligibilitySplat
         
             if($group.DisplayName -like "*-PIM-*"){
-                $pimEligibilityParams.principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "SG-"+$group.DisplayName.Substring(7)}).Id
+                $pimEligibilityParams.principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "$GroupPrefix$($GroupNamingDelimiter)"+$group.DisplayName.Substring(7)}).Id
             }
             $ne = $pimEligibilityParams.principalId+"_noExpiration"
             $ee = $pimEligibilities|ForEach-Object{$_.PrincipalId+"_"+$_.TargetSchedule.ScheduleInfo.Expiration.Type}

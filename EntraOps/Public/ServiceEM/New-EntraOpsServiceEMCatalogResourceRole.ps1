@@ -28,6 +28,8 @@ function New-EntraOpsServiceEMCatalogResourceRole {
         [Parameter(Mandatory)]
         [string]$ServiceCatalogId,
 
+        [switch]$SkipControlPlaneDelegation,        
+
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
@@ -54,6 +56,12 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*Admins-Management
     }
 
     process {
+
+        if($SkipControlPlaneDelegation){
+            Write-Verbose "$logPrefix Skipping Control Plane catalog roles"
+            $catalogRoles = $catalogRoles | Where-Object { $_.filter -notlike "*-Control" }
+        }
+
         Write-Verbose "$logPrefix Processing $(($catalogRoles|Measure-Object).Count) catalog resource role assignments"
         foreach($catalogRole in $catalogRoles){
             $catalogRoleParams = @{

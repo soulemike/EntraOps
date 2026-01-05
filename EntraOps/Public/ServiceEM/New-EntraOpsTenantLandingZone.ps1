@@ -120,10 +120,6 @@ function New-EntraOpsLandingZone {
                 $report.$($role.Role).$component = New-EntraOpsServiceBootstrap @splatServiceBootstrap
             }
         }
-        
-
-        #$report.BillingAccount = New-EntraOpsServiceBootstrap -
-        #$report.
 
         return $report
     }
