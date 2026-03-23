@@ -176,8 +176,8 @@ function Invoke-EntraOpsMsGraphQuery {
                     }
 
                     # Add the initial query result to the result array
-                    if ($QueryRequest.value) {
-                        $QueryResult.AddRange($QueryRequest.value)
+                    if ($null -ne $QueryRequest.value) {
+                        $QueryResult.AddRange(@($QueryRequest.value))
                     } else {
                         $QueryResult.Add($QueryRequest)
                     }
@@ -192,7 +192,7 @@ function Invoke-EntraOpsMsGraphQuery {
                             while (-not $PageSuccess -and $PageRetryCount -le 3) {
                                 try {
                                     $QueryRequest = Invoke-RestMethod -Headers $HeaderParams -Uri $QueryRequest.'@odata.nextLink' -Method $Method -ContentType "application/json" -ResponseHeadersVariable $ResponseMessage
-                                    $QueryResult.AddRange($QueryRequest.value)
+                                    $QueryResult.AddRange(@($QueryRequest.value))
                                     $PageSuccess = $true
                                 } catch {
                                     $PageStatusCode = $_.Exception.Response.StatusCode.value__
@@ -329,8 +329,8 @@ function Invoke-EntraOpsMsGraphQuery {
                     }
 
                     # Add the initial query result to the result array
-                    if ($QueryRequest.value) {
-                        $QueryResult.AddRange($QueryRequest.value)
+                    if ($null -ne $QueryRequest.value) {
+                        $QueryResult.AddRange(@($QueryRequest.value))
                     } else {
                         $QueryResult.Add($QueryRequest)
                     }
@@ -345,7 +345,7 @@ function Invoke-EntraOpsMsGraphQuery {
                             while (-not $PageSuccess -and $PageRetryCount -le 3) {
                                 try {
                                     $QueryRequest = Invoke-MgGraphRequest -Headers $HeaderParams -Uri $QueryRequest.'@odata.nextLink' -Method $Method -ContentType "application/json" -OutputType $OutputType
-                                    $QueryResult.AddRange($QueryRequest.value)
+                                    $QueryResult.AddRange(@($QueryRequest.value))
                                     $PageSuccess = $true
                                 } catch {
                                     $PageStatusCode = $null

@@ -54,6 +54,9 @@ function Disconnect-EntraOps {
         Write-Warning "Failed to clear EntraOps cache: $_"
     }
 
+    # Reset session state set by Connect-EntraOps
+    $__EntraOpsSession['AuthenticationType'] = $null
+
 
     # Disconnect from Microsoft Graph SDK if connected
     $MgContext = Get-MgContext -ErrorAction SilentlyContinue
@@ -125,8 +128,16 @@ function Disconnect-EntraOps {
         Write-Host "  ℹ Persistent Cache     : Not cleared (CacheType: $ClearEntraOpsCache)" -ForegroundColor Gray
     }
     
+    # Validate session state reset
+    $AuthTypeCleaned = $null -eq $__EntraOpsSession['AuthenticationType']
+    if ($AuthTypeCleaned) {
+        Write-Host "  ✓ Session State        : Cleared (AuthenticationType reset)" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Session State        : AuthenticationType still set ($($__EntraOpsSession['AuthenticationType']))" -ForegroundColor Yellow
+    }
+
     # Overall status
-    $AllCleared = ($null -eq $AzContextCheck) -and ($null -eq $MgContextCheck) -and ($MemoryCacheCount -eq 0) -and ($MemoryCacheMetadataCount -eq 0)
+    $AllCleared = ($null -eq $AzContextCheck) -and ($null -eq $MgContextCheck) -and ($MemoryCacheCount -eq 0) -and ($MemoryCacheMetadataCount -eq 0) -and $AuthTypeCleaned
     
     Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
     if ($AllCleared) {

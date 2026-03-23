@@ -83,6 +83,8 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
     }
     $NewPrincipalsWatchlistItems = New-Object System.Collections.ArrayList
     $NewRoleAssignmentsWatchlistItems = New-Object System.Collections.ArrayList
+    $NewRoleAssignmentClassificationsWatchlistItems = New-Object System.Collections.ArrayList
+    $SeenClassificationUniqueIds = [System.Collections.Generic.HashSet[string]]::new()
     foreach ($Rbac in $RbacSystems) {
 
         try {
@@ -95,6 +97,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
             foreach ( $Privilege in $Privileges) {
                 $CurrentPrincipalItem = [PSCustomObject]@{
                     "ObjectId"                      = $Privilege.ObjectId
+                    "ObjectTenantId"                = $Privilege.ObjectTenantId
                     "ObjectType"                    = $Privilege.ObjectType
                     "ObjectSubType"                 = $Privilege.ObjectSubType
                     "ObjectDisplayName"             = $Privilege.ObjectDisplayName
@@ -121,15 +124,51 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                 $NewPrincipalsWatchlistItems.Add( $CurrentPrincipalItem ) | Out-Null
 
                 foreach ( $RoleAssignment in $Privilege.RoleAssignments) {
-                    $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Classification" -Value "$($RoleAssignment.Classification | ConvertTo-Json -Depth 10 -Compress -AsArray)" -Force
+                    # Extract classification into separate watchlist to avoid 10 KB item limit
+                    $RoleAssignmentClassifications = $RoleAssignment.Classification
+                    if ($null -ne $RoleAssignmentClassifications) {
+                        foreach ($ClassificationItem in $RoleAssignmentClassifications) {
+                            $ClassificationUniqueId = "$($RoleAssignment.RoleAssignmentId)_$($ClassificationItem.AdminTierLevelName)_$($ClassificationItem.Service)"
+                            if (-not $SeenClassificationUniqueIds.Add($ClassificationUniqueId)) {
+                                continue
+                            }
+                            $ClassificationWatchlistItem = [PSCustomObject]@{
+                                "RoleAssignmentId"           = $RoleAssignment.RoleAssignmentId
+                                "RoleAssignmentScopeId"      = $RoleAssignment.RoleAssignmentScopeId
+                                "RoleDefinitionName"         = $RoleAssignment.RoleDefinitionName
+                                "RoleDefinitionId"           = $RoleAssignment.RoleDefinitionId
+                                "RoleSystem"                 = $Rbac
+                                "AdminTierLevel"             = $ClassificationItem.AdminTierLevel
+                                "AdminTierLevelName"         = $ClassificationItem.AdminTierLevelName
+                                "Service"                    = $ClassificationItem.Service
+                                "TaggedBy"                   = $ClassificationItem.TaggedBy
+                                "TaggedByObjectIds"          = $ClassificationItem.TaggedByObjectIds | ConvertTo-Json -Depth 10 -Compress -AsArray
+                                "TaggedByObjectDisplayNames" = $ClassificationItem.TaggedByObjectDisplayNames | ConvertTo-Json -Depth 10 -Compress -AsArray
+                                "TaggedByRoleSystem"         = $ClassificationItem.TaggedByRoleSystem
+                                "Tags"                       = @("$($Rbac)", "RoleClassification", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
+                                "UniqueId"                   = $ClassificationUniqueId
+                            }
+                            $NewRoleAssignmentClassificationsWatchlistItems.Add($ClassificationWatchlistItem) | Out-Null
+                        }
+                    }
+
+                    # Remove Classification from RoleAssignment to reduce watchlist item size
+                    $RoleAssignment.PSObject.Properties.Remove("Classification")
+
                     if ($null -eq $RoleAssignment.TransitiveByObjectId ) {
                         $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)" -Force
                     } else {
                         $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)_$($RoleAssignment.TransitiveByObjectId)" -Force
                     }
-                    $TagValue = @("$($Rbac)", "Classification", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    $TagValue = @("$($Rbac)", "Role Assignment", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "RoleSystem" -Value $Rbac -Force
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Tags" -Value $TagValue -Force
+                    if ($RoleAssignment.PSObject.Properties.Match('TransitiveByNestingObjectDisplayNames').Count -gt 0) {
+                        $RoleAssignment.TransitiveByNestingObjectDisplayNames = $RoleAssignment.TransitiveByNestingObjectDisplayNames | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    }
+                    if ($RoleAssignment.PSObject.Properties.Match('TransitiveByNestingObjectIds').Count -gt 0) {
+                        $RoleAssignment.TransitiveByNestingObjectIds = $RoleAssignment.TransitiveByNestingObjectIds | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    }
                     $NewRoleAssignmentsWatchlistItems.Add( $RoleAssignment ) | Out-Null
                 }
             }
@@ -141,7 +180,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         Write-Output "Write information to watchlist: $WatchListName"
 
         $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
-        $NewPrincipalsWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
+        $NewPrincipalsWatchlistItems | Sort-Object ObjectDisplayName | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
         $Parameters = @{
             WatchListFilePath        = $WatchListPath
             DisplayName              = $WatchListName
@@ -162,7 +201,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         $WatchListName = "$($WatchListPrefix)RoleAssignments"
         Write-Output "Write information to watchlist: $WatchListName"
         $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
-        $NewRoleAssignmentsWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
+        $NewRoleAssignmentsWatchlistItems | Sort-Object AdminTierLevel, RoleSystem, ObjectDisplayName | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
         $Parameters = @{
             WatchListFilePath        = $WatchListPath
             DisplayName              = $WatchListName
@@ -176,6 +215,27 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         if ( -not $SkipUploadSaveLocal ) {
             New-GkSeAzSentinelWatchlist @Parameters -Verbose
             Remove-Item -Path $WatchListPath -Force      
+        }
+    }
+
+    if ( ![string]::IsNullOrEmpty($NewRoleAssignmentClassificationsWatchlistItems) ) {
+        $WatchListName = "$($WatchListPrefix)RoleClassifications"
+        Write-Output "Write information to watchlist: $WatchListName"
+        $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
+        $NewRoleAssignmentClassificationsWatchlistItems | Sort-Object AdminTierLevel, Service | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
+        $Parameters = @{
+            WatchListFilePath        = $WatchListPath
+            DisplayName              = $WatchListName
+            itemsSearchKey           = "UniqueId"
+            SubscriptionId           = $SentinelSubscriptionId
+            ResourceGroupName        = $SentinelResourceGroupName
+            WorkspaceName            = $SentinelWorkspaceName
+            DefaultDuration          = "P14D"
+            ReplaceExistingWatchlist = $true
+        }
+        if ( -not $SkipUploadSaveLocal ) {
+            New-GkSeAzSentinelWatchlist @Parameters -Verbose
+            Remove-Item -Path $WatchListPath -Force
         }
     }
 

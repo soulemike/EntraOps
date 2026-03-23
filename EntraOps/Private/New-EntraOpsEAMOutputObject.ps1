@@ -38,6 +38,7 @@ function New-EntraOpsEAMOutputObject {
 
     [PSCustomObject]@{
         'ObjectId'                      = $ObjectId
+        'ObjectTenantId'                = $ObjectDetails.ObjectTenantId
         'ObjectType'                    = ($ObjectDetails.ObjectType ?? 'unknown').ToLower()
         'ObjectSubType'                 = $ObjectDetails.ObjectSubType
         'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName

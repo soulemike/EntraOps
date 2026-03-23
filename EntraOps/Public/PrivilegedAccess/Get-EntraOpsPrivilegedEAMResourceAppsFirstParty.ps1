@@ -63,40 +63,50 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                         $ClassifiedAppRole += $AppRoleClassification | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Category
                         $Classification += $ClassifiedAppRole | ForEach-Object {
                             [PSCustomObject]@{
-                                'AdminTierLevel'     = $_.EAMTierLevelTagValue
-                                'AdminTierLevelName' = $_.EAMTierLevelName
-                                'Service'            = $_.Category
-                                'TaggedBy'           = "JSONwithAction"
+                                'AdminTierLevel'             = $_.EAMTierLevelTagValue
+                                'AdminTierLevelName'         = $_.EAMTierLevelName
+                                'Service'                    = $_.Category
+                                'TaggedBy'                   = "JSONwithAction"
+                                'TaggedByObjectIds'          = $null
+                                'TaggedByObjectDisplayNames' = $null
+                                'TaggedByRoleSystem'         = "AppRoles"
                             }
                         }
                     } else {
                         $Classification += [PSCustomObject]@{
-                            'AdminTierLevel'     = "Unclassified"
-                            'AdminTierLevelName' = "Unclassified"
-                            'Service'            = "Unclassified"
+                            'AdminTierLevel'             = "Unclassified"
+                            'AdminTierLevelName'         = "Unclassified"
+                            'Service'                    = "Unclassified"
+                            'TaggedBy'                   = "JSONwithAction"
+                            'TaggedByObjectIds'          = $null
+                            'TaggedByObjectDisplayNames' = $null
+                            'TaggedByRoleSystem'         = "AppRoles"
                         }
                     }
 
                     [pscustomobject]@{
-                        RoleAssignmentId              = $null
-                        RoleAssignmentScopeId         = $null
-                        RoleAssignmentScopeName       = "Microsoft Graph"
-                        RoleAssignmentType            = "Direct"
-                        PIMManagedRole                = $False
-                        PIMAssignmentType             = "Permanent"
-                        RoleDefinitionName            = $AppRoleClassification.AppRoleDisplayName
-                        RoleDefinitionId              = $AppRoleClassification.AppRoleId
-                        RoleType                      = "Application"
-                        RoleIsPrivileged              = ""
-                        Classification                = $Classification
-                        ObjectId                      = $FirstPartyGraphActivity.ServicePrincipalObjectId
-                        ObjectType                    = "serviceprincipal"
-                        TransitiveByObjectId          = $null
-                        TransitiveByObjectDisplayName = $null
+                        RoleAssignmentId                      = $null
+                        RoleAssignmentScopeId                 = $null
+                        RoleAssignmentScopeName               = "Microsoft Graph"
+                        RoleAssignmentType                    = "Direct"
+                        PIMManagedRole                        = $False
+                        PIMAssignmentType                     = "Permanent"
+                        RoleDefinitionName                    = $AppRoleClassification.AppRoleDisplayName
+                        RoleDefinitionId                      = $AppRoleClassification.AppRoleId
+                        RoleType                              = "Application"
+                        RoleIsPrivileged                      = ""
+                        Classification                        = $Classification
+                        ObjectId                              = $FirstPartyGraphActivity.ServicePrincipalObjectId
+                        ObjectType                            = "serviceprincipal"
+                        TransitiveByObjectId                  = $null
+                        TransitiveByObjectDisplayName         = $null
+                        TransitiveByNestingObjectIds          = $null
+                        TransitiveByNestingObjectDisplayNames = $null
                     }
                 }
 
                 try {
+                    #$ObjectDetails = Get-AzADServicePrincipal -ObjectId $($FirstPartyGraphActivity.ServicePrincipalObjectId)
                     $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $($FirstPartyGraphActivity.ServicePrincipalObjectId) -TenantId $TenantId
                 } catch {
                     Write-Warning "Service Principal Object for $($FirstPartyGraphActivity.AppDisplayName) not found!"

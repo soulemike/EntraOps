@@ -155,22 +155,25 @@ function Get-EntraOpsPrivilegedEamEntraId {
     $AadRbacClassifications = foreach ($AadRbacAssignment in $AadRbacAssignments) {
 
         [PSCustomObject]@{
-            'RoleAssignmentId'              = $AadRbacAssignment.RoleAssignmentId
-            'RoleAssignmentScopeId'         = $AadRbacAssignment.RoleAssignmentScopeId
-            'RoleAssignmentScopeName'       = $AadRbacAssignment.RoleAssignmentScopeName
-            'RoleAssignmentType'            = $AadRbacAssignment.RoleAssignmentType
-            'RoleAssignmentSubType'         = $AadRbacAssignment.RoleAssignmentSubType
-            'PIMManagedRole'                = $AadRbacAssignment.RoleAssignmentPIMRelated
-            'PIMAssignmentType'             = $AadRbacAssignment.RoleAssignmentPIMAssignmentType
-            'RoleDefinitionName'            = $AadRbacAssignment.RoleName
-            'RoleDefinitionId'              = $AadRbacAssignment.RoleId
-            'RoleType'                      = $AadRbacAssignment.RoleType
-            'RoleIsPrivileged'              = if ($null -eq $AadRbacAssignment.IsPrivileged) { $false } else { $AadRbacAssignment.IsPrivileged }
-            'Classification'                = $null  # Will be set during classification processing
-            'ObjectId'                      = $AadRbacAssignment.ObjectId
-            'ObjectType'                    = $AadRbacAssignment.ObjectType
-            'TransitiveByObjectId'          = $AadRbacAssignment.TransitiveByObjectId
-            'TransitiveByObjectDisplayName' = $AadRbacAssignment.TransitiveByObjectDisplayName
+            'RoleAssignmentId'                      = $AadRbacAssignment.RoleAssignmentId
+            'RoleAssignmentScopeId'                 = $AadRbacAssignment.RoleAssignmentScopeId
+            'RoleAssignmentScopeName'               = $AadRbacAssignment.RoleAssignmentScopeName
+            'RoleAssignmentType'                    = $AadRbacAssignment.RoleAssignmentType
+            'RoleAssignmentSubType'                 = $AadRbacAssignment.RoleAssignmentSubType
+            'PIMManagedRole'                        = $AadRbacAssignment.RoleAssignmentPIMRelated
+            'PIMAssignmentType'                     = $AadRbacAssignment.RoleAssignmentPIMAssignmentType
+            'RoleDefinitionName'                    = $AadRbacAssignment.RoleName
+            'RoleDefinitionId'                      = $AadRbacAssignment.RoleId
+            'RoleType'                              = $AadRbacAssignment.RoleType
+            'RoleIsPrivileged'                      = if ($null -eq $AadRbacAssignment.IsPrivileged) { $false } else { $AadRbacAssignment.IsPrivileged }
+            'Classification'                        = $null  # Will be set during classification processing
+            'ObjectId'                              = $AadRbacAssignment.ObjectId
+            'ObjectType'                            = $AadRbacAssignment.ObjectType
+            'ObjectTenantId'                        = $AadRbacAssignment.ObjectTenantId
+            'TransitiveByObjectId'                  = $AadRbacAssignment.TransitiveByObjectId
+            'TransitiveByObjectDisplayName'         = $AadRbacAssignment.TransitiveByObjectDisplayName
+            'TransitiveByNestingObjectIds'          = $AadRbacAssignment.TransitiveByNestingObjectIds
+            'TransitiveByNestingObjectDisplayNames' = $AadRbacAssignment.TransitiveByNestingObjectDisplayNames
         }
     }
 
@@ -238,7 +241,6 @@ function Get-EntraOpsPrivilegedEamEntraId {
         $AllAadRoleActions = $RoleDefCachedObject.Data
     } else {
         # Recommendation: Optimize Payload (Minimal Select)
-
         $AllAadRoleActions = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions?`$select=id,displayName,rolePermissions" -OutputType PSObject)
         
         if ($AllAadRoleActions.Count -gt 0) {
@@ -263,39 +265,59 @@ function Get-EntraOpsPrivilegedEamEntraId {
     }
 
     # Optimization: Create lookup hashtables for role actions and classifications
-    $RoleActionsLookup = @{}
-    foreach ($RoleAction in $AllAadRoleActions) {
-        if ($null -ne $RoleAction.DisplayName) {
-            $RoleActionsLookup[$RoleAction.DisplayName] = $RoleAction
-        }
+$RoleActionsLookup = @{}
+foreach ($RoleAction in $AllAadRoleActions) {
+    if ($null -ne $RoleAction.DisplayName) {
+        $RoleActionsLookup[$RoleAction.DisplayName] = $RoleAction
     }
+}
     
-    # Create hashtable for action-to-classification mapping for O(1) lookups
-    $ActionClassificationLookup = @{}
-    foreach ($ClassificationItem in $AadResourcesByClassificationJSON) {
-        $key = "$($ClassificationItem.RoleAssignmentScopeName)|$($ClassificationItem.RoleDefinitionActions)"
-        if (-not $ActionClassificationLookup.ContainsKey($key)) {
-            $ActionClassificationLookup[$key] = [System.Collections.Generic.List[object]]::new()
-        }
-        $ActionClassificationLookup[$key].Add($ClassificationItem)
+# Create hashtable for action-to-classification mapping for O(1) lookups
+$ActionClassificationLookup = @{}
+foreach ($ClassificationItem in $AadResourcesByClassificationJSON) {
+    $key = "$($ClassificationItem.RoleAssignmentScopeName)|$($ClassificationItem.RoleDefinitionActions)"
+    if (-not $ActionClassificationLookup.ContainsKey($key)) {
+        $ActionClassificationLookup[$key] = [System.Collections.Generic.List[object]]::new()
     }
-    #endregion
+    $ActionClassificationLookup[$key].Add($ClassificationItem)
+}
+#endregion
 
-    #region Apply classification for all role definitions
-    $AadRbacClassification = foreach ($CurrentAadRbacClassification in $AadRbacClassifications) {
-        $CurrentRoleDefinitionName = $CurrentAadRbacClassification.RoleDefinitionName
-        $AadRoleScope = $CurrentAadRbacClassification.RoleAssignmentScopeId
+#region Apply classification for all role definitions
+$AadRbacClassification = foreach ($CurrentAadRbacClassification in $AadRbacClassifications) {
+    $CurrentRoleDefinitionName = $CurrentAadRbacClassification.RoleDefinitionName
+    $AadRoleScope = $CurrentAadRbacClassification.RoleAssignmentScopeId
 
-        # Get role actions for role definition using hashtable lookup
-        $AadRoleActions = $RoleActionsLookup["$($CurrentRoleDefinitionName)"]
+    # Get role actions for role definition using hashtable lookup
+    $AadRoleActions = $RoleActionsLookup["$($CurrentRoleDefinitionName)"]
 
-        # Check if RBAC scope is listed in JSON using optimized hashtable lookups
-        $MatchedClassificationByScope = [System.Collections.Generic.List[object]]::new()
+    # Check if RBAC scope is listed in JSON using optimized hashtable lookups
+    $MatchedClassificationByScope = [System.Collections.Generic.List[object]]::new()
         
-        if ($null -ne $AadRoleScope) {
-            # First, try exact match lookup (fastest - O(1))
-            if ($ExactScopeLookup.ContainsKey($AadRoleScope)) {
-                foreach ($Classification in $ExactScopeLookup[$AadRoleScope]) {
+    if ($null -ne $AadRoleScope) {
+        # First, try exact match lookup (fastest - O(1))
+        if ($ExactScopeLookup.ContainsKey($AadRoleScope)) {
+            foreach ($Classification in $ExactScopeLookup[$AadRoleScope]) {
+                # Check exclusions
+                $ScopeExcluded = $false
+                if ($null -ne $Classification.ExcludedRoleAssignmentScopeName) {
+                    foreach ($ExcludedScope in $Classification.ExcludedRoleAssignmentScopeName) {
+                        if (($AadRoleScope -like $ExcludedScope) -or ($ExcludedScope -like $AadRoleScope)) {
+                            $ScopeExcluded = $true
+                            break
+                        }
+                    }
+                }
+                if (-not $ScopeExcluded) {
+                    $MatchedClassificationByScope.Add($Classification)
+                }
+            }
+        }
+            
+        # Then check pattern-based scopes (requires -like matching)
+        foreach ($Pattern in $ScopePatternLookup.Keys) {
+            if ($AadRoleScope -like $Pattern) {
+                foreach ($Classification in $ScopePatternLookup[$Pattern]) {
                     # Check exclusions
                     $ScopeExcluded = $false
                     if ($null -ne $Classification.ExcludedRoleAssignmentScopeName) {
@@ -311,84 +333,70 @@ function Get-EntraOpsPrivilegedEamEntraId {
                     }
                 }
             }
-            
-            # Then check pattern-based scopes (requires -like matching)
-            foreach ($Pattern in $ScopePatternLookup.Keys) {
-                if ($AadRoleScope -like $Pattern) {
-                    foreach ($Classification in $ScopePatternLookup[$Pattern]) {
-                        # Check exclusions
-                        $ScopeExcluded = $false
-                        if ($null -ne $Classification.ExcludedRoleAssignmentScopeName) {
-                            foreach ($ExcludedScope in $Classification.ExcludedRoleAssignmentScopeName) {
-                                if (($AadRoleScope -like $ExcludedScope) -or ($ExcludedScope -like $AadRoleScope)) {
-                                    $ScopeExcluded = $true
-                                    break
-                                }
-                            }
-                        }
-                        if (-not $ScopeExcluded) {
-                            $MatchedClassificationByScope.Add($Classification)
-                        }
-                    }
+        }
+    }
+
+    # Check if role action and scope exists in JSON definition using optimized lookup
+    $AadRoleActionsInJsonDefinition = [System.Collections.Generic.List[object]]::new()
+    if ($null -ne $AadRoleActions -and $null -ne $AadRoleActions.rolePermissions) {
+        foreach ($Action in $AadRoleActions.rolePermissions.allowedResourceActions) {
+            # Use hashtable lookup for faster matching when possible
+            foreach ($MatchedClassification in $MatchedClassificationByScope) {
+                if ($MatchedClassification.RoleDefinitionActions -Contains $Action -and $MatchedClassification.ExcludedRoleDefinitionActions -notcontains $Action) {
+                    $AadRoleActionsInJsonDefinition.Add($MatchedClassification)
                 }
             }
         }
+    }
 
-        # Check if role action and scope exists in JSON definition using optimized lookup
-        $AadRoleActionsInJsonDefinition = [System.Collections.Generic.List[object]]::new()
-        if ($null -ne $AadRoleActions -and $null -ne $AadRoleActions.rolePermissions) {
-            foreach ($Action in $AadRoleActions.rolePermissions.allowedResourceActions) {
-                # Use hashtable lookup for faster matching when possible
-                foreach ($MatchedClassification in $MatchedClassificationByScope) {
-                    if ($MatchedClassification.RoleDefinitionActions -Contains $Action -and $MatchedClassification.ExcludedRoleDefinitionActions -notcontains $Action) {
-                        $AadRoleActionsInJsonDefinition.Add($MatchedClassification)
-                    }
+    $CurrentAadRbacClassification.Classification = [System.Collections.Generic.List[object]]::new()
+
+    if ($ControlPlaneRolesLookup.ContainsKey($CurrentAadRbacClassification.RoleDefinitionId)) {
+        $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "Apply classification for role $($CurrentAadRbacClassification.RoleDefinitionName) without role actions..." })
+        $ControlPlaneRole = $ControlPlaneRolesLookup[$CurrentAadRbacClassification.RoleDefinitionId]
+        $ClassifiedAadRbacRoleWithoutActions = [PSCustomObject]@{
+            'AdminTierLevel'             = "0"
+            'AdminTierLevelName'         = "ControlPlane"
+            'Service'                    = $ControlPlaneRole.Service
+            'TaggedBy'                   = "ControlPlaneWithoutRoleActions"
+            'TaggedByObjectIds'          = $null
+            'TaggedByObjectDisplayNames' = $null
+            'TaggedByRoleSystem'         = "EntraID"
+        }
+        $CurrentAadRbacClassification.Classification.Add($ClassifiedAadRbacRoleWithoutActions) | Out-Null
+    }        
+
+    $UniqueClassifications = @{}
+    if ($AadRoleActionsInJsonDefinition.Count -gt 0) {
+        # Use hashtable to track unique combinations for better performance
+        foreach ($Item in $AadRoleActionsInJsonDefinition) {
+            $key = "$($Item.EAMTierLevelTagValue)|$($Item.EAMTierLevelName)|$($Item.Service)"
+            if (-not $UniqueClassifications.ContainsKey($key)) {
+                $UniqueClassifications[$key] = [PSCustomObject]@{
+                    'EAMTierLevelTagValue' = $Item.EAMTierLevelTagValue
+                    'EAMTierLevelName'     = $Item.EAMTierLevelName
+                    'Service'              = $Item.Service
                 }
             }
         }
-
-        $CurrentAadRbacClassification.Classification = [System.Collections.Generic.List[object]]::new()
-
-        if ($ControlPlaneRolesLookup.ContainsKey($CurrentAadRbacClassification.RoleDefinitionId)) {
-            $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "Apply classification for role $($CurrentAadRbacClassification.RoleDefinitionName) without role actions..." })
-            $ControlPlaneRole = $ControlPlaneRolesLookup[$CurrentAadRbacClassification.RoleDefinitionId]
-            $ClassifiedAadRbacRoleWithoutActions = [PSCustomObject]@{
-                'AdminTierLevel'     = "0"
-                'AdminTierLevelName' = "ControlPlane"
-                'Service'            = $ControlPlaneRole.Service
-                'TaggedBy'           = "ControlPlaneWithoutRoleActions"
-            }
-            $CurrentAadRbacClassification.Classification.Add($ClassifiedAadRbacRoleWithoutActions) | Out-Null
-        }        
-
-        if ($AadRoleActionsInJsonDefinition.Count -gt 0) {
-            # Use hashtable to track unique combinations for better performance
-            $UniqueClassifications = @{}
-            foreach ($Item in $AadRoleActionsInJsonDefinition) {
-                $key = "$($Item.EAMTierLevelTagValue)|$($Item.EAMTierLevelName)|$($Item.Service)"
-                if (-not $UniqueClassifications.ContainsKey($key)) {
-                    $UniqueClassifications[$key] = [PSCustomObject]@{
-                        'EAMTierLevelTagValue' = $Item.EAMTierLevelTagValue
-                        'EAMTierLevelName'     = $Item.EAMTierLevelName
-                        'Service'              = $Item.Service
-                    }
-                }
-            }
             
-            # Sort and add to classification
-            $SortedClassifications = $UniqueClassifications.Values | Sort-Object EAMTierLevelTagValue, Service
-            foreach ($Item in $SortedClassifications) {
-                $ClassifiedRoleAction = [PSCustomObject]@{
-                    'AdminTierLevel'     = $Item.EAMTierLevelTagValue
-                    'AdminTierLevelName' = $Item.EAMTierLevelName
-                    'Service'            = $Item.Service
-                    'TaggedBy'           = "JSONwithAction"
-                }
-                $CurrentAadRbacClassification.Classification.Add($ClassifiedRoleAction) | Out-Null
+        # Sort and add to classification
+        $SortedClassifications = $UniqueClassifications.Values | Sort-Object EAMTierLevelTagValue, Service
+        foreach ($Item in $SortedClassifications) {
+            $ClassifiedRoleAction = [PSCustomObject]@{
+                'AdminTierLevel'             = $Item.EAMTierLevelTagValue
+                'AdminTierLevelName'         = $Item.EAMTierLevelName
+                'Service'                    = $Item.Service
+                'TaggedBy'                   = "JSONwithAction"
+                'TaggedByObjectIds'          = $null
+                'TaggedByObjectDisplayNames' = $null
+                'TaggedByRoleSystem'         = "EntraID"
             }
-        }     
+            $CurrentAadRbacClassification.Classification.Add($ClassifiedRoleAction) | Out-Null
+        }
+    }     
 
-        $CurrentAadRbacClassification 
+    $CurrentAadRbacClassification 
     }
     
     $Stage2Duration = ((Get-Date) - $Stage2Start).TotalSeconds
@@ -409,7 +417,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
     $RbacAssignmentsByObject = $AadRbacClassification | Group-Object ObjectId -AsHashTable -AsString
 
     # Optimization: Collect all unique ObjectIds and batch resolve details
-    $UniqueObjects = $AadRbacClassification | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    $UniqueObjects = $AadRbacClassification | Select-Object -Unique ObjectId, ObjectType, ObjectTenantId | Where-Object { $null -ne $_.ObjectId }
     $UniqueObjectIds = @($UniqueObjects.ObjectId)
     
     $Stage3Duration = ((Get-Date) - $Stage3Start).TotalSeconds
@@ -670,7 +678,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
 
                         # Get object details using MgGraph SDK - authentication already in place!
                         # Optimized: Passes pre-fetched InputObject to avoid redundant API calls
-                        $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $LocalTenantId -InputObject $PreFetchedObj
+                        # Flag foreign principals (from tenant governance) so expected 404s are treated as informational.
+                        $IsForeign = (-not [string]::IsNullOrEmpty($obj.ObjectTenantId) -and $obj.ObjectTenantId -ne $LocalTenantId)
+                        $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $LocalTenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign
                         
                         # Update progress (thread-safe)
                         $LocalCounter = $using:ProgressCounter
@@ -796,7 +806,10 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 # Use pre-fetched object if available
                 $PreFetchedObj = if ($PreFetchedObjectLookup.ContainsKey($ObjectId)) { $PreFetchedObjectLookup[$ObjectId] } else { $null }
 
-                $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId -InputObject $PreFetchedObj
+                # Flag foreign principals (from tenant governance) so expected 404s are treated as informational.
+                $ObjMeta = $UniqueObjects[$i]
+                $IsForeign = (-not [string]::IsNullOrEmpty($ObjMeta.ObjectTenantId) -and $ObjMeta.ObjectTenantId -ne $TenantId)
+                $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign
             } catch {
                 $WarningMessages.Add([PSCustomObject]@{Type = "Stage5-Sequential"; Message = "Failed to get details for object $($ObjectId): $_"; Target = $ObjectId })
                 $ObjectDetailsCache[$ObjectId] = $null
@@ -807,6 +820,236 @@ function Get-EntraOpsPrivilegedEamEntraId {
         $Stage5Duration = ((Get-Date) - $Stage5Start).TotalSeconds
         Write-Host "✓ Stage 5 completed in $([Math]::Round($Stage5Duration, 2)) seconds (sequential: $($ObjectDetailsCache.Count) objects processed)" -ForegroundColor Green
     }
+    #endregion
+
+    #region Stage 5b: Cross-Tenant Group Expansion and Object Resolution
+    # Detect cross-tenant objects from classification data
+    $CrossTenantGroupEntries = @($AadRbacClassification | Where-Object {
+        $_.ObjectType -eq 'group' -and
+        -not [string]::IsNullOrEmpty($_.ObjectTenantId) -and
+        $_.ObjectTenantId -ne $TenantId
+    } | Select-Object -Unique ObjectId, ObjectType, ObjectTenantId)
+
+    $CrossTenantNonGroupObjects = @($AadRbacClassification | Where-Object {
+        $_.ObjectType -ne 'group' -and
+        -not [string]::IsNullOrEmpty($_.ObjectTenantId) -and
+        $_.ObjectTenantId -ne $TenantId
+    } | Select-Object -Unique ObjectId, ObjectType, ObjectTenantId)
+
+    $HasCrossTenantWork = ($CrossTenantGroupEntries.Count -gt 0 -or $CrossTenantNonGroupObjects.Count -gt 0) -and
+                          -not [string]::IsNullOrEmpty($Global:ManagingTenantIdContext)
+
+    if ($HasCrossTenantWork) {
+            $Stage5bStart = Get-Date
+            Write-Host ""
+            Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+            Write-Host "  Stage 5b: Cross-Tenant Group Expansion and Object Resolution" -ForegroundColor Cyan
+            Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+            Write-Host "Managing tenant: '$Global:ManagingTenantIdContext' — $($CrossTenantGroupEntries.Count) group(s) to expand, $($CrossTenantNonGroupObjects.Count) direct cross-tenant object(s)" -ForegroundColor Gray
+
+            $AuthType = $__EntraOpsSession.AuthenticationType
+            $IsInteractiveAuth = $AuthType -in @('UserInteractive', 'DeviceAuthentication')
+
+            # Scopes for the managing tenant connection.
+            $ManagingTenantScopes = @(
+                "Application.Read.All",
+                "Directory.Read.All",
+                "Group.Read.All",
+                "GroupMember.Read.All",
+                "User.Read.All"
+            )
+
+            # Scopes for the interactive home-tenant restore via Connect-MgGraph -TenantId.
+            # Must be a subset of what Connect-EntraOps requested so MSAL returns the cached
+            # full-scope home tenant token without prompting.
+            $HomeTenantScopes = @(
+                "AdministrativeUnit.Read.All",
+                "Application.Read.All",
+                "CustomSecAttributeAssignment.Read.All",
+                "Directory.Read.All",
+                "Group.Read.All",
+                "GroupMember.Read.All",
+                "PrivilegedAccess.Read.AzureADGroup",
+                "PrivilegedEligibilitySchedule.Read.AzureADGroup",
+                "RoleManagement.Read.All",
+                "User.Read.All"
+            )
+
+            # Home token needed only for non-interactive restore (Connect-MgGraph -AccessToken).
+            # For interactive, home restore uses Connect-MgGraph -TenantId (MSAL cache).
+            $HomeToken = $null
+            $Stage5bSkip = $false
+            if (-not $IsInteractiveAuth) {
+                try {
+                    $HomeToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $Global:TenantIdContext -AsSecureString -ErrorAction Stop).Token
+                } catch {
+                    Write-Warning "Could not acquire home tenant token for context restore: $($_.Exception.Message). Stage 5b skipped."
+                    $Stage5bSkip = $true
+                }
+            }
+
+            if (-not $Stage5bSkip) {
+                try {
+                    #region Connect to managing tenant (single connection for all cross-tenant work)
+                    if ($IsInteractiveAuth) {
+                        Write-Host "Connecting to managing tenant '$Global:ManagingTenantIdContext' (interactive sign-in required)..." -ForegroundColor Cyan
+                        Connect-MgGraph -TenantId $Global:ManagingTenantIdContext -Scopes $ManagingTenantScopes -NoWelcome -ErrorAction Stop
+                    } else {
+                        $ManagingToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $Global:ManagingTenantIdContext -AsSecureString -ErrorAction Stop).Token
+                        Connect-MgGraph -AccessToken $ManagingToken -NoWelcome -ErrorAction Stop
+                    }
+                    Write-Host "Connected to managing tenant '$Global:ManagingTenantIdContext'." -ForegroundColor Cyan
+                    #endregion
+
+                    #region Phase 1: Expand cross-tenant groups into transitive classification entries
+                    $NewTransitiveClassifications = [System.Collections.Generic.List[object]]::new()
+
+                    if ($CrossTenantGroupEntries.Count -gt 0) {
+                        Write-Host "Expanding $($CrossTenantGroupEntries.Count) cross-tenant group(s)..." -ForegroundColor Gray
+
+                        foreach ($GroupEntry in $CrossTenantGroupEntries) {
+                            $GroupId = $GroupEntry.ObjectId
+                            $GroupTenantId = $GroupEntry.ObjectTenantId
+
+                            try {
+                                $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember `
+                                    -GroupObjectId $GroupId `
+                                    -TenantId $GroupTenantId
+
+                                # All classification entries for this group (one per role assignment)
+                                $GroupClassEntries = @($AadRbacClassification | Where-Object { $_.ObjectId -eq $GroupId })
+
+                                if ($TransitiveMembers.Count -eq 0) {
+                                    Write-Verbose "Empty cross-tenant group $GroupId — no transitive entries created"
+                                    $WarningMessages.Add([PSCustomObject]@{
+                                        Type    = "Empty Group"
+                                        Message = "Empty cross-tenant group $GroupId in tenant $GroupTenantId — no transitive assignments created"
+                                        Target  = $GroupId
+                                    })
+                                }
+
+                                foreach ($TransitiveMember in $TransitiveMembers) {
+                                    $MemberObjectType = $TransitiveMember.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
+                                    $MemberObjectId   = $TransitiveMember.id
+
+                                    foreach ($GroupClassEntry in $GroupClassEntries) {
+                                        $TransitiveEntry = [PSCustomObject]@{
+                                            RoleAssignmentId                      = $GroupClassEntry.RoleAssignmentId
+                                            RoleAssignmentScopeId                 = $GroupClassEntry.RoleAssignmentScopeId
+                                            RoleAssignmentScopeName               = $GroupClassEntry.RoleAssignmentScopeName
+                                            RoleAssignmentType                    = "Transitive"
+                                            RoleAssignmentSubType                 = $TransitiveMember.RoleAssignmentSubType
+                                            PIMManagedRole                        = $GroupClassEntry.PIMManagedRole
+                                            PIMAssignmentType                     = $GroupClassEntry.PIMAssignmentType
+                                            RoleDefinitionName                    = $GroupClassEntry.RoleDefinitionName
+                                            RoleDefinitionId                      = $GroupClassEntry.RoleDefinitionId
+                                            RoleType                              = $GroupClassEntry.RoleType
+                                            RoleIsPrivileged                      = $GroupClassEntry.RoleIsPrivileged
+                                            Classification                        = $GroupClassEntry.Classification
+                                            ObjectId                              = $MemberObjectId
+                                            ObjectTenantId                        = $GroupTenantId
+                                            ObjectType                            = $MemberObjectType
+                                            TransitiveByObjectId                  = $GroupId
+                                            TransitiveByObjectDisplayName         = $null  # Populated after object resolution below
+                                            TransitiveByNestingObjectIds          = $TransitiveMember.NestingObjectIds
+                                            TransitiveByNestingObjectDisplayNames = $TransitiveMember.NestingObjectDisplayNames
+                                        }
+                                        $NewTransitiveClassifications.Add($TransitiveEntry) | Out-Null
+                                    }
+                                }
+                            } catch {
+                                Write-Warning "Failed to expand cross-tenant group $GroupId in tenant $GroupTenantId : $($_.Exception.Message)"
+                                $WarningMessages.Add([PSCustomObject]@{
+                                    Type    = "CrossTenant-TransitiveExpansion"
+                                    Message = "Failed to expand group $GroupId in tenant $GroupTenantId : $($_.Exception.Message)"
+                                    Target  = $GroupId
+                                })
+                            }
+                        }
+
+                        if ($NewTransitiveClassifications.Count -gt 0) {
+                            Write-Host "Cross-tenant group expansion: $($NewTransitiveClassifications.Count) transitive classification entries created." -ForegroundColor Cyan
+
+                            # Merge into $AadRbacClassification and rebuild Stage 3 lookups
+                            $AadRbacClassification = @($AadRbacClassification) + @($NewTransitiveClassifications)
+                            $RbacAssignmentsByObject = $AadRbacClassification | Group-Object ObjectId -AsHashTable -AsString
+
+                            # Add newly discovered unique objects (transitive members) to $UniqueObjects
+                            $ExistingObjectIds = @($UniqueObjects.ObjectId)
+                            $NewUniqueObjects = @($NewTransitiveClassifications |
+                                Select-Object -Unique ObjectId, ObjectType, ObjectTenantId |
+                                Where-Object { $null -ne $_.ObjectId -and $ExistingObjectIds -notcontains $_.ObjectId })
+                            if ($NewUniqueObjects.Count -gt 0) {
+                                $UniqueObjects = @($UniqueObjects) + $NewUniqueObjects
+                            }
+                        }
+                    }
+                    #endregion
+
+                    #region Phase 2: Resolve all cross-tenant unique objects in managing tenant context
+                    $AllCrossTenantUniqueObjects = @($UniqueObjects | Where-Object {
+                        -not [string]::IsNullOrEmpty($_.ObjectTenantId) -and $_.ObjectTenantId -ne $TenantId
+                    })
+
+                    if ($AllCrossTenantUniqueObjects.Count -gt 0) {
+                        Write-Host "Resolving $($AllCrossTenantUniqueObjects.Count) cross-tenant object(s) against managing tenant..." -ForegroundColor Gray
+
+                        $ManagingTenantCache = Invoke-EntraOpsParallelObjectResolution `
+                            -UniqueObjects $AllCrossTenantUniqueObjects `
+                            -TenantId $Global:ManagingTenantIdContext `
+                            -EnableParallelProcessing $EnableParallelProcessing `
+                            -ParallelThrottleLimit $ParallelThrottleLimit
+
+                        $MergedCount = 0
+                        foreach ($ObjectId in $ManagingTenantCache.Keys) {
+                            if ($null -ne $ManagingTenantCache[$ObjectId]) {
+                                $ObjectDetailsCache[$ObjectId] = $ManagingTenantCache[$ObjectId]
+                                $MergedCount++
+                            }
+                        }
+                        Write-Host "Cross-tenant object resolution complete: $MergedCount of $($AllCrossTenantUniqueObjects.Count) object(s) resolved." -ForegroundColor Cyan
+                    }
+                    #endregion
+
+                    #region Post-process: populate TransitiveByObjectDisplayName from resolved cache
+                    foreach ($Entry in $NewTransitiveClassifications) {
+                        if ($null -ne $Entry.TransitiveByObjectId -and $ObjectDetailsCache.ContainsKey($Entry.TransitiveByObjectId)) {
+                            $Entry.TransitiveByObjectDisplayName = $ObjectDetailsCache[$Entry.TransitiveByObjectId].ObjectDisplayName
+                        }
+                    }
+                    #endregion
+
+                } catch {
+                    Write-Warning "Stage 5b cross-tenant processing failed: $($_.Exception.Message)"
+                    $WarningMessages.Add([PSCustomObject]@{
+                        Type    = "Stage5b-CrossTenant"
+                        Message = "Cross-tenant processing failed: $($_.Exception.Message)"
+                    })
+                } finally {
+                    # Always restore home-tenant MgGraph context regardless of success or failure.
+                    # Interactive: Connect-MgGraph -TenantId hits the MSAL cache (full-scope token from
+                    #              Connect-EntraOps) — no prompt, no scope loss.
+                    # Non-interactive: Connect-MgGraph -AccessToken uses the Az app token which carries
+                    #              full application permissions.
+                    try {
+                        if ($IsInteractiveAuth) {
+                            Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop
+                        } elseif ($null -ne $HomeToken) {
+                            Connect-MgGraph -AccessToken $HomeToken -NoWelcome -ErrorAction Stop
+                        }
+                        Write-Verbose "Restored Microsoft Graph context to home tenant '$Global:TenantIdContext'."
+                    } catch {
+                        Write-Warning "Failed to restore home tenant Microsoft Graph context: $($_.Exception.Message)"
+                    }
+                }
+
+                $Stage5bDuration = ((Get-Date) - $Stage5bStart).TotalSeconds
+                Write-Host "✓ Stage 5b completed in $([Math]::Round($Stage5bDuration, 2)) seconds" -ForegroundColor Green
+            }
+        } else {
+            Write-Verbose "Stage 5b: No cross-tenant groups or objects found — skipping."
+        }
+    #endregion
     #endregion
     
     #region Stage 6: Apply Global Exclusions and Finalize

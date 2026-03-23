@@ -52,6 +52,7 @@
           "DelegatedPermissionGrant.ReadWrite.All",
           "PermissionGrantPolicy.ReadWrite.All",
           "Policy.ReadWrite.ApplicationConfiguration",
+          "Policy.ReadWrite.B2BManagementPolicy",
           "Policy.ReadWrite.ConsentRequest",
           "Policy.ReadWrite.PermissionGrant",
           "ServicePrincipalEndpoint.ReadWrite.All",
@@ -371,6 +372,7 @@
         ],
         "RoleDefinitionActions": [
           "DeviceManagementRBAC.ReadWrite.All",
+          "PrivilegedAccess-CustomExt.ReadWrite.All",
           "PrivilegedAccess.ReadWrite.AzureAD",
           "PrivilegedAccess.ReadWrite.AzureADGroup",
           "PrivilegedAccess.ReadWrite.AzureResources",
@@ -492,6 +494,7 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "EntraBackup.Read.All",
           "BackupRestore-Control.Read.All",
           "BackupRestore-Control.ReadWrite.All"
         ]
@@ -982,13 +985,21 @@
           "PendingExternalUserProfile.Read.All",
           "Policy.Read.All",
           "Policy.Read.AuthenticationMethod",
+          "Policy.Read.B2BManagementPolicy",
           "Policy.Read.ConditionalAccess",
           "Policy.Read.DeviceConfiguration",
           "Policy.Read.IdentityProtection",
           "Policy.Read.PermissionGrant",
+          "PrivilegedAccess-CustomExt.Read.All",
           "PrivilegedAccess.Read.AzureAD",
           "PrivilegedAccess.Read.AzureADGroup",
           "PrivilegedAccess.Read.AzureResources",
+          "TenantGovernance-Invitation.Read.All",
+          "TenantGovernance-PolicyTemplate.Read.All",
+          "TenantGovernance-RelatedTenant.Read.All",
+          "TenantGovernance-Relationship.Read.All",
+          "TenantGovernance-Request.Read.All",
+          "TenantGovernance-Setting.Read.All",
           "PrivilegedAssignmentSchedule.Read.AzureADGroup",
           "PrivilegedEligibilitySchedule.Read.AzureADGroup",
           "RoleAssignmentSchedule.Read.Directory",

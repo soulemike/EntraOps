@@ -102,7 +102,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     }
                 }
 
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
                         'AdminTierLevel'     = "Unclassified"
@@ -114,6 +114,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                 # Build output object inline (cannot call module functions from parallel runspace)
                 [PSCustomObject]@{
                     'ObjectId'                      = $ObjectId
+                    'ObjectTenantId'                = $ObjectDetails.ObjectTenantId
                     'ObjectType'                    = ($ObjectDetails.ObjectType ?? 'unknown').ToLower()
                     'ObjectSubType'                 = $ObjectDetails.ObjectSubType
                     'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
@@ -188,7 +189,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     }
                 }
 
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
                         'AdminTierLevel'     = "Unclassified"

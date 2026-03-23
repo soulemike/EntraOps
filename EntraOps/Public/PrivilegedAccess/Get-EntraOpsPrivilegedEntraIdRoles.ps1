@@ -25,7 +25,7 @@
 function Get-EntraOpsPrivilegedEntraIdRoles {
     param (
         [Parameter(Mandatory = $False)]
-        [System.String]$TenantId
+        [System.String]$TenantId = (Get-AzContext).Tenant.Id
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("User", "Group", "ServicePrincipal")]
@@ -33,6 +33,9 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         ,
         [Parameter(Mandatory = $False)]
         [System.Boolean]$ExpandGroupMembers = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$ExpandCrossTenantGroupMembers = $true
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$SampleMode = $False
@@ -49,17 +52,21 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
     # Recommendation: Implement Persistent Disk Caching (matching module cache pattern)
     $PersistentCachePath = $__EntraOpsSession.PersistentCachePath
-    if (-not (Test-Path $PersistentCachePath)) {
+    if ([string]::IsNullOrEmpty($PersistentCachePath)) {
+        Write-Warning "PersistentCachePath is not set in EntraOps session. Caching will be disabled for this run."
+        $PersistentCachePath = $null
+    }
+    if ($PersistentCachePath -and -not (Test-Path $PersistentCachePath)) {
         New-Item -ItemType Directory -Path $PersistentCachePath -Force | Out-Null
     }
     
     $CacheKey = "EntraOps_RoleData_$($TenantId)"
     $CacheFileName = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($CacheKey)) + ".json"
-    $CacheFile = Join-Path $PersistentCachePath $CacheFileName
+    $CacheFile = if ($PersistentCachePath) { Join-Path $PersistentCachePath $CacheFileName } else { $null }
     $CacheValid = $false
     $CacheTTL = $__EntraOpsSession.StaticDataCacheTTL  # Use configurable TTL for static data
     
-    if (Test-Path $CacheFile) {
+    if ($CacheFile -and (Test-Path $CacheFile)) {
         try {
             $CachedObject = Get-Content $CacheFile -Raw | ConvertFrom-Json
             $CurrentTime = [DateTime]::UtcNow
@@ -88,12 +95,14 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             $AadEligibleRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementEligibleAssignments.json" | ConvertFrom-Json -Depth 10
         }
         $AadRoleAssignmentsByPim = @()
+        $TgRelationships = @()
     } elseif ($CacheValid) {
         $CachedObject = Get-Content $CacheFile -Raw | ConvertFrom-Json
         $AadRoleDefinitions = $CachedObject.Data.RoleDefinitions
         $AadRoleAssignments = $CachedObject.Data.RoleAssignments
         $AadEligibleRoleAssignments = $CachedObject.Data.EligibleAssignments
         $AadRoleAssignmentsByPim = $CachedObject.Data.PimAssignments
+        $TgRelationships = if ($CachedObject.Data.TgRelationships) { $CachedObject.Data.TgRelationships } else { @() }
 
         # Load resolved principals from cache if available
         if ($CachedObject.Data.ResolvedPrincipals) {
@@ -112,6 +121,21 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $AadEligibleRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?`$select=id,principalId,roleDefinitionId,directoryScopeId,memberType,status"
         # Fetch PIM assignment schedules early (used later for enrichment)
         $AadRoleAssignmentsByPim = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$select=id,roleDefinitionId,assignmentType,endDateTime,startDateTime,roleAssignmentOriginId" -OutputType PSObject
+        # Fetch Tenant Governance relationships for delegated admin role assignments
+        try {
+            $TgRelationships = Invoke-EntraOpsMsGraphQuery -Uri "/beta/directory/tenantGovernance/governanceRelationships"
+            Write-Host "Fetched $(@($TgRelationships).Count) Tenant Governance relationship(s) from API" -ForegroundColor Gray
+        } catch {
+            Write-Warning "Tenant Governance relationships not available (API error or insufficient permissions): $_"
+            if ($null -ne $WarningMessages) {
+                $WarningMessages.Add([PSCustomObject]@{
+                        Type    = "TenantGovernance"
+                        Message = "Failed to fetch Tenant Governance relationships: $($_.Exception.Message)"
+                        Target  = "/beta/directory/tenantGovernance/governanceRelationships"
+                    })
+            }
+            $TgRelationships = @()
+        }
         Write-Verbose "Parallel data fetch complete"
 
         # Validate essential data was retrieved
@@ -123,8 +147,9 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         # Ensure collections are arrays even if API returns null
         if ($null -eq $AadEligibleRoleAssignments) { $AadEligibleRoleAssignments = @() }
         if ($null -eq $AadRoleAssignmentsByPim) { $AadRoleAssignmentsByPim = @() }
+        if ($null -eq $TgRelationships) { $TgRelationships = @() }
 
-        if ($AadRoleAssignments.Count -gt 0) {
+        if ($AadRoleAssignments.Count -gt 0 -and $CacheFile) {
             try {
                 $CurrentTime = [DateTime]::UtcNow
                 $ExpiryTime = $CurrentTime.AddSeconds($CacheTTL)
@@ -139,6 +164,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         RoleAssignments     = $AadRoleAssignments
                         EligibleAssignments = $AadEligibleRoleAssignments
                         PimAssignments      = $AadRoleAssignmentsByPim
+                        TgRelationships     = $TgRelationships
                     }
                 }
                 
@@ -168,6 +194,9 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     # Separate principals (users/groups/servicePrincipals) from scopes (AUs, other objects)
     $PrincipalIds = [System.Collections.Generic.HashSet[string]]::new()
     $ScopeIds = [System.Collections.Generic.HashSet[string]]::new()
+    # Track principal IDs that are known to reside in a foreign (managing) tenant.
+    # These objects cannot be resolved via home-tenant endpoints and should not generate warnings.
+    $ForeignPrincipalIds = [System.Collections.Generic.HashSet[string]]::new()
     $GuidPattern = "([0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12})"
 
     foreach ($AadRoleAssignment in $AadRoleAssignments) {
@@ -193,6 +222,82 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         }
         if ($AadRoleAssignment.directoryScopeId -and $AadRoleAssignment.directoryScopeId -ne "/" -and $AadRoleAssignment.directoryScopeId -match $GuidPattern) {
             $ScopeIds.Add($Matches[1]) | Out-Null
+        }
+    }
+
+    # Collect group IDs from Tenant Governance delegated admin assignments for principal resolution
+    $ActiveTgRelationships = $TgRelationships | Where-Object { $_.status -eq "active" }
+
+    # Diagnostic: Log TG relationship filtering results to help troubleshoot missing data
+    if (@($TgRelationships).Count -gt 0 -and @($ActiveTgRelationships).Count -eq 0) {
+        $AllStatuses = @($TgRelationships | ForEach-Object { $_.status }) | Select-Object -Unique
+        Write-Warning "Found $(@($TgRelationships).Count) TG relationship(s) but none with status 'active'. Statuses found: $($AllStatuses -join ', ')"
+        if ($null -ne $WarningMessages) {
+            $WarningMessages.Add([PSCustomObject]@{
+                    Type    = "TenantGovernance"
+                    Message = "No active TG relationships found. Total: $(@($TgRelationships).Count), Statuses: $($AllStatuses -join ', ')"
+                    Target  = "status-filter"
+                })
+        }
+
+        # Diagnostic: Dump first relationship's property names for API schema debugging
+        $FirstTg = $TgRelationships | Select-Object -First 1
+        if ($FirstTg) {
+            $PropNames = ($FirstTg | Get-Member -MemberType NoteProperty, Property | Select-Object -ExpandProperty Name) -join ', '
+            Write-Verbose "TG relationship properties: $PropNames"
+            Write-Verbose "TG relationship sample: $($FirstTg | ConvertTo-Json -Depth 3 -Compress)"
+        }
+    } elseif (@($TgRelationships).Count -gt 0) {
+        Write-Host "Found $(@($ActiveTgRelationships).Count) active TG relationship(s) out of $(@($TgRelationships).Count) total" -ForegroundColor Gray
+    } else {
+        Write-Verbose "No Tenant Governance relationships returned from API"
+    }
+
+    foreach ($TgRelationship in $ActiveTgRelationships) {
+        # Validate expected property structure (API may use different property names)
+        if ($null -eq $TgRelationship.GoverningTenantId -and $null -eq $TgRelationship.governingTenantId) {
+            $PropNames = ($TgRelationship | Get-Member -MemberType NoteProperty, Property | Select-Object -ExpandProperty Name) -join ', '
+            Write-Warning "TG relationship '$($TgRelationship.id)' missing GoverningTenantId property. Available properties: $PropNames"
+            if ($null -ne $WarningMessages) {
+                $WarningMessages.Add([PSCustomObject]@{
+                        Type    = "TenantGovernance"
+                        Message = "TG relationship '$($TgRelationship.id)' missing GoverningTenantId. Properties: $PropNames"
+                        Target  = $TgRelationship.id
+                    })
+            }
+        }
+
+        if ($null -eq $TgRelationship.policySnapshot) {
+            Write-Warning "TG relationship '$($TgRelationship.id)' has null policySnapshot"
+            if ($null -ne $WarningMessages) {
+                $WarningMessages.Add([PSCustomObject]@{
+                        Type    = "TenantGovernance"
+                        Message = "TG relationship '$($TgRelationship.id)' has null policySnapshot - no role assignments can be extracted"
+                        Target  = $TgRelationship.id
+                    })
+            }
+            continue
+        }
+
+        if ($null -eq $TgRelationship.policySnapshot.delegatedAdministrationRoleAssignments -or @($TgRelationship.policySnapshot.delegatedAdministrationRoleAssignments).Count -eq 0) {
+            Write-Warning "TG relationship '$($TgRelationship.id)' has no delegatedAdministrationRoleAssignments in policySnapshot"
+            if ($null -ne $WarningMessages) {
+                $WarningMessages.Add([PSCustomObject]@{
+                        Type    = "TenantGovernance"
+                        Message = "TG relationship '$($TgRelationship.id)' policySnapshot has no delegatedAdministrationRoleAssignments"
+                        Target  = $TgRelationship.id
+                    })
+            }
+            continue
+        }
+
+        foreach ($DelegatedGroupAssignment in $TgRelationship.policySnapshot.delegatedAdministrationRoleAssignments) {
+            if ($DelegatedGroupAssignment.groupId) {
+                $PrincipalIds.Add($DelegatedGroupAssignment.groupId) | Out-Null
+                # These groups reside in the governing (managing) tenant — mark as foreign so
+                # home-tenant resolution does not attempt to resolve them or log spurious warnings.
+                $ForeignPrincipalIds.Add($DelegatedGroupAssignment.groupId) | Out-Null
+            }
         }
     }
 
@@ -274,8 +379,12 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             }
         }
         
-        # Check for unresolved principals and attempt individual fallback resolution
-        $UnresolvedPrincipals = $PrincipalIdArray | Where-Object { -not $DirObjLookup.ContainsKey($_) }
+        # Check for unresolved principals and attempt individual fallback resolution.
+        # Foreign (managing-tenant) group IDs are excluded — they can never be resolved via the
+        # home-tenant endpoint and their absence is expected, not an error.
+        $UnresolvedPrincipals = $PrincipalIdArray | Where-Object {
+            -not $DirObjLookup.ContainsKey($_) -and -not $ForeignPrincipalIds.Contains($_)
+        }
         
         if ($UnresolvedPrincipals.Count -gt 0) {
             Write-Verbose "$($UnresolvedPrincipals.Count) principal(s) not resolved via type-specific endpoints, attempting individual resolution..."
@@ -386,7 +495,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
     # Update persistent cache with resolved principals if any new resolutions occurred or cache is being refreshed
     # We do this after resolution so we store the complete picture (Role Data + Principals)
-    if ($UnresolvedPrincipalIds.Count -gt 0 -or ($ScopeResolvedCount -gt 0) -or (-not $CacheValid)) {
+    if ($CacheFile -and ($UnresolvedPrincipalIds.Count -gt 0 -or ($ScopeResolvedCount -gt 0) -or (-not $CacheValid))) {
         try {
             $CurrentTime = [DateTime]::UtcNow
             $ExpiryTime = $CurrentTime.AddSeconds($CacheTTL)
@@ -401,6 +510,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     RoleAssignments     = $AadRoleAssignments
                     EligibleAssignments = $AadEligibleRoleAssignments
                     PimAssignments      = $AadRoleAssignmentsByPim
+                    TgRelationships     = $TgRelationships
                     ResolvedPrincipals  = $DirObjLookup
                 }
             }
@@ -491,6 +601,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $RoleDefLookup = $using:RoleDefLookup
         $GuidPattern = $using:GuidPattern
         $LocalWarnings = $using:ParallelWarningsPermanent
+        $LocalTenantId = $using:TenantId
         
         # Resolve Principal
         $ObjectType = "unknown"
@@ -574,22 +685,25 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $ObjectTypeLower = $ObjectType.ToLower()
         
         [pscustomobject]@{
-            RoleAssignmentId                = $AadPrincipalRoleAssignment.Id
-            RoleName                        = $RoleDefinitionName
-            RoleId                          = $RoleDefId
-            RoleType                        = $RoleType
-            IsPrivileged                    = $RoleIsPrivileged
-            RoleAssignmentPIMRelated        = $False
-            RoleAssignmentPIMAssignmentType = "Permanent"
-            RoleAssignmentScopeId           = $AadPrincipalRoleAssignment.directoryScopeId
-            RoleAssignmentScopeName         = $RoleAssignmentScopeName
-            RoleAssignmentType              = "Direct"
-            RoleAssignmentSubType           = ""
-            ObjectDisplayName               = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { "[Unresolved: $Principal]" }
-            ObjectId                        = $Principal
-            ObjectType                      = $ObjectTypeLower
-            TransitiveByObjectId            = $null
-            TransitiveByObjectDisplayName   = $null
+            RoleAssignmentId                      = $AadPrincipalRoleAssignment.Id
+            RoleName                              = $RoleDefinitionName
+            RoleId                                = $RoleDefId
+            RoleType                              = $RoleType
+            IsPrivileged                          = $RoleIsPrivileged
+            RoleAssignmentPIMRelated              = $False
+            RoleAssignmentPIMAssignmentType       = "Permanent"
+            RoleAssignmentScopeId                 = $AadPrincipalRoleAssignment.directoryScopeId
+            RoleAssignmentScopeName               = $RoleAssignmentScopeName
+            RoleAssignmentType                    = "Direct"
+            RoleAssignmentSubType                 = ""
+            ObjectDisplayName                     = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { "[Unresolved: $Principal]" }
+            ObjectId                              = $Principal
+            ObjectTenantId                        = $LocalTenantId            
+            ObjectType                            = $ObjectTypeLower
+            TransitiveByObjectId                  = $null
+            TransitiveByObjectDisplayName         = $null
+            TransitiveByNestingObjectIds          = $null
+            TransitiveByNestingObjectDisplayNames = $null
         }
     }
 
@@ -622,6 +736,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $RoleDefLookup = $using:RoleDefLookup
         $GuidPattern = $using:GuidPattern
         $LocalWarnings = $using:ParallelWarningsEligible
+        $LocalTenantId = $using:TenantId
         
         # Thread-safe progress tracking using ConcurrentBag
         $LocalCounter = $using:ProgressCounter
@@ -713,22 +828,25 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $ObjectTypeLower = $ObjectType.ToLower()
 
         [pscustomobject]@{
-            RoleAssignmentId                = $EligiblePrincipalRoleAssignment.Id
-            RoleName                        = $RoleDefinitionName
-            RoleId                          = $RoleDefId
-            RoleType                        = $RoleType
-            IsPrivileged                    = $RoleIsPrivileged
-            RoleAssignmentPIMRelated        = $True
-            RoleAssignmentPIMAssignmentType = "Eligible"
-            RoleAssignmentScopeId           = $EligiblePrincipalRoleAssignment.directoryScopeId
-            RoleAssignmentScopeName         = $RoleAssignmentScopeName
-            RoleAssignmentType              = "Direct"
-            RoleAssignmentSubType           = ""
-            ObjectDisplayName               = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { "[Unresolved: $Principal]" }
-            ObjectId                        = $Principal
-            ObjectType                      = $ObjectTypeLower
-            TransitiveByObjectId            = $null
-            TransitiveByObjectDisplayName   = $null
+            RoleAssignmentId                      = $EligiblePrincipalRoleAssignment.Id
+            RoleName                              = $RoleDefinitionName
+            RoleId                                = $RoleDefId
+            RoleType                              = $RoleType
+            IsPrivileged                          = $RoleIsPrivileged
+            RoleAssignmentPIMRelated              = $True
+            RoleAssignmentPIMAssignmentType       = "Eligible"
+            RoleAssignmentScopeId                 = $EligiblePrincipalRoleAssignment.directoryScopeId
+            RoleAssignmentScopeName               = $RoleAssignmentScopeName
+            RoleAssignmentType                    = "Direct"
+            RoleAssignmentSubType                 = ""
+            ObjectDisplayName                     = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { "[Unresolved: $Principal]" }
+            ObjectId                              = $Principal
+            ObjectTenantId                        = $LocalTenantId            
+            ObjectType                            = $ObjectTypeLower
+            TransitiveByObjectId                  = $null
+            TransitiveByObjectDisplayName         = $null
+            TransitiveByNestingObjectIds          = $null
+            TransitiveByNestingObjectDisplayNames = $null
         }
     }
     
@@ -746,6 +864,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $AadActiveRoleAssignments = $AadRoleAssignmentsByPim | Where-Object { $_.assignmentType -eq 'Activated' }
     $AadTimeBoundedRoleAssignments = $AadRoleAssignmentsByPim | Where-Object { $_.assignmentType -eq 'Assigned' -and $null -ne $_.endDateTime }
 
+    # Fixed: Build hashtable lookups correctly - separate lookups for assignment IDs vs origin IDs
     $ActiveAssignmentLookup = @{}
     $ActiveOriginToAssignmentMap = @{}
     foreach ($ActiveAssignment in $AadActiveRoleAssignments) {
@@ -788,39 +907,293 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $AadRbacActiveAndPermanentAssignment
     }
 
+    # Fixed: Include activated assignments in output (with proper flag) instead of excluding them
+    # This ensures all current role assignments are visible
     $AadPermanentRoleAssignments = $AadPermanentRoleAssignmentsWithEnrichment
+    #endregion
+
+    #region Collect Tenant Governance Delegated Admin Role Assignments
+    Write-Host "Get Tenant Governance Delegated Admin Role Assignments..."
+    $TgDelegatedActiveAndPermanentAssignments = @()
+
+    if ($null -ne $ActiveTgRelationships -and $ActiveTgRelationships.Count -gt 0) {
+        Write-Host "Processing ... Remote Tenant Groups"
+        $RemoteTgGroups = Invoke-EntraOpsMsGraphQuery -Uri "/beta/directory/remoteTenantGroups" -OutputType PSObject
+
+        Write-Host "Processing $($ActiveTgRelationships.Count) active Tenant Governance relationship(s)..."
+
+        # Flatten nested structure into processable items for parallel execution
+        $TgFlattenedAssignments = [System.Collections.Generic.List[psobject]]::new()
+        foreach ($TgRelationship in $ActiveTgRelationships) {
+            Write-Verbose "Processing Tenant Governance Relationship $($TgRelationship.id)"
+
+            if ($null -eq $TgRelationship.policySnapshot) {
+                Write-Warning "Skipping TG relationship '$($TgRelationship.id)': policySnapshot is null"
+                continue
+            }
+
+            $DelegatedAssignments = $TgRelationship.policySnapshot.delegatedAdministrationRoleAssignments
+            if ($null -eq $DelegatedAssignments -or @($DelegatedAssignments).Count -eq 0) {
+                Write-Warning "Skipping TG relationship '$($TgRelationship.id)': no delegatedAdministrationRoleAssignments found in policySnapshot"
+                $SnapshotProps = ($TgRelationship.policySnapshot | Get-Member -MemberType NoteProperty, Property | Select-Object -ExpandProperty Name) -join ', '
+                Write-Verbose "policySnapshot properties: $SnapshotProps"
+                continue
+            }
+
+            foreach ($DelegatedGroupAssignment in $DelegatedAssignments) {
+                if ($null -eq $DelegatedGroupAssignment.roleTemplates -or @($DelegatedGroupAssignment.roleTemplates).Count -eq 0) {
+                    Write-Warning "TG relationship '$($TgRelationship.id)': group '$($DelegatedGroupAssignment.groupId)' has no roleTemplates"
+                    continue
+                }
+
+                foreach ($RoleAssignment in $DelegatedGroupAssignment.roleTemplates) {
+                    $TgFlattenedAssignments.Add([pscustomobject]@{
+                            GoverningTenantId   = $TgRelationship.GoverningTenantId
+                            GoverningTenantName = $TgRelationship.GoverningTenantName
+                            GroupId             = $DelegatedGroupAssignment.groupId
+                            RoleTemplateId      = $RoleAssignment.id
+                            RoleTemplateName    = $RoleAssignment.name
+                        }) | Out-Null
+                }
+            }
+        }
+
+        if ($TgFlattenedAssignments.Count -eq 0) {
+            Write-Warning "No TG delegated admin role assignments extracted despite $($ActiveTgRelationships.Count) active relationship(s). Check API response structure."
+            if ($null -ne $WarningMessages) {
+                $WarningMessages.Add([PSCustomObject]@{
+                        Type    = "TenantGovernance"
+                        Message = "Zero flattened assignments from $($ActiveTgRelationships.Count) active TG relationships. Possible API schema mismatch."
+                        Target  = "TgFlattening"
+                    })
+            }
+        }
+
+        Write-Host "Processing $($TgFlattenedAssignments.Count) Tenant Governance delegated admin role assignment(s)..."
+
+        if ($TgFlattenedAssignments.Count -gt 0) {
+            # Thread-safe warning collection for parallel block (List[psobject] is NOT thread-safe)
+            $ParallelWarningsTg = [System.Collections.Concurrent.ConcurrentBag[psobject]]::new()
+
+            $TgDelegatedActiveAndPermanentAssignments = $TgFlattenedAssignments | ForEach-Object -ThrottleLimit 50 -Parallel {
+                $TgAssignment = $_
+
+                # Import hashtables from parent scope
+                $DirObjLookup = $using:DirObjLookup
+                $RoleDefLookup = $using:RoleDefLookup
+                $LocalWarnings = $using:ParallelWarningsTg
+
+                $RoleId = "$($TgAssignment.GoverningTenantId)_$($TgAssignment.GroupId)_$($TgAssignment.RoleTemplateId)"
+
+                # Resolve Role using RoleDefLookup hashtable for O(1) lookup
+                $RoleDefinitionName = $TgAssignment.RoleTemplateName
+                $RoleType = "CustomRole"
+                $RoleIsPrivileged = $false
+
+                if ($RoleDefLookup.ContainsKey($TgAssignment.RoleTemplateId)) {
+                    $Role = $RoleDefLookup[$TgAssignment.RoleTemplateId]
+                    if ($Role.isBuiltIn -eq $True -or $Role.isBuiltIn -eq "true") {
+                        $RoleType = "BuiltInRole"
+                        $RoleIsPrivileged = $Role.isPrivileged
+                        $RoleDefinitionName = $Role.displayName
+                    } else {
+                        $LocalWarnings.Add([PSCustomObject]@{
+                                Type    = "TenantGovernance"
+                                Message = "Delegated Admin Role $($TgAssignment.RoleTemplateId) is not a built-in role (unexpected)."
+                                Target  = $TgAssignment.RoleTemplateId
+                            })
+                    }
+                } else {
+                    $LocalWarnings.Add([PSCustomObject]@{
+                            Type    = "TenantGovernance"
+                            Message = "Role definition $($TgAssignment.RoleTemplateId) not found in lookup cache for TG delegated admin assignment"
+                            Target  = $TgAssignment.RoleTemplateId
+                        })
+                }
+
+                # Resolve Group display name from DirObjLookup
+                $GroupDisplayName = $null
+                $GroupDisplayName = $RemoteTgGroups | Where-Object { $_.remoteGroupId -eq $TgAssignment.GroupId } | Select-Object -ExpandProperty remoteTenantPrimaryDomain
+
+                [pscustomobject]@{
+                    RoleAssignmentId                      = $RoleId
+                    RoleName                              = $RoleDefinitionName
+                    RoleId                                = $TgAssignment.RoleTemplateId
+                    RoleType                              = $RoleType
+                    IsPrivileged                          = $RoleIsPrivileged
+                    RoleAssignmentPIMRelated              = $False
+                    RoleAssignmentPIMAssignmentType       = "Permanent"
+                    RoleAssignmentScopeId                 = "/"
+                    RoleAssignmentScopeName               = "Directory"
+                    RoleAssignmentType                    = "Direct"
+                    RoleAssignmentSubType                 = "Tenant Governance Delegated Admin"
+                    ObjectDisplayName                     = $GroupDisplayName
+                    ObjectId                              = $TgAssignment.GroupId
+                    ObjectTenantId                        = $TgAssignment.GoverningTenantId
+                    ObjectType                            = "group"
+                    TransitiveByObjectId                  = $null
+                    TransitiveByObjectDisplayName         = $null
+                    TransitiveByNestingObjectIds          = $null
+                    TransitiveByNestingObjectDisplayNames = $null
+                }
+            }
+
+            # Merge thread-safe warnings back into main WarningMessages list
+            foreach ($w in $ParallelWarningsTg) {
+                if ($null -ne $WarningMessages) { $WarningMessages.Add($w) }
+            }
+
+            Write-Host "✓ Processed $($TgDelegatedActiveAndPermanentAssignments.Count) Tenant Governance delegated admin role assignments" -ForegroundColor Green
+        }
+    } else {
+        if (@($TgRelationships).Count -gt 0) {
+            Write-Warning "No active Tenant Governance relationships found ($(@($TgRelationships).Count) total, none with status 'active')"
+        } else {
+            Write-Verbose "No Tenant Governance relationships available"
+        }
+    }
     #endregion
 
     # Summarize results with direct permanent (excl.s activated roles) and eligible role assignments
     $AllAadRbacAssignments = @()
     $AllAadRbacAssignments += $AadPermanentRoleAssignments
     $AllAadRbacAssignments += $AadEligibleUserRoleAssignments
+    $AllAadRbacAssignments += $TgDelegatedActiveAndPermanentAssignments
 
     #region Collect transitive assignments by group members of Role-Assignable Groups
     if ($ExpandGroupMembers -eq $True) {    
-        $GroupsWithRbacAssignment = $AllAadRbacAssignments | where-object { $_.ObjectType -eq "group" } | Select-Object -Unique ObjectId, ObjectDisplayName
+        $GroupsWithRbacAssignment = $AllAadRbacAssignments | where-object { $_.ObjectType -eq "group" } | Select-Object -Unique ObjectId, ObjectDisplayName, ObjectTenantId
         $GroupCount = $GroupsWithRbacAssignment.Count
         
         if ($GroupCount -eq 0) {
             Write-Verbose "No groups with role assignments found, skipping transitive member expansion"
             $AllTransitiveMembers = [System.Collections.Generic.List[object]]::new()
         } else {
+            # Separate local and cross-tenant groups
+            $LocalGroups = @($GroupsWithRbacAssignment | Where-Object { [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $TenantId })
+            $CrossTenantGroups = @($GroupsWithRbacAssignment | Where-Object { -not [string]::IsNullOrEmpty($_.ObjectTenantId) -and $_.ObjectTenantId -ne $TenantId })
+
             # Sequential processing: Get-EntraOpsPrivilegedTransitiveGroupMember not available in parallel runspaces
-            Write-Verbose "Expanding $GroupCount group(s) for transitive Entra ID role assignments"
+            Write-Verbose "Expanding $GroupCount group(s) for transitive Entra ID role assignments ($($LocalGroups.Count) local, $($CrossTenantGroups.Count) cross-tenant)"
             $AllTransitiveMembers = [System.Collections.Generic.List[object]]::new()
             
-            foreach ($GroupWithRbacAssignment in $GroupsWithRbacAssignment) {
-                $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
+            # Expand local groups (current Graph context)
+            foreach ($GroupWithRbacAssignment in $LocalGroups) {
+                $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId) -TenantId $TenantId
                 foreach ($TransitiveMember in $TransitiveMembers) {
                     $Member = [pscustomobject]@{
-                        displayName            = $TransitiveMember.displayName
-                        id                     = $TransitiveMember.id
-                        '@odata.type'          = $TransitiveMember.'@odata.type'
-                        RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
-                        GroupObjectDisplayName = $GroupWithRbacAssignment.ObjectDisplayName
-                        GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                        displayName               = $TransitiveMember.displayName
+                        id                        = $TransitiveMember.id
+                        '@odata.type'             = $TransitiveMember.'@odata.type'
+                        RoleAssignmentSubType     = $TransitiveMember.RoleAssignmentSubType
+                        GroupObjectDisplayName    = $GroupWithRbacAssignment.ObjectDisplayName
+                        GroupObjectId             = $GroupWithRbacAssignment.ObjectId
+                        NestingObjectIds          = $TransitiveMember.NestingObjectIds
+                        NestingObjectDisplayNames = $TransitiveMember.NestingObjectDisplayNames
                     }
                     $AllTransitiveMembers.Add($Member) | Out-Null
+                }
+            }
+
+            # Expand cross-tenant groups (requires Graph context switch per foreign tenant)
+            # Skip when $ExpandCrossTenantGroupMembers is $false — caller (e.g. Get-EntraOpsPrivilegedEAMEntraId)
+            # handles expansion and object resolution together in Stage 5b with a single auth prompt.
+            if ($CrossTenantGroups.Count -gt 0 -and $ExpandCrossTenantGroupMembers) {
+                $CrossTenantGroupsByTenant = $CrossTenantGroups | Group-Object ObjectTenantId
+
+                $AuthType = $__EntraOpsSession.AuthenticationType
+                $IsInteractiveAuth = $AuthType -in @('UserInteractive', 'DeviceAuthentication')
+
+                # Home token needed only for non-interactive restore (Connect-MgGraph -AccessToken).
+                # For interactive, home restore uses Connect-MgGraph -TenantId (MSAL cache).
+                # Managing tenant always uses Get-AzAccessToken (silent for all auth types because
+                # Connect-EntraOps already pre-authenticated to managing tenant via Get-AzAccessToken).
+                $HomeToken = $null
+                if (-not $IsInteractiveAuth) {
+                    try {
+                        $HomeToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $Global:TenantIdContext -AsSecureString -ErrorAction Stop).Token
+                    } catch {
+                        Write-Warning "Could not acquire home tenant token for context restore: $($_.Exception.Message). Cross-tenant group expansion skipped."
+                        $CrossTenantGroupsByTenant = @()
+                    }
+                }
+
+                # Scopes for the interactive home-tenant restore via Connect-MgGraph -TenantId.
+                $HomeTenantScopes = @(
+                    "AdministrativeUnit.Read.All",
+                    "Application.Read.All",
+                    "CustomSecAttributeAssignment.Read.All",
+                    "Directory.Read.All",
+                    "Group.Read.All",
+                    "GroupMember.Read.All",
+                    "PrivilegedAccess.Read.AzureADGroup",
+                    "PrivilegedEligibilitySchedule.Read.AzureADGroup",
+                    "RoleManagement.Read.All",
+                    "User.Read.All"
+                )
+
+                foreach ($TenantGroup in $CrossTenantGroupsByTenant) {
+                    $ForeignTenantId = $TenantGroup.Name
+                    try {
+                        Write-Verbose "Switching MgGraph context to tenant $ForeignTenantId for transitive group expansion ($($TenantGroup.Group.Count) groups)"
+                        # Always use Get-AzAccessToken for managing tenant (silent — Az session has
+                        # a cached token from Connect-EntraOps pre-auth, no browser/device prompt).
+                        $ForeignToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ForeignTenantId -AsSecureString -ErrorAction Stop).Token
+                        Connect-MgGraph -AccessToken $ForeignToken -NoWelcome -ErrorAction Stop
+
+                        foreach ($GroupWithRbacAssignment in $TenantGroup.Group) {
+                            try {
+                                $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId) -TenantId $ForeignTenantId
+                                foreach ($TransitiveMember in $TransitiveMembers) {
+                                    $Member = [pscustomobject]@{
+                                        displayName               = $TransitiveMember.displayName
+                                        id                        = $TransitiveMember.id
+                                        '@odata.type'             = $TransitiveMember.'@odata.type'
+                                        RoleAssignmentSubType     = $TransitiveMember.RoleAssignmentSubType
+                                        GroupObjectDisplayName    = $GroupWithRbacAssignment.ObjectDisplayName
+                                        GroupObjectId             = $GroupWithRbacAssignment.ObjectId
+                                        NestingObjectIds          = $TransitiveMember.NestingObjectIds
+                                        NestingObjectDisplayNames = $TransitiveMember.NestingObjectDisplayNames
+                                    }
+                                    $AllTransitiveMembers.Add($Member) | Out-Null
+                                }
+                            } catch {
+                                Write-Warning "Failed to expand cross-tenant group $($GroupWithRbacAssignment.ObjectId) in tenant $ForeignTenantId : $($_.Exception.Message)"
+                                if ($WarningMessages) {
+                                    $WarningMessages.Add([PSCustomObject]@{
+                                            Type    = "CrossTenant-TransitiveExpansion"
+                                            Message = "Failed to expand group $($GroupWithRbacAssignment.ObjectId) in tenant $ForeignTenantId : $($_.Exception.Message)"
+                                            Target  = $GroupWithRbacAssignment.ObjectId
+                                        })
+                                }
+                            }
+                        }
+                    } catch {
+                        Write-Warning "Failed to switch MgGraph context to tenant $ForeignTenantId : $($_.Exception.Message)"
+                        if ($WarningMessages) {
+                            $WarningMessages.Add([PSCustomObject]@{
+                                    Type    = "CrossTenant-ContextSwitch"
+                                    Message = "Failed to switch MgGraph context to tenant $ForeignTenantId : $($_.Exception.Message)"
+                                    Target  = $ForeignTenantId
+                                })
+                        }
+                    } finally {
+                        # Restore home-tenant MgGraph context.
+                        # Interactive: Connect-MgGraph -TenantId hits the MSAL cache (full-scope token
+                        #              from Connect-EntraOps) — no prompt, no scope loss.
+                        # Non-interactive: Connect-MgGraph -AccessToken uses the Az app token which
+                        #              carries full application permissions.
+                        try {
+                            if ($IsInteractiveAuth) {
+                                Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop
+                            } elseif ($null -ne $HomeToken) {
+                                Connect-MgGraph -AccessToken $HomeToken -NoWelcome -ErrorAction Stop
+                            }
+                            Write-Verbose "Restored Microsoft Graph context to home tenant '$Global:TenantIdContext'."
+                        } catch {
+                            Write-Warning "Failed to restore home tenant Microsoft Graph context: $($_.Exception.Message)"
+                        }
+                    }
                 }
             }
         }
@@ -836,22 +1209,25 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     $MemberObjectType = $_.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
                     
                     $TransitiveMember = [pscustomobject]@{
-                        RoleAssignmentId                = $RbacAssignmentByGroup.RoleAssignmentId
-                        RoleName                        = $RbacAssignmentByGroup.RoleName
-                        RoleId                          = $RbacAssignmentByGroup.RoleId
-                        RoleType                        = $RbacAssignmentByGroup.RoleType
-                        IsPrivileged                    = $RbacAssignmentByGroup.isPrivileged
-                        RoleAssignmentPIMRelated        = $RbacAssignmentByGroup.RoleAssignmentPIMRelated
-                        RoleAssignmentPIMAssignmentType = $RbacAssignmentByGroup.RoleAssignmentPIMAssignmentType
-                        RoleAssignmentScopeId           = $RbacAssignmentByGroup.RoleAssignmentScopeId
-                        RoleAssignmentScopeName         = $RbacAssignmentByGroup.RoleAssignmentScopeName
-                        RoleAssignmentType              = "Transitive"
-                        RoleAssignmentSubType           = $_.RoleAssignmentSubType
-                        ObjectDisplayName               = $_.displayName
-                        ObjectId                        = $_.id
-                        ObjectType                      = $MemberObjectType
-                        TransitiveByObjectId            = $RbacAssignmentByGroup.ObjectId
-                        TransitiveByObjectDisplayName   = $_.GroupObjectDisplayName
+                        RoleAssignmentId                      = $RbacAssignmentByGroup.RoleAssignmentId
+                        RoleName                              = $RbacAssignmentByGroup.RoleName
+                        RoleId                                = $RbacAssignmentByGroup.RoleId
+                        RoleType                              = $RbacAssignmentByGroup.RoleType
+                        IsPrivileged                          = $RbacAssignmentByGroup.isPrivileged
+                        RoleAssignmentPIMRelated              = $RbacAssignmentByGroup.RoleAssignmentPIMRelated
+                        RoleAssignmentPIMAssignmentType       = $RbacAssignmentByGroup.RoleAssignmentPIMAssignmentType
+                        RoleAssignmentScopeId                 = $RbacAssignmentByGroup.RoleAssignmentScopeId
+                        RoleAssignmentScopeName               = $RbacAssignmentByGroup.RoleAssignmentScopeName
+                        RoleAssignmentType                    = "Transitive"
+                        RoleAssignmentSubType                 = $_.RoleAssignmentSubType
+                        ObjectDisplayName                     = $_.displayName
+                        ObjectId                              = $_.id
+                        ObjectTenantId                        = $RbacAssignmentByGroup.ObjectTenantId
+                        ObjectType                            = $MemberObjectType
+                        TransitiveByObjectId                  = $RbacAssignmentByGroup.ObjectId
+                        TransitiveByObjectDisplayName         = $_.GroupObjectDisplayName
+                        TransitiveByNestingObjectIds          = $_.NestingObjectIds
+                        TransitiveByNestingObjectDisplayNames = $_.NestingObjectDisplayNames
                     }
                     $AadRbacTransitiveAssignments.Add($TransitiveMember) | Out-Null
                 }

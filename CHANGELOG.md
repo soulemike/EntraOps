@@ -1,6 +1,45 @@
-
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
+
+## [0.7.0] - 2026-03-25
+### Added
+- **Tenant Governance Relationship support**: `Get-EntraOpsPrivilegedEntraIdRoles` now fetches active governance relationships from `/beta/directory/tenantGovernance/governanceRelationships` and processes delegated admin role assignments (`policySnapshot.delegatedAdministrationRoleAssignments`) from managing tenants (Tenant Governance Relationship).
+- **Cross-tenant object resolution**: New private function `Invoke-EntraOpsCrossTenantObjectResolution` implements a two-phase resolution strategy — Phase 1 resolves objects in the home tenant, Phase 2 switches context to the managing tenant to resolve objects that returned `unknown` type
+- **Managing tenant authentication in `Connect-EntraOps`**: New parameters `ManagingTenantId` and `ManagingTenantName` to pre-authenticate to a managing tenant across all authentication types (`UserInteractive`, `DeviceAuthentication`, `FederatedCredentials`, `MSI`, `AlreadyAuthenticated`). Settings are also auto-loaded from the config file. New global variables `ManagingTenantIdContext` and `ManagingTenantNameContext` are set for use across all cmdlets
+- **`ObjectTenantId` field in EAM output**: All role assignment objects now include `ObjectTenantId` to identify whether a principal resides in the home tenant or a foreign (managing) tenant
+- **Stage 5b in `Get-EntraOpsPrivilegedEAMEntraId`**: New combined processing stage for cross-tenant group expansion and object resolution — connects to the managing tenant once (single auth prompt for interactive flows), expands cross-tenant groups into transitive classification entries, resolves cross-tenant object details, then restores the home-tenant context
+- **`ExpandCrossTenantGroupMembers` parameter** in `Get-EntraOpsPrivilegedEntraIdRoles`: Controls whether cross-tenant group members are expanded inline; when a managing tenant is configured, Stage 5b handles expansion instead to avoid redundant auth prompts
+- **Foreign principal tracking** in `Get-EntraOpsPrivilegedEntraIdRoles`: Principal IDs sourced from Tenant Governance relationships are marked as foreign (`$ForeignPrincipalIds`) to suppress spurious home-tenant resolution warnings
+- **Tenant Governance relationships included in persistent cache**: `TgRelationships` are now stored and restored alongside role definitions, assignments, eligible assignments, and PIM schedules
+- **`AuthenticationType` stored in session state**: `Connect-EntraOps` stores the active authentication type in `$__EntraOpsSession['AuthenticationType']` so cross-tenant helper functions can choose the correct token-acquisition and context-restore strategy
+- Identification of nesting path/chain for transitive group members in all privileged access reports (`TransitiveByNestingObjectIds`, `TransitiveByNestingObjectDisplayNames`)
+- New capabilities to automate parameterization for Device Management by using `Update-EntraOpsClassificationControlPlaneScope`: `Classification_DeviceManagement.Param.json`
+- New role classification section with enhanced details on classification category and capabilities in the Privileged EAM Overview workbook
+
+### Changed
+- **`Connect-EntraOps`**: Pre-authenticates to the managing tenant for all authentication types before connecting to the target tenant; verifies and corrects Azure/Graph context after auth if it landed on the wrong tenant; displays managing tenant info in the connection summary
+- **`Disconnect-EntraOps`**: Resets `AuthenticationType` in session state (`$__EntraOpsSession`) on disconnect and includes the reset in the overall "all cleared" check
+- **`Get-EntraOpsPrivilegedEntraIdRoles`**: `TenantId` now defaults to `(Get-AzContext).Tenant.Id` instead of requiring explicit passing; cache path handling is now null-safe (gracefully disables caching when `PersistentCachePath` is not set)
+- **`Get-EntraOpsPrivilegedEAMEntraId`**: Batch pre-fetch and parallel object resolution now operate only on local-tenant objects; cross-tenant objects are separated out and handled in Stage 5b; throttle-limit sizing is based on local object count
+- **`New-EntraOpsConfigFile`**: Removed redundant configuration file writing logic
+- Improved classification transparency by handling tagging properties (`TaggedByObjectIds`, `TaggedByObjectDisplayNames`, `TaggedByRoleSystem`) during processing
+- Expanded default list of classifications for automated updates in `New-EntraOpsConfigFile` to include Defender, DeviceManagement, and IdentityGovernance templates
+- Refactoring of Intune (Device Management) RBAC
+  - Intune AppScopeId will be used as RoleAassignmentScopeName
+- Updated Privileged EAM cmdlets (`Get-EntraOpsPrivilegedDeviceRoles`, `Get-EntraOpsPrivilegedEAMDefender`, `Get-EntraOpsPrivilegedEAMIntune`) to align with new classification structures
+- **`Update-EntraOpsClassificationFiles`**: Added `-IncludeParamFiles` switch (default: `$true`); when enabled, automatically includes and downloads any `.Param` variant files found in the repository for each entry in `$Classifications` (e.g., `DeviceManagement` also pulls `DeviceManagement.Param`)
+- Classification will be stored in separated WatchList to avoid 10KB limit for WatchList, Parser will merge all Role Assignment details in a single view
+- Updated parser to support new WatchList `EntraOps_RoleClassifications`
+- Updated Privileged EAM Overview workbook: reintroduced `PrincipalDisplayName` parameter, added `SelectedRoleAssignmentIds` parameter, improved KQL queries for clarity and sorting
+
+### Removed
+- Capabilities to classify by "AssignedDeviceObjects" (optional parameter: ApplyClassificationByAssignedObjects), use `Update-EntraOpsClassificationControlPlaneScope` to identify scope of devices by Control and Management Plane users
+
+### Fixed
+- Fixed a bug in `Update-EntraOpsPrivilegedAdministrativeUnit` where role-assignable groups and PIM for Groups enabled groups could be added to Restricted Management Administrative Units (RMAU), which is not supported
+
+### Known issues
+- In multi-tenant environments using user interactive mode, EntraOps may prompt for sign-in multiple times during execution.
 
 ## [0.6.0] - 2026-03-12
 ### Added

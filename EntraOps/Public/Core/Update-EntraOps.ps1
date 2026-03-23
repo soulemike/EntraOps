@@ -17,6 +17,9 @@ function Update-EntraOps {
         [System.String]$Branch = "main"
         ,
         [Parameter(Mandatory = $False)]
+        [System.String]$Repository = "EntraOps"
+        ,        
+        [Parameter(Mandatory = $False)]
         [System.String]$PersonalAccessToken
         ,
         [Parameter(Mandatory = $False)]
@@ -32,11 +35,21 @@ function Update-EntraOps {
 
     $ErrorActionPreference = "Stop"
 
-    if ($null -ne $PersonalAccessToken) {
-        $CloneUrl = "https://$($PersonalAccessToken):@github.com/Cloud-Architekt/EntraOps.git"
+    if ([string]::IsNullOrWhiteSpace($PersonalAccessToken) -and -not [string]::IsNullOrWhiteSpace($env:ENTRAOPS_PAT)) {
+        $PersonalAccessToken = $env:ENTRAOPS_PAT
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($PersonalAccessToken)) {
+        Write-Output "Cloning repository 'Cloud-Architekt/$($Repository)' (branch: $Branch) using Personal Access Token..."
+        $CloneUrl = "https://$($PersonalAccessToken):@github.com/Cloud-Architekt/$($Repository).git"
         git clone -b $Branch $CloneUrl $TemporaryUpdateFolder
     } else {
-        git clone -b $Branch https://github.com/Cloud-Architekt/EntraOps.git $TemporaryUpdateFolder
+        Write-Output "Cloning repository 'Cloud-Architekt/$($Repository)' (branch: $Branch) without authentication..."
+        git clone -b $Branch "https://github.com/Cloud-Architekt/$($Repository).git" $TemporaryUpdateFolder
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "git clone failed with exit code $LASTEXITCODE. Verify the repository name, branch, and whether a Personal Access Token (secret: EntraOpsUpdatePat) is required for private repositories."
     }
 
     foreach ($TargetUpdateFolder in $TargetUpdateFolders) {

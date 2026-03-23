@@ -44,6 +44,12 @@ function New-EntraOpsConfigFile {
         [parameter(Mandatory = $true)]
         [string]$TenantName,
 
+        [parameter(Mandatory = $false)]
+        [string]$ManagingTenantName = "",        
+
+        [parameter(Mandatory = $false)]
+        [string]$ManagingTenantId = "",
+
         [Parameter(Mandatory = $false)]
         [ValidateSet('UserInteractive', 'SystemAssignedMSI', 'UserAssignedMSI', 'FederatedCredentials', 'AlreadyAuthenticated', 'DeviceAuthentication')]
         [string]$AuthenticationType = "FederatedCredentials",
@@ -123,6 +129,8 @@ function New-EntraOpsConfigFile {
     $EnvConfigSchema = [ordered]@{
         TenantId                                      = $($TenantId)
         TenantName                                    = $($TenantDetails.Domains[0])
+        ManagingTenantId                              = $($ManagingTenantId)
+        ManagingTenantName                            = $($ManagingTenantName)
         AuthenticationType                            = $($AuthenticationType)
         ClientId                                      = "Use New-EntraOpsWorkloadIdentity to create a new App Registration or enter here manually"
         DevOpsPlatform                                = $($DevOpsPlatform)
@@ -142,7 +150,7 @@ function New-EntraOpsConfigFile {
         }
         AutomatedClassificationUpdate                 = [ordered]@{
             ApplyAutomatedClassificationUpdate = $ApplyAutomatedClassificationUpdate
-            Classifications                    = ("AadResources", "AadResources.Param", "AppRoles")
+            Classifications                    = ("AadResources", "AadResources.Param", "AppRoles", "Defender", "DeviceManagement", "DeviceManagement.Param", "IdentityGovernance")
         }
         AutomatedEntraOpsUpdate                       = [ordered]@{
             ApplyAutomatedEntraOpsUpdate = $ApplyAutomatedEntraOpsUpdate

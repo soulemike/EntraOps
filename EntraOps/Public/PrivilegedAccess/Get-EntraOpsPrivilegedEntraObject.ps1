@@ -37,7 +37,7 @@ function Get-EntraOpsPrivilegedEntraObject {
         [System.String]$AadObjectId
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$TenantId
+        [System.String]$TenantId = $Global:TenantIdContext
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$CustomSecurityUserAttribute = $EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAttribute
@@ -56,9 +56,28 @@ function Get-EntraOpsPrivilegedEntraObject {
         ,
         [Parameter(Mandatory = $false)]
         [PSObject]$InputObject
+        ,
+        [Parameter(Mandatory = $false)]
+        [switch]$IsForeignPrincipal
     )
 
     $StopwatchTotal = [System.Diagnostics.Stopwatch]::StartNew()
+
+    # Ensure TenantId is always set — the parameter default ($Global:TenantIdContext) is bypassed
+    # when an explicit $null or empty string is passed (e.g. (Get-AzContext).Tenant.Id returning null).
+    if ([string]::IsNullOrEmpty($TenantId)) {
+        $TenantId = $Global:TenantIdContext
+    }
+
+    # Detect cross-tenant mode: when TenantId differs from the home tenant (set by Connect-EntraOps),
+    # the object belongs to a foreign tenant (e.g., governing tenant in TG scenarios).
+    # The MgGraph context is expected to be already switched to the foreign tenant by the caller,
+    # so full enrichment (RMAU, PIM roles, owners, admin units, custom security attributes) works via Graph API.
+    # Only XDR hunting is skipped (queries home tenant's security data, not applicable cross-tenant).
+    $IsCrossTenant = (-not [string]::IsNullOrEmpty($TenantId) -and -not [string]::IsNullOrEmpty($Global:TenantIdContext) -and $TenantId -ne $Global:TenantIdContext)
+    if ($IsCrossTenant) {
+        Write-Verbose "Cross-tenant mode: Object $AadObjectId belongs to tenant $TenantId (home: $($Global:TenantIdContext))"
+    }
     
     try {
         $ObjectDetails = $null
@@ -76,12 +95,48 @@ function Get-EntraOpsPrivilegedEntraObject {
         
         # Fallback to API call if object details are still null
         if ($null -eq $ObjectDetails) {
-            $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($AadObjectId)?`$select=id,displayName,userPrincipalName,userType,isAssignableToRole,isManagementRestricted,onPremisesSyncEnabled,passwordPolicies" -OutputType PSObject
+            # When the object is a known foreign (tenant governance) principal, suppress the built-in
+            # Write-Warning from Invoke-EntraOpsMsGraphQuery for expected NotFound responses.
+            # We handle the null result ourselves with a targeted informational message below.
+            $GraphWarningAction = if ($IsForeignPrincipal) { 'SilentlyContinue' } else { 'Continue' }
+            $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($AadObjectId)?`$select=id,displayName,userPrincipalName,userType,isAssignableToRole,isManagementRestricted,onPremisesSyncEnabled,passwordPolicies" -OutputType PSObject -WarningAction $GraphWarningAction
         }
     } catch {
         $ObjectDetails = $null
         Write-Verbose "No object has been found with Id: $AadObjectId"
         Write-Warning $_.Exception.Message
+    }
+
+    # If the object is a known foreign (tenant governance) principal and was not found in this tenant,
+    # return early with a minimal placeholder. This is expected — the object lives in the managing tenant
+    # and will be resolved in Stage 5b. Suppresses cascading 404 warnings from subsequent Graph calls.
+    if ($null -eq $ObjectDetails -and $IsForeignPrincipal) {
+        Write-Host "Object $AadObjectId not found in home tenant — expected for tenant governance (TG) objects, will be resolved in managing tenant context." -ForegroundColor Gray
+        $StopwatchTotal.Stop()
+        return [PSCustomObject]@{
+            'ObjectId'                      = $AadObjectId
+            'ObjectTenantId'                = $TenantId
+            'ObjectType'                    = 'unknown'
+            'ObjectSubType'                 = 'unknown'
+            'ObjectDisplayName'             = 'Identity not found'
+            'ObjectSignInName'              = ''
+            'OwnedObjects'                  = @()
+            'OwnedDevices'                  = @()
+            'Owners'                        = @()
+            'Sponsors'                      = @()
+            'IdentityParent'                = $null
+            'AdminTierLevel'                = 'Unclassified'
+            'AdminTierLevelName'            = 'Unclassified'
+            'AssociatedWorkAccount'         = @()
+            'AssociatedPawDevice'           = @()
+            'OnPremSynchronized'            = $false
+            'RestrictedManagementByRAG'     = $false
+            'RestrictedManagementByAadRole' = $false
+            'RestrictedManagementByRMAU'    = $false
+            'AssignedAdministrativeUnits'   = @()
+            'PasswordPolicyAssigned'        = @()
+            'OutsideOfHomeTenant'           = $true
+        }
     }
 
     # Variables for ownership or other object relationships
@@ -195,7 +250,10 @@ function Get-EntraOpsPrivilegedEntraObject {
                 $OutsideOfAadTenant = $True
             } else { $OutsideOfAadTenant = $False }
 
-            # Object Classification (already retrieved in initial query)
+            # Force OutsideOfHomeTenant for cross-tenant objects
+            if ($IsCrossTenant) { $OutsideOfAadTenant = $true }
+
+            # Object Classification from custom security attributes
             try {
                 $ObjectCustomSec = $UserDetails.customSecurityAttributes.$($CustomSecurityUserAttribute)
             } catch {
@@ -214,7 +272,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             }
             if ($null -ne $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute)) {
                 $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute) | ForEach-Object { $WorkAccount.Add($_) | out-null }                
-            } elseif ( $XdrHunting -eq $true ) {
+            } elseif ( -not $IsCrossTenant -and $XdrHunting -eq $true ) {
+                # XDR hunting queries the home tenant's security data - skip for cross-tenant objects
                 try {
                     $IdentityAccountQuery = "
                         IdentityAccountInfo
@@ -263,6 +322,7 @@ function Get-EntraOpsPrivilegedEntraObject {
                 $RestrictedManagementByRAG = $false
             }
             $OutsideOfAadTenant = $false
+            if ($IsCrossTenant) { $OutsideOfAadTenant = $true }
 
             # No support for custom security attributes
             $AdminTierLevel = ""
@@ -304,7 +364,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             # Restricted by Role Assignale Groups does not apply
             $RestrictedManagementByRAG = $false
 
-            # Details of classified object from custom security attribute (already retrieved in initial query)
+            # Details of classified object from custom security attribute
             try {
                 $ObjectCustomSec = $SPObject.customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
             } catch {
@@ -359,7 +419,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             # Administrative Units and Restricted Management does not apply to service principals
             $RestrictedManagementByRAG = $false
 
-            # Details of classified object from custom security attribute (already retrieved in SP query)
+            # Details of classified object from custom security attribute
             try {
                 $ObjectCustomSec = $SPObject.customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
             } catch {
@@ -403,12 +463,14 @@ function Get-EntraOpsPrivilegedEntraObject {
         $AllAdminUnits = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/administrativeunits?`$select=id,displayName" -OutputType PSObject
         $AdminUnitLookup = @{}
         foreach ($AU in $AllAdminUnits) {
-            $AdminUnitLookup[$AU.id] = $AU
+            if ($null -ne $AU.id) {
+                $AdminUnitLookup[$AU.id] = $AU
+            }
         }
         
         # Use hashtable lookup for fast filtering
         foreach ($AuId in $AssignedAdminUnitIds) {
-            if ($AdminUnitLookup.ContainsKey($AuId)) {
+            if ($null -ne $AuId -and $AdminUnitLookup.ContainsKey($AuId)) {
                 $AssignedAdministrativeUnits.Add($AdminUnitLookup[$AuId]) | out-null
             }
         }
@@ -461,6 +523,7 @@ function Get-EntraOpsPrivilegedEntraObject {
         
         [PSCustomObject]@{
             'ObjectId'                      = $ObjectDetails.Id
+            'ObjectTenantId'                = $TenantId            
             'ObjectType'                    = $ObjectType
             'ObjectSubType'                 = $ObjectSubType
             'ObjectDisplayName'             = $ObjectDetails.displayName

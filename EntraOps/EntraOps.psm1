@@ -49,6 +49,7 @@ $__EntraOpsSession = @{
     PersistentCachePath = $PersistentCachePath
     DefaultCacheTTL     = 3600  # Default 1 hour for dynamic data
     StaticDataCacheTTL  = 3600  # 1 hour for static reference data (role definitions, etc.)
+    AuthenticationType  = $null  # Set by Connect-EntraOps; used to determine cross-tenant token acquisition strategy
 }
 New-Variable -Name __EntraOpsSession -Value $__EntraOpsSession -Scope Script -Force
 

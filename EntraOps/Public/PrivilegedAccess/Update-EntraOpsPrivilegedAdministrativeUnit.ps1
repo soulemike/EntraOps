@@ -101,16 +101,22 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
             Write-Progress -Activity "Updating Administrative Units" -Status "$RbacSystem - Processing tier $TierLevelIndex of $($PrivilegedEamClassifications.Count): Tier$($TierLevel.EAMTierLevelTagValue)-$($TierLevel.EAMTierLevelName)" -PercentComplete (($TierLevelIndex / $PrivilegedEamClassifications.Count) * 100)
             
             $AdminUnitId = $null
+            $IsRestrictedManagementAu = $false
             $AdminUnitName = "Tier" + $TierLevel.EAMTierLevelTagValue + "-" + $TierLevel.EAMTierLevelName + "." + $RbacSystem
             $AuAdded = 0
             $AuRemoved = 0
             $AuFailed = 0
+            $AuSkipped = 0
             $AuStatus = "OK"
 
             Write-Host ""
             Write-Host "  AU: $AdminUnitName" -ForegroundColor White
 
-            $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$AdminUnitName'" -DisableCache).id
+            $AdminUnit = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$AdminUnitName'" -DisableCache
+            $AdminUnitId = $AdminUnit.id
+            if ($null -ne $AdminUnit) {
+                $IsRestrictedManagementAu = $AdminUnit.isMemberManagementRestricted -eq $true
+            }
             if ($null -eq $AdminUnitId) {
                 Write-Warning "  [SKIP] Could not find AU: $AdminUnitName"
                 $WarningMessages.Add([PSCustomObject]@{ Type = "AuNotFound"; Message = "Could not find AU: $AdminUnitName" })
@@ -128,6 +134,28 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
 
             $EntraOpsPrivilegedObjects = @()
             $EntraOpsPrivilegedObjects = ($PrivilegedEamClassifiedObjects | Where-Object { $_.Classification.AdminTierLevel -contains $TierLevel.EAMTierLevelTagValue -and $_.Classification.AdminTierLevelName -contains $TierLevel.EAMTierLevelName -and $_.RoleSystem -eq $RbacSystem })
+
+            # Exclude role-assignable and PIM-enabled groups from desired set when target AU is restricted management
+            if ($IsRestrictedManagementAu) {
+                # Identify PIM-enabled groups from EAM role assignment data (eligible/active members indicate PIM for Groups is enabled)
+                $PimEnabledGroupIds = @($PrivilegedEam.RoleAssignments | Where-Object { $_.RoleAssignmentSubType -in @("Eligible member", "Active member", "Nested Eligible member") } | Select-Object -ExpandProperty TransitiveByObjectId -Unique)
+
+                $ExcludedGroups = @($EntraOpsPrivilegedObjects | Where-Object {
+                    $_.ObjectType -eq 'Group' -and ($_.ObjectSubType -eq 'Role-assignable' -or $_.ObjectId -in $PimEnabledGroupIds)
+                })
+                if ($ExcludedGroups.Count -gt 0) {
+                    foreach ($ExclGroup in $ExcludedGroups) {
+                        $ExclReason = if ($ExclGroup.ObjectSubType -eq 'Role-assignable') { "role-assignable" } else { "PIM-enabled" }
+                        Write-Warning "  [SKIP] $ExclReason group excluded from restricted management AU: $($ExclGroup.ObjectDisplayName) ($($ExclGroup.ObjectId))"
+                        $WarningMessages.Add([PSCustomObject]@{ Type = "GroupExcludedFromRMAU"; Message = "Skipped $ExclReason group for restricted AU ${AdminUnitName}: $($ExclGroup.ObjectDisplayName) ($($ExclGroup.ObjectId))" })
+                        $AuSkipped++
+                        $TotalSkipped++
+                    }
+                    $ExcludedGroupIds = $ExcludedGroups.ObjectId
+                    $EntraOpsPrivilegedObjects = @($EntraOpsPrivilegedObjects | Where-Object { $_.ObjectId -notin $ExcludedGroupIds })
+                }
+            }
+
             $CurrentAdminUnitMembers = @()
             $CurrentAdminUnitMembers = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members" -OutputType PSObject -DisableCache)
 
@@ -221,6 +249,7 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                     Added         = $AuAdded
                     Removed       = $AuRemoved
                     Failed        = $AuFailed
+                    Skipped       = $AuSkipped
                     Status        = $AuStatus
                 })
         }
@@ -233,6 +262,9 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
     Write-Host " Administrative Unit Sync - Complete" -ForegroundColor Cyan
     Write-Host "  Total added  : $TotalAdded" -ForegroundColor Green
     Write-Host "  Total removed: $TotalRemoved" -ForegroundColor Yellow
+    if ($TotalSkipped -gt 0) {
+        Write-Host "  Total skipped: $TotalSkipped" -ForegroundColor DarkYellow
+    }
     if (($SyncSummary | Where-Object { $_.Failed -gt 0 }).Count -gt 0) {
         Write-Host "  Failures     : $(($SyncSummary | Measure-Object -Property Failed -Sum).Sum)" -ForegroundColor Red
     }
@@ -243,5 +275,6 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
     @{Name = 'Added'; Expression = { $_.Added }; Align = 'Right' },
     @{Name = 'Removed'; Expression = { $_.Removed }; Align = 'Right' },
     @{Name = 'Failed'; Expression = { $_.Failed }; Align = 'Right' },
+    @{Name = 'Skipped'; Expression = { $_.Skipped }; Align = 'Right' },
     Status
 }

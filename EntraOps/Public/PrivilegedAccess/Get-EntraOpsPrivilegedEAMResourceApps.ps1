@@ -48,6 +48,14 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         [System.Int32]$ParallelThrottleLimit = 10
     )
 
+    # Ensure TenantId is always set before it propagates into parallel runspaces where
+    # $Global:TenantIdContext is not available. (Get-AzContext).Tenant.Id can return null
+    # when only MgGraph auth is active (no Az context), which would cause ObjectTenantId
+    # to be empty in all output entries.
+    if ([string]::IsNullOrEmpty($TenantId) -and -not [string]::IsNullOrEmpty($Global:TenantIdContext)) {
+        $TenantId = $Global:TenantIdContext
+    }
+
     # Configuration for batch processing
     $BatchSize = 100  # Number of objects to process before showing progress
     $WarningMessages = New-Object -TypeName "System.Collections.Generic.List[psobject]"
@@ -84,18 +92,24 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             $ClassifiedAppRole += $AppRoleInJsonDefinition | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service | Sort-Object EAMTierLevelTagValue, EAMTierLevelName, Service
             $Classification += $ClassifiedAppRole | ForEach-Object {
                 [PSCustomObject]@{
-                    'AdminTierLevel'     = $_.EAMTierLevelTagValue
-                    'AdminTierLevelName' = $_.EAMTierLevelName
-                    'Service'            = $_.Service
-                    'TaggedBy'           = "JSONwithAction"
+                    'AdminTierLevel'             = $_.EAMTierLevelTagValue
+                    'AdminTierLevelName'         = $_.EAMTierLevelName
+                    'Service'                    = $_.Service
+                    'TaggedBy'                   = "JSONwithAction"
+                    'TaggedByObjectIds'          = $null
+                    'TaggedByObjectDisplayNames' = $null
+                    'TaggedByRoleSystem'         = "ResourceApps"
                 }
             }
         } else {
             $Classification += [PSCustomObject]@{
-                'AdminTierLevel'     = "Unclassified"
-                'AdminTierLevelName' = "Unclassified"
-                'Service'            = "Unclassified"
-                'TaggedBy'           = "JSONwithAction"
+                'AdminTierLevel'             = "Unclassified"
+                'AdminTierLevelName'         = "Unclassified"
+                'Service'                    = "Unclassified"
+                'TaggedBy'                   = "JSONwithAction"
+                'TaggedByObjectIds'          = $null
+                'TaggedByObjectDisplayNames' = $null
+                'TaggedByRoleSystem'         = "ResourceApps"
             }
         }
 
@@ -114,7 +128,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $Classification = @()
         $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $AppRoleAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
         if ($ClassificationCollection.Classification.Count -gt 0) {
-            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem
         }
         $AppRoleAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $AppRoleAssignment
@@ -147,7 +161,9 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable" -Force
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentSubType" -NotePropertyValue "AllAllowed" -Force
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectDisplayName" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.displayName)" -Force
-                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectId" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.id)" -Force                        
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectId" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.id)" -Force
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByNestingObjectIds" -NotePropertyValue $null -Force
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByNestingObjectDisplayNames" -NotePropertyValue $null -Force
                     $InheritableResourceAppPermission
                 } elseif ($AgentIdentityResourceAppPermission.inheritableScopes.kind -eq "enumerated") {
                     $RoleAssignmentScopeId = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '$($AgentIdentityResourceAppPermission.resourceAppId)'" | select-object -ExpandProperty id
@@ -156,7 +172,9 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable" -Force
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentSubType" -NotePropertyValue "Enumerated" -Force
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectDisplayName" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.displayName)" -Force
-                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectId" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.id)" -Force                    
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectId" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.id)" -Force
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByNestingObjectIds" -NotePropertyValue $null -Force
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByNestingObjectDisplayNames" -NotePropertyValue $null -Force
                     $InheritableResourceAppPermission
                 } elseif ($null -eq $AgentIdentityResourceAppPermission.inheritableScopes.kind) {
                     Write-Verbose "No inheritable scopes defined for Agent Identity $($AgentIdentityBlueprintPrincipal.displayName) Resource App Permission: $($AgentIdentityResourceAppPermission.id)"
@@ -172,7 +190,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             } else {
                 $ChildAgentIdentities = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=(isof('microsoft.graph.agentIdentity')%20OR%20(tags%2Fany(p%3Astartswith(p%2C%20'power-virtual-agents-'))%20OR%20tags%2Fany(p%3Ap%20eq%20'AgenticInstance')))%20AND%20createdByAppId%20eq%20'$($AgentIdentityBlueprintPrincipal.appId)'"
                 foreach ( $ChildAgentIdentity in $ChildAgentIdentities ) {
-                    $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ChildAgentIdentity.Id
+                    $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ChildAgentIdentity.Id -TenantId $TenantId
 
                     # Classification
                     $Classification = @()
@@ -188,6 +206,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
                     [PSCustomObject]@{
                         'ObjectId'                      = $ChildAgentIdentity.id
+                        'ObjectTenantId'                = $AgentIdentityBlueprintPrincipal.appOwnerOrganizationId
                         'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
                         'ObjectSubType'                 = $ObjectDetails.ObjectSubType
                         'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
@@ -287,7 +306,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     }
                 }
                 
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
 
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
@@ -299,6 +318,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
                 [PSCustomObject]@{
                     'ObjectId'                      = $ObjectId
+                    'ObjectTenantId'                = $ObjectDetails.ObjectTenantId
                     'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
                     'ObjectSubType'                 = $ObjectDetails.ObjectSubType
                     'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
@@ -374,7 +394,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     }
                 }
             
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
 
                 if ($Classification.Count -eq 0) {
                     $Classification = @(
@@ -388,6 +408,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
                 [PSCustomObject]@{
                     'ObjectId'                      = $ObjectId
+                    'ObjectTenantId'                = $ObjectDetails.ObjectTenantId
                     'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
                     'ObjectSubType'                 = $ObjectDetails.ObjectSubType
                     'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
@@ -437,4 +458,5 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     $AppRoleClassifiedObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 
 }
+
 

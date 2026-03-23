@@ -81,41 +81,58 @@ function Get-EntraOpsPrivilegedDeviceRoles {
 
                 if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DeviceMgmtPrincipalRoleAssignment.id)" }
 
-                if ( [string]::IsNullOrEmpty($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) ) {
-                    # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
-                    # No indicator to identify the scope type, so empty value is used for considering RBAC role without specific directoryScopeId
-                    $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds = "/"
-                }
+                # Collect non-root directoryScopeIds for TaggedBy enrichment
+                $nonRootDirectoryScopeIds = @($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds | Where-Object { $_ -ne "/" -and -not [string]::IsNullOrEmpty($_) })
 
-                foreach ($directoryScopeId in $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) {
-                    # Get scope name from tags
-                    if ($directoryScopeId -ne "/") {
-                        $RoleAssignmentScopeName = foreach ($appScopeId in $DeviceMgmtPrincipalRoleAssignment.appScopeIds) {
-                            $ScopeTags | Where-Object { $_.Id -eq $appScopeId } | Select-Object -ExpandProperty displayName
-                        }
-                    } elseif ($directoryScopeId -eq "/") {
-                        $RoleAssignmentScopeName = "Tenant-wide"
-                    } else {
-                        Write-Warning "No scope name found for directoryScopeId $directoryScopeId"
+                # Tenant-wide: directoryScopeIds is null/empty (All Devices or All Users only) OR contains "/" (All Devices + All Users)
+                $isTenantWide = [string]::IsNullOrEmpty($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) -or ($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds -contains "/")
+                if ($isTenantWide) {
+                    # Tenant-wide scope (all users or all devices, root scope "/")
+                    [pscustomobject]@{
+                        RoleAssignmentId                      = $DeviceMgmtPrincipalRoleAssignment.Id
+                        RoleAssignmentScopeId                 = "/"
+                        RoleAssignmentScopeName               = "Tenant-wide"
+                        DirectoryScopeIds                     = @()
+                        RoleAssignmentType                    = "Direct"
+                        RoleAssignmentSubType                 = ""
+                        PIMManagedRole                        = $False
+                        PIMAssignmentType                     = "Permanent"
+                        RoleDefinitionName                    = $Role.displayName
+                        RoleDefinitionId                      = $Role.id
+                        RoleType                              = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
+                        RoleIsPrivileged                      = $Role.isPrivileged
+                        ObjectId                              = $Principal    
+                        ObjectTenantId                        = $TenantId                                       
+                        ObjectType                            = $ObjectType                      
+                        TransitiveByObjectId                  = ""
+                        TransitiveByObjectDisplayName         = ""
+                        TransitiveByNestingObjectIds          = $null
+                        TransitiveByNestingObjectDisplayNames = $null
                     }
-
-                    $RoleAssignmentScopeName | foreach-object {
+                } else {
+                    foreach ($appScopeId in $DeviceMgmtPrincipalRoleAssignment.appScopeIds) {
+                        $ScopeTagName = ($ScopeTags | Where-Object { $_.Id -eq $appScopeId }).displayName
+                        if ([string]::IsNullOrEmpty($ScopeTagName)) { $ScopeTagName = "ScopeTag-$appScopeId" }
                         [pscustomobject]@{
-                            RoleAssignmentId              = $DeviceMgmtPrincipalRoleAssignment.Id
-                            RoleAssignmentScopeId         = $directoryScopeId
-                            RoleAssignmentScopeName       = $_
-                            RoleAssignmentType            = "Direct"
-                            RoleAssignmentSubType         = ""
-                            PIMManagedRole                = $False
-                            PIMAssignmentType             = "Permanent"
-                            RoleDefinitionName            = $Role.displayName
-                            RoleDefinitionId              = $Role.id
-                            RoleType                      = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
-                            RoleIsPrivileged              = $Role.isPrivileged
-                            ObjectId                      = $Principal
-                            ObjectType                    = $ObjectType
-                            TransitiveByObjectId          = ""
-                            TransitiveByObjectDisplayName = ""
+                            RoleAssignmentId                      = $DeviceMgmtPrincipalRoleAssignment.Id
+                            RoleAssignmentScopeId                 = "$appScopeId"
+                            RoleAssignmentScopeName               = $ScopeTagName
+                            DirectoryScopeIds                     = $nonRootDirectoryScopeIds
+                            RoleAssignmentType                    = "Direct"
+                            RoleAssignmentSubType                 = ""
+                            PIMManagedRole                        = $False
+                            PIMAssignmentType                     = "Permanent"
+                            RoleDefinitionName                    = $Role.displayName
+                            RoleDefinitionId                      = $Role.id
+                            RoleType                              = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
+                            RoleIsPrivileged                      = $Role.isPrivileged
+                            ObjectId                              = $Principal
+                            ObjectTenantId                        = $TenantId                          
+                            ObjectType                            = $ObjectType                      
+                            TransitiveByObjectId                  = ""
+                            TransitiveByObjectDisplayName         = ""
+                            TransitiveByNestingObjectIds          = $null
+                            TransitiveByNestingObjectDisplayNames = $null
                         }
                     }
                 }
@@ -143,12 +160,14 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName            = $TransitiveMember.displayName
-                    id                     = $TransitiveMember.id
-                    '@odata.type'          = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
-                    GroupObjectDisplayName = $GroupObjectDisplayName
-                    GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                    displayName               = $TransitiveMember.displayName
+                    id                        = $TransitiveMember.id
+                    '@odata.type'             = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType     = $TransitiveMember.RoleAssignmentSubType
+                    GroupObjectDisplayName    = $GroupObjectDisplayName
+                    GroupObjectId             = $GroupWithRbacAssignment.ObjectId
+                    NestingObjectIds          = $TransitiveMember.NestingObjectIds
+                    NestingObjectDisplayNames = $TransitiveMember.NestingObjectDisplayNames
                 }
                 $AllTransitiveMembers += $Member
             }
@@ -163,21 +182,24 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             if ($RbacAssignmentByNestedGroupMembers.Count -gt 0) {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
                     $TransitiveAssignment = [pscustomobject]@{
-                        RoleAssignmentId              = $RbacAssignmentByGroup.RoleAssignmentId
-                        RoleAssignmentScopeId         = $RbacAssignmentByGroup.RoleAssignmentScopeId
-                        RoleAssignmentScopeName       = $RbacAssignmentByGroup.RoleAssignmentScopeName
-                        RoleAssignmentType            = "Transitive"
-                        RoleAssignmentSubType         = $_.RoleAssignmentSubType
-                        PIMManagedRole                = $RbacAssignmentByGroup.PIMManagedRole
-                        PIMAssignmentType             = $RbacAssignmentByGroup.PIMAssignmentType
-                        RoleDefinitionName            = $RbacAssignmentByGroup.RoleDefinitionName
-                        RoleDefinitionId              = $RbacAssignmentByGroup.RoleDefinitionId
-                        RoleType                      = $RbacAssignmentByGroup.RoleType
-                        RoleIsPrivileged              = $RbacAssignmentByGroup.RoleIsPrivileged
-                        ObjectId                      = $_.Id
-                        ObjectType                    = $_.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
-                        TransitiveByObjectId          = $RbacAssignmentByGroup.ObjectId
-                        TransitiveByObjectDisplayName = $_.GroupObjectDisplayName
+                        RoleAssignmentId                      = $RbacAssignmentByGroup.RoleAssignmentId
+                        RoleAssignmentScopeId                 = $RbacAssignmentByGroup.RoleAssignmentScopeId
+                        RoleAssignmentScopeName               = $RbacAssignmentByGroup.RoleAssignmentScopeName
+                        DirectoryScopeIds                     = $RbacAssignmentByGroup.DirectoryScopeIds
+                        RoleAssignmentType                    = "Transitive"
+                        RoleAssignmentSubType                 = $_.RoleAssignmentSubType
+                        PIMManagedRole                        = $RbacAssignmentByGroup.PIMManagedRole
+                        PIMAssignmentType                     = $RbacAssignmentByGroup.PIMAssignmentType
+                        RoleDefinitionName                    = $RbacAssignmentByGroup.RoleDefinitionName
+                        RoleDefinitionId                      = $RbacAssignmentByGroup.RoleDefinitionId
+                        RoleType                              = $RbacAssignmentByGroup.RoleType
+                        RoleIsPrivileged                      = $RbacAssignmentByGroup.RoleIsPrivileged
+                        ObjectId                              = $_.Id
+                        ObjectType                            = $_.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
+                        TransitiveByObjectId                  = $RbacAssignmentByGroup.ObjectId
+                        TransitiveByObjectDisplayName         = $_.GroupObjectDisplayName
+                        TransitiveByNestingObjectIds          = $_.NestingObjectIds
+                        TransitiveByNestingObjectDisplayNames = $_.NestingObjectDisplayNames
                     }
                     $DeviceMgmtTransitiveRbacAssignments.Add($TransitiveAssignment) | Out-Null
                 }

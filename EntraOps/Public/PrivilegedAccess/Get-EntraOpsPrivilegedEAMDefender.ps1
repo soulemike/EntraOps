@@ -29,10 +29,7 @@ function Get-EntraOpsPrivilegedEamDefender {
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$FolderClassifiedObjects = "$DefaultFolderClassifiedEam"
-        ,
-        [Parameter(Mandatory = $false)]
-        [System.String]$ApplyClassificationByAssignedObjects = $false
-        ,        
+        ,    
         [Parameter(Mandatory = $false)]
         [System.Boolean]$SampleMode = $False
         ,
@@ -123,7 +120,7 @@ function Get-EntraOpsPrivilegedEamDefender {
         }
         # Role actions are defined for scope and role definition contains an action of the role, otherwise all role actions within role assignment scope will be applied
         if ($SampleMode -eq $True) {
-            # Skip cache lookup in SampleMode
+            # Removed redundant warning
         } else {
             # Optimization: Use cache lookup
             if ($DefenderRoleDefinitionsCache.ContainsKey("$($DefenderRbacAssignment.RoleDefinitionId)")) {
@@ -154,10 +151,13 @@ function Get-EntraOpsPrivilegedEamDefender {
             $ClassifiedDefenderMgmtRbacRoleWithActions = $ClassifiedDefenderMgmtRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification = $ClassifiedDefenderMgmtRbacRoleWithActions | ForEach-Object {
                 [PSCustomObject]@{
-                    'AdminTierLevel'     = $_.EAMTierLevelTagValue
-                    'AdminTierLevelName' = $_.EAMTierLevelName
-                    'Service'            = $_.Service
-                    'TaggedBy'           = "JSONwithAction"
+                    'AdminTierLevel'             = $_.EAMTierLevelTagValue
+                    'AdminTierLevelName'         = $_.EAMTierLevelName
+                    'Service'                    = $_.Service
+                    'TaggedBy'                   = "JSONwithAction"
+                    'TaggedByObjectIds'          = $null
+                    'TaggedByObjectDisplayNames' = $null
+                    'TaggedByRoleSystem'         = "Defender"
                 }
             }
 
@@ -196,7 +196,7 @@ function Get-EntraOpsPrivilegedEamDefender {
         $Classification = @()
         $Classification += ($DefenderRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -contains $DefenderRbacAssignment.RoleAssignmentScopeId }).Classification
         $Classification += ($DefenderRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -contains $DefenderRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DefenderRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $DefenderRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DefenderRbacAssignment
     }

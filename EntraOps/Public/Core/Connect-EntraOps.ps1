@@ -43,6 +43,12 @@ function Connect-EntraOps {
         [System.String]$TenantId
         ,
         [Parameter(Mandatory = $False)]
+        [System.String]$ManagingTenantId
+        ,
+        [Parameter(Mandatory = $False)]
+        [System.String]$ManagingTenantName
+        ,
+        [Parameter(Mandatory = $False)]
         [boolean]$MultiTenantRepo = $false
         ,
         [Parameter(Mandatory = $False)]
@@ -101,6 +107,22 @@ Community Project by Thomas Naunheim - www.entraops.com
 
             Write-Host $Splash -ForegroundColor Blue
         }
+
+        #region Load tenant and managing tenant settings from config file if not provided as parameters
+        if ($ConfigFilePath -and (Test-Path $ConfigFilePath)) {
+            $EarlyConfig = Get-Content -Path $ConfigFilePath | ConvertFrom-Json
+            if ([string]::IsNullOrEmpty($TenantId) -and -not [string]::IsNullOrEmpty($EarlyConfig.TenantId)) {
+                $TenantId = $EarlyConfig.TenantId
+            }
+            if ([string]::IsNullOrEmpty($ManagingTenantId) -and -not [string]::IsNullOrEmpty($EarlyConfig.ManagingTenantId)) {
+                $ManagingTenantId = $EarlyConfig.ManagingTenantId
+            }
+            if ([string]::IsNullOrEmpty($ManagingTenantName) -and -not [string]::IsNullOrEmpty($EarlyConfig.ManagingTenantName)) {
+                $ManagingTenantName = $EarlyConfig.ManagingTenantName
+            }
+        }
+        #endregion
+
         #region Switch between Microsoft Graph SDK (Invoke-MgGraphRequest) and Azure PowerShell only in combination with Invoke-RestMethod
         if ($UseInvokeRestMethodOnly -eq $true) {
             New-Variable -Name UseInvokeRestMethodOnly -Value $True -Scope Global -Force
@@ -134,6 +156,7 @@ Community Project by Thomas Naunheim - www.entraops.com
                 "PrivilegedEligibilitySchedule.Read.AzureADGroup",
                 "Policy.Read.All",
                 "RoleManagement.Read.All",
+                "TenantGovernance-Relationship.Read.All",
                 "ThreatHunting.Read.All",
                 "User.Read.All"
             )
@@ -144,6 +167,16 @@ Community Project by Thomas Naunheim - www.entraops.com
         switch ( $AuthenticationType ) {
             UserInteractive {
                 try {
+                    # Pre-authenticate to managing tenant for cross-tenant access
+                    if (-not [string]::IsNullOrEmpty($ManagingTenantId)) {
+                        Write-Output "Pre-authenticating to managing tenant (Azure)..."
+                        Connect-AzAccount -Tenant $ManagingTenantId -ErrorAction Stop | Out-Null
+                        Write-Output "Pre-authenticating to managing tenant (Microsoft Graph) using Az token..."
+                        $SecureManagingAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ManagingTenantId -AsSecureString -ErrorAction Stop).Token
+                        Connect-MgGraph -AccessToken $SecureManagingAccessToken -NoWelcome -ErrorAction Stop
+                        Write-Output "Successfully pre-authenticated to managing tenant $ManagingTenantId"
+                    }
+
                     Write-Output "Logging in to Azure..."
                     Connect-AzAccount -Tenant $TenantName -ErrorAction Stop | Out-Null
                     if ($TenantId -ne (Get-AzContext).Tenant.Id -or $null -eq $TenantId) {
@@ -160,6 +193,16 @@ Community Project by Thomas Naunheim - www.entraops.com
             }
             DeviceAuthentication {
                 try {
+                    # Pre-authenticate to managing tenant for cross-tenant access
+                    if (-not [string]::IsNullOrEmpty($ManagingTenantId)) {
+                        Write-Output "Pre-authenticating to managing tenant (Azure)..."
+                        Connect-AzAccount -Tenant $ManagingTenantId -ErrorAction Stop -UseDeviceAuthentication | Out-Null
+                        Write-Output "Pre-authenticating to managing tenant (Microsoft Graph) using Az token..."
+                        $SecureManagingAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ManagingTenantId -AsSecureString -ErrorAction Stop).Token
+                        Connect-MgGraph -AccessToken $SecureManagingAccessToken -NoWelcome -ErrorAction Stop
+                        Write-Output "Successfully pre-authenticated to managing tenant $ManagingTenantId"
+                    }
+
                     Write-Output "Logging in to Azure..."
                     Connect-AzAccount -Tenant $TenantName -ErrorAction Stop -UseDeviceAuthentication | Out-Null
                     if ($TenantId -ne (Get-AzContext).Tenant.Id -or $null -eq $TenantId) {
@@ -205,7 +248,20 @@ Community Project by Thomas Naunheim - www.entraops.com
                     throw "Federated environment is not already authenticated"
                 }
                 try {
-                    $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
+                    # Pre-authenticate to managing tenant for cross-tenant access
+                    if (-not [string]::IsNullOrEmpty($ManagingTenantId)) {
+                        Write-Output "Pre-authenticating to managing tenant (Microsoft Graph)..."
+                        $SecureManagingAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ManagingTenantId -AsSecureString).Token
+                        Connect-MgGraph -AccessToken $SecureManagingAccessToken -ErrorAction Stop -NoWelcome
+                        Write-Output "Successfully pre-authenticated to managing tenant $ManagingTenantId"
+                    }
+
+                    # Connect to target tenant
+                    if (-not [string]::IsNullOrEmpty($TenantId)) {
+                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $TenantId -AsSecureString).Token
+                    } else {
+                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
+                    }
                     Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
                 } catch {
                     throw $_.Exception
@@ -215,6 +271,18 @@ Community Project by Thomas Naunheim - www.entraops.com
                 # Recommendation 2: Optimize context retrieval to avoid redundant cmdlet calls
                 $CurrentAzContext = Get-AzContext
                 $CurrentMgContext = Get-MgContext
+
+                # Pre-authenticate to managing tenant for cross-tenant access
+                if (-not [string]::IsNullOrEmpty($ManagingTenantId) -and $Null -ne $CurrentAzContext.Tenant.Id) {
+                    try {
+                        Write-Output "Pre-authenticating to managing tenant (Microsoft Graph)..."
+                        $SecureManagingAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ManagingTenantId -AsSecureString).Token
+                        Connect-MgGraph -AccessToken $SecureManagingAccessToken -ErrorAction Stop -NoWelcome
+                        Write-Output "Successfully pre-authenticated to managing tenant $ManagingTenantId"
+                    } catch {
+                        Write-Warning "Failed to pre-authenticate to managing tenant: $($_.Exception.Message)"
+                    }
+                }
 
                 if ($AccountId -and $MsGraphAccessToken -and $AzArmAccessToken) {
                     Connect-AzAccount -AccountId $AccountId -AccessToken $AzArmAccessToken -Tenant $TenantName
@@ -240,6 +308,29 @@ Community Project by Thomas Naunheim - www.entraops.com
                     }
                 } else {
                     Write-Error -Message 'User or workload is not already authenticated. This authentication method is the default for EntraOps. Check "Get-Help Connect-EntraOps" to review the various options. Authenticated Azure PowerShell session is required for using "AlreadyAuthenticated" mode.'
+                }
+            }
+        }
+        #endregion
+
+        #region Verify connection to target tenant
+        if (-not [string]::IsNullOrEmpty($TenantId)) {
+            $VerifyAzContext = Get-AzContext
+            if ($VerifyAzContext -and $VerifyAzContext.Tenant.Id -ne $TenantId) {
+                Write-Output "Azure context is on tenant $($VerifyAzContext.Tenant.Id), switching to target tenant $TenantId..."
+                Set-AzContext -TenantId $TenantId -ErrorAction Stop | Out-Null
+                Write-Output "Successfully switched Azure context to target tenant"
+            }
+
+            $VerifyMgContext = Get-MgContext
+            if ($VerifyMgContext -and $VerifyMgContext.TenantId -ne $TenantId) {
+                Write-Output "Microsoft Graph is connected to $($VerifyMgContext.TenantId), reconnecting to target tenant $TenantId..."
+                try {
+                    $SecureTargetAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $TenantId -AsSecureString).Token
+                    Connect-MgGraph -AccessToken $SecureTargetAccessToken -ErrorAction Stop -NoWelcome
+                    Write-Output "Successfully reconnected Microsoft Graph to target tenant"
+                } catch {
+                    Write-Warning "Could not reconnect Microsoft Graph to target tenant ${TenantId}: $($_.Exception.Message)"
                 }
             }
         }
@@ -287,7 +378,10 @@ Community Project by Thomas Naunheim - www.entraops.com
         #region Set global variables
         New-Variable -Name TenantIdContext -Value $TenantId -Scope Global -Force
         New-Variable -Name TenantNameContext -Value $TenantName -Scope Global -Force
+        New-Variable -Name ManagingTenantIdContext -Value $ManagingTenantId -Scope Global -Force
+        New-Variable -Name ManagingTenantNameContext -Value $ManagingTenantName -Scope Global -Force
         New-Variable -Name XdrAvdHuntingAccess -Value ((Get-MgContext).Scopes -contains "ThreatHunting.Read.All") -Scope Global -Force
+        $__EntraOpsSession['AuthenticationType'] = $AuthenticationType
         if ($MultiTenantRepo -eq $true) {
             New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/$($TenantName)/" -Scope Global -Force
             New-Variable -Name DefaultFolderClassifiedEam -Value "$EntraOpsBaseFolder/PrivilegedEAM/$($TenantName)/" -Scope Global -Force
@@ -307,6 +401,12 @@ Community Project by Thomas Naunheim - www.entraops.com
             Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
             
             Write-Host "  Authentication Type : $AuthenticationType" -ForegroundColor White
+
+            # Display managing tenant info if configured
+            if (-not [string]::IsNullOrEmpty($ManagingTenantId)) {
+                Write-Host "  Managing Tenant ID  : $ManagingTenantId" -ForegroundColor White
+                Write-Host "  Managing Tenant Name: $ManagingTenantName" -ForegroundColor White
+            }
 
             # Get Azure context
             $AzContext = Get-AzContext -ErrorAction SilentlyContinue

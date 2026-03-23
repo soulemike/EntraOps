@@ -143,21 +143,24 @@ function Get-EntraOpsPrivilegedDefenderRoles {
 
                     $RoleAssignmentScopeName | foreach-object {
                         [pscustomobject]@{
-                            RoleAssignmentId              = $DefenderPrincipalRoleAssignment.Id
-                            RoleAssignmentScopeId         = $directoryScopeId
-                            RoleAssignmentScopeName       = $_
-                            RoleAssignmentType            = "Direct"
-                            RoleAssignmentSubType         = ""
-                            PIMManagedRole                = $False
-                            PIMAssignmentType             = "Permanent"
-                            RoleDefinitionName            = $Role.displayName
-                            RoleDefinitionId              = $Role.id
-                            RoleType                      = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
-                            RoleIsPrivileged              = $Role.isPrivileged
-                            ObjectId                      = $Principal
-                            ObjectType                    = $ObjectType
-                            TransitiveByObjectId          = ""
-                            TransitiveByObjectDisplayName = ""
+                            RoleAssignmentId                      = $DefenderPrincipalRoleAssignment.Id
+                            RoleAssignmentScopeId                 = $directoryScopeId
+                            RoleAssignmentScopeName               = $_
+                            RoleAssignmentType                    = "Direct"
+                            RoleAssignmentSubType                 = ""
+                            PIMManagedRole                        = $False
+                            PIMAssignmentType                     = "Permanent"
+                            RoleDefinitionName                    = $Role.displayName
+                            RoleDefinitionId                      = $Role.id
+                            RoleType                              = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
+                            RoleIsPrivileged                      = $Role.isPrivileged
+                            ObjectId                              = $Principal
+                            ObjectTenantId                        = $TenantId                            
+                            ObjectType                            = $ObjectType
+                            TransitiveByObjectId                  = ""
+                            TransitiveByObjectDisplayName         = ""
+                            TransitiveByNestingObjectIds          = $null
+                            TransitiveByNestingObjectDisplayNames = $null
                         }
                     }
                 }
@@ -186,12 +189,14 @@ function Get-EntraOpsPrivilegedDefenderRoles {
             $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName            = $TransitiveMember.displayName
-                    id                     = $TransitiveMember.id
-                    '@odata.type'          = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
-                    GroupObjectDisplayName = $GroupObjectDisplayName
-                    GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                    displayName               = $TransitiveMember.displayName
+                    id                        = $TransitiveMember.id
+                    '@odata.type'             = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType     = $TransitiveMember.RoleAssignmentSubType
+                    GroupObjectDisplayName    = $GroupObjectDisplayName
+                    GroupObjectId             = $GroupWithRbacAssignment.ObjectId
+                    NestingObjectIds          = $TransitiveMember.NestingObjectIds
+                    NestingObjectDisplayNames = $TransitiveMember.NestingObjectDisplayNames
                 }
                 $AllTransitiveMembers += $Member
             }
@@ -205,21 +210,23 @@ function Get-EntraOpsPrivilegedDefenderRoles {
             if ($RbacAssignmentByNestedGroupMembers.Count -gt 0) {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
                     $TransitiveAssignment = [pscustomobject]@{
-                        RoleAssignmentId              = $RbacAssignmentByGroup.RoleAssignmentId
-                        RoleAssignmentScopeId         = $RbacAssignmentByGroup.RoleAssignmentScopeId
-                        RoleAssignmentScopeName       = $RbacAssignmentByGroup.RoleAssignmentScopeName
-                        RoleAssignmentType            = "Transitive"
-                        RoleAssignmentSubType         = $_.RoleAssignmentSubType
-                        PIMManagedRole                = $RbacAssignmentByGroup.PIMManagedRole
-                        PIMAssignmentType             = $RbacAssignmentByGroup.PIMAssignmentType
-                        RoleDefinitionName            = $RbacAssignmentByGroup.RoleDefinitionName
-                        RoleDefinitionId              = $RbacAssignmentByGroup.RoleDefinitionId
-                        RoleType                      = $RbacAssignmentByGroup.RoleType
-                        RoleIsPrivileged              = $RbacAssignmentByGroup.RoleIsPrivileged
-                        ObjectId                      = $_.Id
-                        ObjectType                    = $_.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
-                        TransitiveByObjectId          = $RbacAssignmentByGroup.ObjectId
-                        TransitiveByObjectDisplayName = $_.GroupObjectDisplayName
+                        RoleAssignmentId                      = $RbacAssignmentByGroup.RoleAssignmentId
+                        RoleAssignmentScopeId                 = $RbacAssignmentByGroup.RoleAssignmentScopeId
+                        RoleAssignmentScopeName               = $RbacAssignmentByGroup.RoleAssignmentScopeName
+                        RoleAssignmentType                    = "Transitive"
+                        RoleAssignmentSubType                 = $_.RoleAssignmentSubType
+                        PIMManagedRole                        = $RbacAssignmentByGroup.PIMManagedRole
+                        PIMAssignmentType                     = $RbacAssignmentByGroup.PIMAssignmentType
+                        RoleDefinitionName                    = $RbacAssignmentByGroup.RoleDefinitionName
+                        RoleDefinitionId                      = $RbacAssignmentByGroup.RoleDefinitionId
+                        RoleType                              = $RbacAssignmentByGroup.RoleType
+                        RoleIsPrivileged                      = $RbacAssignmentByGroup.RoleIsPrivileged
+                        ObjectId                              = $_.Id
+                        ObjectType                            = $_.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
+                        TransitiveByObjectId                  = $RbacAssignmentByGroup.ObjectId
+                        TransitiveByObjectDisplayName         = $_.GroupObjectDisplayName
+                        TransitiveByNestingObjectIds          = $_.NestingObjectIds
+                        TransitiveByNestingObjectDisplayNames = $_.NestingObjectDisplayNames
                     }
                     $DefenderTransitiveRbacAssignments.Add($TransitiveAssignment) | Out-Null
                 }

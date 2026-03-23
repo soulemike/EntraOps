@@ -111,21 +111,24 @@ function Get-EntraOpsPrivilegedAppRoles {
                 }
 
                 $AllAssignments += [pscustomobject]@{
-                    RoleAssignmentId              = $AppRole.Id
-                    RoleAssignmentScopeId         = $AppRole.resourceId
-                    RoleAssignmentScopeName       = $ResourceName
-                    RoleAssignmentType            = "Direct"
-                    PIMManagedRole                = $False
-                    PIMAssignmentType             = "Permanent"
-                    RoleDefinitionName            = $RoleName
-                    RoleDefinitionId              = $AppRole.appRoleId
-                    RoleType                      = "Application"
-                    RoleIsPrivileged              = ""
-                    Classification                = $null
-                    ObjectId                      = $Sp.Id
-                    ObjectType                    = if ($Sp.principalType) { $Sp.principalType.ToLower() } else { "serviceprincipal" }
-                    TransitiveByObjectId          = $null
-                    TransitiveByObjectDisplayName = $null
+                    RoleAssignmentId                      = $AppRole.Id
+                    RoleAssignmentScopeId                 = $AppRole.resourceId
+                    RoleAssignmentScopeName               = $ResourceName
+                    RoleAssignmentType                    = "Direct"
+                    PIMManagedRole                        = $False
+                    PIMAssignmentType                     = "Permanent"
+                    RoleDefinitionName                    = $RoleName
+                    RoleDefinitionId                      = $AppRole.appRoleId
+                    RoleType                              = "Application"
+                    RoleIsPrivileged                      = ""
+                    Classification                        = $null
+                    ObjectId                              = $Sp.Id
+                    ObjectTenantId                        = $TenantId
+                    ObjectType                            = if ($Sp.principalType) { $Sp.principalType.ToLower() } else { "serviceprincipal" }
+                    TransitiveByObjectId                  = $null
+                    TransitiveByObjectDisplayName         = $null
+                    TransitiveByNestingObjectIds          = $null
+                    TransitiveByNestingObjectDisplayNames = $null
                 }
             }
         }
@@ -175,21 +178,23 @@ function Get-EntraOpsPrivilegedAppRoles {
                     }
 
                     $AllAssignments += [pscustomobject]@{
-                        RoleAssignmentId              = $Grant.Id
-                        RoleAssignmentScopeId         = $Grant.resourceId
-                        RoleAssignmentScopeName       = if ($ResourceMeta) { $ResourceMeta.DisplayName } else { $null }
-                        RoleAssignmentType            = "Direct"
-                        PIMManagedRole                = $False
-                        PIMAssignmentType             = "Permanent"
-                        RoleDefinitionName            = $Scope
-                        RoleDefinitionId              = $ScopeId
-                        RoleType                      = "Delegated"
-                        RoleIsPrivileged              = ""
-                        Classification                = $null
-                        ObjectId                      = $Grant.clientId
-                        ObjectType                    = "serviceprincipal"
-                        TransitiveByObjectId          = $null
-                        TransitiveByObjectDisplayName = $null
+                        RoleAssignmentId                      = $Grant.Id
+                        RoleAssignmentScopeId                 = $Grant.resourceId
+                        RoleAssignmentScopeName               = if ($ResourceMeta) { $ResourceMeta.DisplayName } else { $null }
+                        RoleAssignmentType                    = "Direct"
+                        PIMManagedRole                        = $False
+                        PIMAssignmentType                     = "Permanent"
+                        RoleDefinitionName                    = $Scope
+                        RoleDefinitionId                      = $ScopeId
+                        RoleType                              = "Delegated"
+                        RoleIsPrivileged                      = ""
+                        Classification                        = $null
+                        ObjectId                              = $Grant.clientId
+                        ObjectType                            = "serviceprincipal"
+                        TransitiveByObjectId                  = $null
+                        TransitiveByObjectDisplayName         = $null
+                        TransitiveByNestingObjectIds          = $null
+                        TransitiveByNestingObjectDisplayNames = $null
                     }
                 }
             }

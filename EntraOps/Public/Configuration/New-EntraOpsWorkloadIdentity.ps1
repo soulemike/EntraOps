@@ -151,7 +151,8 @@ function New-EntraOpsWorkloadIdentity {
         "PrivilegedAccess.Read.AzureADGroup",
         "PrivilegedEligibilitySchedule.Read.AzureADGroup",
         "Policy.Read.All",
-        "RoleManagement.Read.All",    
+        "RoleManagement.Read.All",  
+        "TenantGovernance-Relationship.Read.All",  
         "ThreatHunting.Read.All",
         "User.Read.All"
     )
