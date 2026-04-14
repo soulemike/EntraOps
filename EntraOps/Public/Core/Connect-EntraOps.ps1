@@ -11,15 +11,15 @@
 
 .EXAMPLE
     Using Interactive Sign-In of User with double authentication to Az PowerShell (Connect-AzAccount) and Microsoft Graph SDK (Connect-MgGraph)
-    Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "cloudlab.onmicrosoft.com"
+    Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 
 .EXAMPLE
     Using authenticated session to Az PowerShell (Connect-AzAccount) in GitHub workflow or any other workload identity environment to request access token for Microsoft Graph SDK (by Get-AzAccessToken) without any further initial authentication.
-    Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "cloudlab.onmicrosoft.com"
+    Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso.onmicrosoft.com"
 
 .EXAMPLE
     Using Managed Identity (User Assigned) to sign-in to Azure and Microsoft Graph
-    Connect-EntraOps -AuthenticationType "UserAssignedMSI" -AccountId "b8c2f9d2-9886-4981-b9c2-e8e3726a871d" -TenantName "cloudlab.onmicrosoft.com"
+    Connect-EntraOps -AuthenticationType "UserAssignedMSI" -AccountId "b8c2f9d2-9886-4981-b9c2-e8e3726a871d" -TenantName "contoso.onmicrosoft.com"
 #>
 function Connect-EntraOps {
     [cmdletbinding()]
@@ -28,6 +28,10 @@ function Connect-EntraOps {
         [ValidateSet('UserInteractive', 'SystemAssignedMSI', 'UserAssignedMSI', 'FederatedCredentials', 'AlreadyAuthenticated', 'DeviceAuthentication')]
         [System.String]$AuthenticationType = "AlreadyAuthenticated"
         ,
+        [Parameter(Mandatory = $False)]
+        [ValidateSet("Report", "Automation")]
+        [System.String]$Scope = "Report"
+        ,        
         [Parameter(Mandatory = $False)]
         [ValidateSet("beta", "v1.0")]
         [System.String]$GraphApiVersion = "beta"
@@ -129,17 +133,6 @@ Community Project by Thomas Naunheim - www.entraops.com
         } else {
             New-Variable -Name UseInvokeRestMethodOnly -Value $False -Scope Global -Force        
 
-            $RequiredCoreModules = @{
-                ModuleName    = 'Microsoft.Graph.Authentication'
-                ModuleVersion = '2.0.0'
-            }
-            # Recommendation 1: Validate module availability before installation check
-            $RequiredCoreModules | ForEach-Object {
-                if (-not (Get-Module -Name $_.ModuleName)) {
-                    Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion
-                }
-            }
-
             $Scopes = @(
                 "AdministrativeUnit.Read.All",
                 "Application.Read.All",
@@ -160,6 +153,34 @@ Community Project by Thomas Naunheim - www.entraops.com
                 "ThreatHunting.Read.All",
                 "User.Read.All"
             )
+
+            if ($Scope -eq "Report") {
+                $RequiredCoreModules = @(
+                    [PSCustomObject]@{ ModuleName = 'Microsoft.Graph.Authentication'; ModuleVersion = '2.0.0' }
+                )
+            } elseif ($Scope -eq "Automation") {
+                $RequiredCoreModules = @(
+                    [PSCustomObject]@{ ModuleName = 'Microsoft.Graph.Authentication'; ModuleVersion = '2.0.0' },
+                    [PSCustomObject]@{ ModuleName = 'Az.Accounts'; ModuleVersion = '2.8.0' },
+                    [PSCustomObject]@{ ModuleName = 'Az.Resources'; ModuleVersion = '6.5.0' }
+                ) 
+                $MgGraphScopesServiceEM = @(
+                    "Directory.AccessAsUser.All",
+                    "EntitlementManagement.ReadWrite.All",
+                    "RoleManagementPolicy.ReadWrite.AzureADGroup",
+                    "RoleManagementPolicy.ReadWrite.Directory",
+                    "RoleManagement.ReadWrite.Directory",
+                    "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+                    "PrivilegedAccess.ReadWrite.AzureADGroup"
+                )
+                $MgGraphScopes += $MgGraphScopesServiceEM         
+            } else {
+                throw "Scope $($Scope) is not supported. Valid options are 'Report' and 'Automation'."
+            }
+
+
+            $RequiredCoreModules | ForEach-Object { Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion }        
+
         }
         #endregion
 

@@ -197,9 +197,65 @@ function New-EntraOpsConfigFile {
         CustomSecurityAttributes                      = [ordered]@{
             PrivilegedUserAttribute             = "privilegedUser"
             PrivilegedUserPawAttribute          = "associatedSecureAdminWorkstation"
-            PrivilegedServicePrincipalAttribute = "privilegedWorkloadIdentitiy"            
+            PrivilegedServicePrincipalAttribute = "privilegedWorkloadIdentitiy"
             UserWorkAccountAttribute            = "associatedWorkAccount"
-        }        
+        }
+        ServiceEM                                     = [ordered]@{
+            GovernanceModel                  = "Centralized"
+            ControlPlaneDelegationGroupId    = ""
+            ControlPlaneGroupName            = "PRG-Tenant-ControlPlane-IdentityOps"
+            ManagementPlaneDelegationGroupId = ""
+            ManagementPlaneGroupName         = "PRG-Tenant-ManagementPlane-PlatformOps"
+            AdministratorGroupId             = ""
+            ConstrainedDelegation            = [ordered]@{
+                ManagementPlane = [ordered]@{
+                    ExcludedRoleDefinitionIds   = @(
+                        "8e3af657-a8ff-443c-a75c-2fe8c4bcb635"  # Owner
+                        "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9"  # User Access Administrator
+                        "f58310d9-a9f6-439a-9e8d-f62e7b41a168"  # Role Based Access Control Administrator
+                    )
+                    AllowedTargetGroupFilter    = "WorkloadPlane-Admins"
+                }
+                WorkloadPlane   = [ordered]@{
+                    AllowedRoleDefinitionIds    = @(
+                        # Key Vault roles
+                        "00482a5a-887f-4fb3-b363-3b7fe8e74483"  # Key Vault Administrator
+                        "a4417e6f-fecd-4de8-b567-7b0420556985"  # Key Vault Certificates Officer
+                        "14b46e9e-c2b7-41b4-b07b-48a6ebf60603"  # Key Vault Crypto Officer
+                        "12338af0-0e69-4776-bea7-57ae8d297424"  # Key Vault Crypto User
+                        "21090545-7ca7-4776-b22c-e363652d74d2"  # Key Vault Reader
+                        "b86a8fe4-44ce-4948-aee5-eccb2c155cd7"  # Key Vault Secrets Officer
+                        "4633458b-17de-408a-b874-0445c86b69e6"  # Key Vault Secrets User
+                        # Storage roles
+                        "ba92f5b4-2d11-453d-a403-e96b0029c9fe"  # Storage Blob Data Contributor
+                        "b7e6dc6d-f1e8-4753-8033-0f276bb0955b"  # Storage Blob Data Owner
+                        "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"  # Storage Blob Data Reader
+                        "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"  # Storage Table Data Contributor
+                        "76199698-9eea-4c19-bc75-cec21354c6b6"  # Storage Table Data Reader
+                        "974c5e8b-45b9-4653-ba55-5f855dd0fb88"  # Storage Queue Data Contributor
+                        "19e7f393-937e-4f77-808e-94535e297925"  # Storage Queue Data Reader
+                        "8a0f0c08-91a1-4084-bc3d-661d67233fed"  # Storage Queue Data Message Processor
+                        "c6a89b2d-59bc-44d0-9896-0f6e12d7b80a"  # Storage Queue Data Message Sender
+                    )
+                    AllowedTargetGroupFilter    = "WorkloadPlane-Users"
+                }
+            }
+            PIMAuthenticationContext         = [ordered]@{
+                EnableAuthenticationContext = $false
+                ControlPlane                = [ordered]@{
+                    AuthenticationContextClassReferenceId = ""
+                    AuthenticationContextDisplayName      = ""
+                }
+                ManagementPlane             = [ordered]@{
+                    AuthenticationContextClassReferenceId = ""
+                    AuthenticationContextDisplayName      = ""
+                }
+                WorkloadPlane               = [ordered]@{
+                    AuthenticationContextClassReferenceId = ""
+                    AuthenticationContextDisplayName      = ""
+                }
+            }
+        }
     }
     #endregion
 

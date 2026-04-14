@@ -3,6 +3,10 @@
 - [EntraOps (Privileged EAM) - Management and Monitoring of Enterprise Access Model](#entraops-privileged-eam---management-and-monitoring-of-enterprise-access-model)
   - [Introduction](#introduction)
   - [Key features](#key-features)
+  - [ServiceEM - Service-scoped Landing Zones](#serviceem---service-scoped-landing-zones)
+    - [Key Capabilities](#key-capabilities)
+    - [Governance Models](#governance-models)
+    - [Documentation](#documentation)
   - [Videos and demos of EntraOps Privileged EAM](#videos-and-demos-of-entraops-privileged-eam)
   - [Quick starts](#quick-starts)
   - [Executing EntraOps interactively](#executing-entraops-interactively)
@@ -70,6 +74,30 @@ Currently the following RBAC systems are supported:
 - 🖥️ Microsoft Intune
 
 EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline and any automation/worker environment which supports PowerShell Core. The automation to create a pipeline supports GitHub only yet.
+
+## ServiceEM - Service-scoped Landing Zones
+
+**ServiceEM** is a submodule of EntraOps (developed in collaboration with **Michael Soule**) that enables automated provisioning and management of tiered, service-scoped landing zones aligned with Microsoft's Enterprise Access Model. ServiceEM provides a complete solution for delegated administration with least-privilege access across Azure and Entra ID.
+
+### Key Capabilities
+
+- **🏗️ Tiered Landing Zones**: Automatically provisions Azure resource groups with ControlPlane, ManagementPlane, and WorkloadPlane security groups following Enterprise Access Model principles
+- **🔐 Constrained Delegation**: ABAC-based role assignment conditions limit which roles can be assigned and to which principals (e.g., ManagementPlane admins cannot assign Owner/UAA roles)
+- **⏱️ PIM Integration**: Configures PIM for Groups policies with optional tier-specific authentication contexts for role activations
+- **📦 Access Packages**: Automates Entra ID Governance access package creation for self-service group membership with approval workflows
+- **🎯 Smart Provisioning**: Detects inherited role assignments to prevent redundant grants; creates role-assignable groups with automated naming conventions
+- **⚙️ Configuration-driven**: All settings including constrained delegation rules, authentication contexts, and role IDs configurable via `EntraOpsConfig.json`
+
+### Governance Models
+
+ServiceEM supports two governance approaches:
+
+- **Centralized**: Tenant-wide delegation groups (e.g., `PRG-Tenant-ControlPlane-IdentityOps`) for ControlPlane and ManagementPlane tiers
+- **Delegated**: Service-specific groups with isolated permissions per service landing zone
+
+### Documentation
+
+For complete setup instructions, configuration options, constrained delegation rules, PIM authentication context setup, and troubleshooting, see **[ServiceEM.md](ServiceEM.md)**.
 
 ## Videos and demos of EntraOps Privileged EAM
 

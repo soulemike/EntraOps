@@ -1,6 +1,17 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [Unreleased]
+### Added
+- **ServiceEM - Service-scoped Landing Zones for Enterprise Access Model**: New submodule (developed in collaboration with **Michael Soule**) for creating and managing tiered, service-scoped landing zones aligned with Microsoft's Enterprise Access Model. ServiceEM automates the provisioning of Azure resource groups, Entra ID security groups (role-assignable), PIM for Groups policies, Entra Identity Governance access packages, and Azure RBAC assignments with constrained delegation at ControlPlane, ManagementPlane, and WorkloadPlane tiers. Enables delegated administration with least-privilege access through ABAC conditions, automated group lifecycle management, and optional PIM authentication context enforcement. See [ServiceEM.md](ServiceEM.md) for complete documentation, configuration options, and examples.
+  - **Constrained Delegation**: Configurable role-based access controls with ABAC conditions limiting which roles can be assigned and to which principals (e.g., ManagementPlane can assign any role except Owner/UAA to WorkloadPlane-Admins; WorkloadPlane can assign only Key Vault/Storage data-plane roles to WorkloadPlane-Users)
+  - **PIM Authentication Context**: Optional tier-specific Conditional Access authentication contexts for PIM role activations (disabled by default; when disabled, enforces MFA + Business Justification)
+  - **Automated Group Provisioning**: Creates and manages role-assignable groups for each service and tier with automated naming conventions
+  - **Access Package Integration**: Configures Entra ID Governance access packages for self-service group membership with approval workflows
+  - **Centralized and Delegated Governance Models**: Supports tenant-wide delegation groups or service-specific isolation
+  - **Azure Landing Zones**: Automated resource group creation with PIM-eligible role assignments and inheritance detection to prevent redundant assignments
+  - **Configuration-driven**: All settings including role IDs, delegation rules, and authentication contexts configurable via `EntraOpsConfig.json` with inline role name comments for readability
+
 ## [0.7.0] - 2026-03-25
 ### Added
 - **Tenant Governance Relationship support**: `Get-EntraOpsPrivilegedEntraIdRoles` now fetches active governance relationships from `/beta/directory/tenantGovernance/governanceRelationships` and processes delegated admin role assignments (`policySnapshot.delegatedAdministrationRoleAssignments`) from managing tenants (Tenant Governance Relationship).
@@ -34,6 +45,12 @@ All essential changes on EntraOps will be documented in this changelog.
 
 ### Removed
 - Capabilities to classify by "AssignedDeviceObjects" (optional parameter: ApplyClassificationByAssignedObjects), use `Update-EntraOpsClassificationControlPlaneScope` to identify scope of devices by Control and Management Plane users
+
+### Security
+- **`Save-EntraOpsPrivilegedEAMWatchLists`**: Added path boundary validation for `ImportPath` parameter — the resolved path is now checked against `$EntraOpsBaseFolder` to prevent path traversal attacks that could read arbitrary files and exfiltrate data to Sentinel WatchLists
+- **`Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists`**: Applied the same `ImportPath` path boundary validation
+- **`Update-EntraOps`**: PAT is no longer embedded in the `git clone` URL (visible in process listings, error messages, and logs); credentials are now passed via `GIT_CONFIG` environment variables with HTTP `extraheader`, and cleaned up in a `finally` block (ZVE-2026-DE86DC)
+- **`Save-EntraOpsEAMRbacSystemJson`**: Added validation of `ObjectType` and `ObjectId` against path traversal characters before constructing file paths; added a final resolved-path check in the parallel write block to ensure output stays within the export directory
 
 ### Fixed
 - Fixed a bug in `Update-EntraOpsPrivilegedAdministrativeUnit` where role-assignable groups and PIM for Groups enabled groups could be added to Restricted Management Administrative Units (RMAU), which is not supported
