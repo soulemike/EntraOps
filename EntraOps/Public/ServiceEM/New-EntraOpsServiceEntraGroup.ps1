@@ -148,6 +148,15 @@ function New-EntraOpsServiceEntraGroup {
     process {
         Write-Verbose "$logPrefix Processing $(($ServiceRoles|Measure-Object).Count) Groups"
         foreach($ServiceRole in $ServiceRoles){
+            # Issue 4.2: Validate and sanitize parameters
+            $validationErrors = @()
+            
+            # Validate ServiceRole properties
+            if ([string]::IsNullOrWhiteSpace($ServiceRole.Name)) {
+                $validationErrors += "ServiceRole.Name is required"
+            }
+            
+            # Construct names
             $unifiedParams.Description = "Team $(($ServiceRole.accessLevel +" "+ $ServiceRole.name).trim()) supporting $ServiceName"
             $unifiedParams.DisplayName = "$ServiceName $($ServiceRole.Name)"
             $unifiedParams.MailNickname = "$ServiceName.$($ServiceRole.Name)"
@@ -159,6 +168,46 @@ function New-EntraOpsServiceEntraGroup {
                 $secParams.DisplayName = "$GroupPrefix$($GroupNamingDelimiter)$ServiceName$($GroupNamingDelimiter)$($ServiceRole.accessLevel)$($GroupNamingDelimiter)$($ServiceRole.Name)"
                 $secParams.MailNickname = "$ServiceName.$($ServiceRole.accessLevel).$($ServiceRole.Name)"
             }
+            
+            # Validate displayName length (max 256 chars)
+            if ($secParams.DisplayName.Length -gt 256) {
+                $validationErrors += "DisplayName '$($secParams.DisplayName)' exceeds maximum length of 256 characters (current: $($secParams.DisplayName.Length))"
+            }
+            if ($unifiedParams.DisplayName.Length -gt 256) {
+                $validationErrors += "DisplayName '$($unifiedParams.DisplayName)' exceeds maximum length of 256 characters (current: $($unifiedParams.DisplayName.Length))"
+            }
+            
+            # Validate mailNickname length (max 64 chars) and format
+            $mailNicknamePattern = '^[a-zA-Z0-9_.-]+$'
+            if ($secParams.MailNickname.Length -gt 64) {
+                $validationErrors += "MailNickname '$($secParams.MailNickname)' exceeds maximum length of 64 characters (current: $($secParams.MailNickname.Length))"
+            }
+            if ($secParams.MailNickname -notmatch $mailNicknamePattern) {
+                $validationErrors += "MailNickname '$($secParams.MailNickname)' contains invalid characters. Only alphanumeric, underscore, dot, and hyphen allowed."
+            }
+            if ($unifiedParams.MailNickname.Length -gt 64) {
+                $validationErrors += "MailNickname '$($unifiedParams.MailNickname)' exceeds maximum length of 64 characters (current: $($unifiedParams.MailNickname.Length))"
+            }
+            if ($unifiedParams.MailNickname -notmatch $mailNicknamePattern) {
+                $validationErrors += "MailNickname '$($unifiedParams.MailNickname)' contains invalid characters. Only alphanumeric, underscore, dot, and hyphen allowed."
+            }
+            
+            # Check for duplicate mailNickname in current batch
+            $currentNicknames = $groups | ForEach-Object { $_.MailNickname }
+            if ($currentNicknames -contains $secParams.MailNickname) {
+                $validationErrors += "MailNickname '$($secParams.MailNickname)' is already used by another group in this deployment"
+            }
+            if ($currentNicknames -contains $unifiedParams.MailNickname) {
+                $validationErrors += "MailNickname '$($unifiedParams.MailNickname)' is already used by another group in this deployment"
+            }
+            
+            # Throw if validation errors found
+            if ($validationErrors.Count -gt 0) {
+                throw "VALIDATION FAILED for ServiceRole '$($ServiceRole.Name)':`n  - $($validationErrors -join "`n  - ")"
+            }
+            
+            # Issue 4.2: Log payload for debugging
+            Write-Verbose "$logPrefix Validated group parameters for '$($ServiceRole.Name)''
             try{
                 if($ServiceRole.groupType -eq "Unified" -and $groups.MailNickname -notcontains $unifiedParams.MailNickname){
                     Write-Verbose "$logPrefix $($unifiedParams|ConvertTo-Json -Compress)"

@@ -27,31 +27,84 @@ ServiceEM creates and manages:
 
 ### Prerequisites
 
+#### Required (All Deployments)
+
 1. **PowerShell 7+** with the following modules installed:
    ```powershell
    Install-Module Microsoft.Graph -Scope CurrentUser
    Install-Module Az -Scope CurrentUser
    ```
 
-2. **EntraOpsConfig.json** created in your workspace:
+2. **EntraOps PowerShell Module** imported:
    ```powershell
-   New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com"
+   Import-Module ./EntraOps
    ```
 
 3. **Connected sessions** to both Microsoft Graph and Azure:
    ```powershell
-   Connect-MgGraph -Scopes "Group.ReadWrite.All","EntitlementManagement.ReadWrite.All","RoleManagement.ReadWrite.Directory"
+   Connect-MgGraph -Scopes "Group.ReadWrite.All","EntitlementManagement.ReadWrite.All"
    Connect-AzAccount
    ```
 
-4. **(Optional) Persona groups** if using Centralized governance:
-   - Create IdentityOps group for ControlPlane delegation
-   - Create PlatformOps group for ManagementPlane delegation
-   - Add their ObjectIds to `EntraOpsConfig.json` (see [Centralized Governance Model](#centralized-governance-model-default))
+#### Required for PerService Model (Default)
+
+The **PerService** governance model is the default and requires **no pre-existing groups**:
+- All admin groups are created automatically per service
+- Works out-of-the-box with minimal permissions
+- Recommended for most use cases
+
+#### Required for Centralized Model (Optional)
+
+The **Centralized** governance model requires pre-existing delegation groups:
+
+1. **Create persona groups** (one-time setup):
+   ```powershell
+   # Example: Create ControlPlane delegation group
+   $controlPlaneGroup = New-MgGroup `
+       -DisplayName "PRG-Tenant-ControlPlane-IdentityOps" `
+       -MailNickname "PRGControlPlane" `
+       -SecurityEnabled `
+       -IsAssignableToRole `
+       -MailEnabled:$false
+   
+   # Example: Create ManagementPlane delegation group
+   $managementPlaneGroup = New-MgGroup `
+       -DisplayName "PRG-Tenant-ManagementPlane-PlatformOps" `
+       -MailNickname "PRGManagementPlane" `
+       -SecurityEnabled `
+       -IsAssignableToRole `
+       -MailEnabled:$false
+   ```
+
+2. **Add group IDs to EntraOpsConfig.json**:
+   ```json
+   {
+     "ServiceEM": {
+       "GovernanceModel": "Centralized",
+       "ControlPlaneDelegationGroupId": "<control-plane-group-id>",
+       "ManagementPlaneDelegationGroupId": "<management-plane-group-id>"
+     }
+   }
+   ```
+
+3. **Alternative: Auto-create with elevated permissions**:
+   - Grant `RoleManagement.ReadWrite.Directory` permission
+   - ServiceEM will auto-create groups if they don't exist
+   - Groups will be persisted to EntraOpsConfig.json
+
+#### Governance Model Comparison
+
+| Feature | PerService (Default) | Centralized |
+|---------|---------------------|-------------|
+| **Pre-existing groups** | ❌ Not required | ✅ Required |
+| **Permissions needed** | Group.ReadWrite.All | + RoleManagement.ReadWrite.Directory |
+| **Group count** | More (per service) | Fewer (shared) |
+| **Use case** | 5-10 services, dev/test | 50+ services, production |
+| **Isolation** | Higher (dedicated admins) | Lower (shared admins) |
 
 ### Basic Landing Zone Deployment
 
-**Simple deployment with defaults:**
+**Simple deployment with defaults (PerService model - no pre-existing groups required):**
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyFirstApp" `
@@ -64,7 +117,18 @@ New-EntraOpsSubscriptionLandingZone `
 **What gets created:**
 - **Sub scope**: Subscription-level groups, catalog, access packages, PIM policies
 - **Rg scope**: Resource group `RG-Rg-MyFirstApp` with tier-specific groups and RBAC
-- **Governance**: Centralized model (if delegation groups configured) or PerService (if not)
+- **Governance**: PerService model (creates per-service admin groups automatically)
+
+**Explicit Centralized deployment (requires pre-existing groups):**
+```powershell
+New-EntraOpsSubscriptionLandingZone `
+    -DeploymentPrefix "MyFirstApp" `
+    -AzureRegion "westeurope" `
+    -ServiceOwner "alice@contoso.com" `
+    -ServiceMembers @("bob@contoso.com") `
+    -GovernanceModel "Centralized" `
+    -Verbose
+```
 
 ### Understanding Verbose Output
 
