@@ -25,7 +25,9 @@
     flat structure without the Sub/Rg distinction.
 
     Delegation and governance model behaviour:
-    - When GovernanceModel = "Centralized" (default), ControlPlane-Admins and
+    - When GovernanceModel = "PerService" (default), per-service groups are created
+      for ControlPlane-Admins and ManagementPlane-Admins.
+    - When GovernanceModel = "Centralized", ControlPlane-Admins and
       ManagementPlane-Admins are resolved to tenant-wide shared groups via
       Resolve-EntraOpsServiceEMDelegationGroup for both Sub and Rg scopes.
     - Delegation group IDs are read from EntraOpsConfig.ServiceEM when not
@@ -75,6 +77,19 @@
     ManagementPlaneDelegationGroupId is provided or when GovernanceModel is
     Centralized.
 
+.PARAMETER GovernanceModel
+    Governance model for the landing zone deployment. Valid values: "Centralized", "PerService".
+    
+    Centralized: Uses tenant-wide delegation groups (ControlPlane-Admins and 
+    ManagementPlane-Admins) that are shared across all landing zones. Requires
+    pre-existing groups or permissions to create them.
+    
+    PerService: Creates per-service admin groups for each landing zone. No
+    pre-existing groups required. This is the default for simple deployments.
+    
+    Defaults to "PerService" unless overridden in EntraOpsConfig.json or via
+    this parameter.
+
 .PARAMETER ControlPlaneDelegationGroupId
     Object ID of an existing Entra group to use as ControlPlane-Admins across
     both scopes instead of creating per-scope groups. Receives the Catalog Owner
@@ -112,15 +127,15 @@
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
-.EXAMPLE
+    .EXAMPLE
     New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Management" `
         -AzureRegion "westeurope" `
         -ServiceOwner "owner@contoso.com" `
         -ServiceMembers @("alice@contoso.com", "bob@contoso.com")
 
     Creates the full Sub + Rg EAM structure for "Sub-Management" with resource
-    groups in West Europe. Delegation groups are resolved from EntraOpsConfig or
-    auto-created (Centralized governance model default).
+    groups in West Europe. Per-service admin groups are created (PerService 
+    governance model default).
 
 .EXAMPLE
     New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Connectivity" `
@@ -186,6 +201,9 @@ function New-EntraOpsSubscriptionLandingZone {
 
         [switch]$SkipManagementPlaneDelegation,
 
+        [ValidateSet("Centralized", "PerService")]
+        [string]$GovernanceModel,
+
         [string]$AzureRegion,
 
         [string]$DeploymentPrefix = "Default",
@@ -233,6 +251,36 @@ function New-EntraOpsSubscriptionLandingZone {
             throw "Parameter -AzureRegion is required unless -SkipAzureResourceGroup is specified."
         }
 
+        # Issue 3.0: Load EntraOpsConfig.json if not already loaded
+        if ($null -eq $Global:EntraOpsConfig) {
+            $configPaths = @(
+                "$PWD/EntraOpsConfig.json"
+                "$PSScriptRoot/EntraOpsConfig.json"
+                $env:ENTRAOPS_CONFIG
+            ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            
+            $configLoaded = $false
+            foreach ($configPath in $configPaths) {
+                if (Test-Path $configPath) {
+                    try {
+                        $Global:EntraOpsConfig = Get-Content -Path $configPath -Raw | ConvertFrom-Json -AsHashtable
+                        Write-Verbose "$logPrefix Loaded EntraOpsConfig.json from: $configPath"
+                        $configLoaded = $true
+                        break
+                    } catch {
+                        Write-Verbose "$logPrefix Failed to load config from $configPath : $_"
+                    }
+                }
+            }
+            
+            if (-not $configLoaded) {
+                Write-Verbose "$logPrefix No EntraOpsConfig.json found. Using parameter defaults."
+                $Global:EntraOpsConfig = @{}
+            }
+        } else {
+            Write-Verbose "$logPrefix Using existing `$Global:EntraOpsConfig"
+        }
+
         # Read delegation Group IDs from EntraOpsConfig when not supplied as parameters.
         # A non-empty config value also auto-activates the corresponding skip flag.
         if ([string]::IsNullOrWhiteSpace($ControlPlaneDelegationGroupId) -and
@@ -257,14 +305,21 @@ function New-EntraOpsSubscriptionLandingZone {
             $AdministratorGroupId = $Global:EntraOpsConfig.ServiceEM.AdministratorGroupId
         }
 
-        # Read GovernanceModel from config (default: Centralized)
-        $governanceModel = "Centralized"
-        if ($null -ne $Global:EntraOpsConfig -and
+        # Read GovernanceModel from parameter > config > default (PerService)
+        $governanceModelValue = "PerService"
+        $governanceModelSource = "default"
+        
+        if ($PSBoundParameters.ContainsKey('GovernanceModel')) {
+            $governanceModelValue = $GovernanceModel
+            $governanceModelSource = "parameter"
+        } elseif ($null -ne $Global:EntraOpsConfig -and
             $Global:EntraOpsConfig.ContainsKey('ServiceEM') -and
             -not [string]::IsNullOrWhiteSpace($Global:EntraOpsConfig.ServiceEM.GovernanceModel)) {
-            $governanceModel = $Global:EntraOpsConfig.ServiceEM.GovernanceModel
-            Write-Verbose "$logPrefix Using ServiceEM.GovernanceModel: $governanceModel"
+            $governanceModelValue = $Global:EntraOpsConfig.ServiceEM.GovernanceModel
+            $governanceModelSource = "config"
         }
+        
+        Write-Verbose "$logPrefix Using governance model '$governanceModelValue' (source: $governanceModelSource)"
 
         # Auto-resolve or create role-assignable delegation groups.
         # Searches by config ID, then by default group name, then creates if permissions allow.
@@ -279,35 +334,73 @@ function New-EntraOpsSubscriptionLandingZone {
             }
         }
 
-        if ($governanceModel -eq "Centralized") {
+        if ($governanceModelValue -eq "Centralized") {
             # Centralized model: Use tenant-wide delegation groups
             Write-Verbose "$logPrefix Centralized governance model - using tenant-wide delegation groups"
             
-            $ControlPlaneDelegationGroupId = Resolve-EntraOpsServiceEMDelegationGroup `
-                -Plane "ControlPlane" `
-                -GroupId $ControlPlaneDelegationGroupId `
-                -DefaultGroupName $ControlPlaneGroupName `
-                -ConfigKey "ControlPlaneDelegationGroupId" `
-                -logPrefix $logPrefix
-            $SkipControlPlaneDelegation = $true
-
-            $ManagementPlaneDelegationGroupId = Resolve-EntraOpsServiceEMDelegationGroup `
-                -Plane "ManagementPlane" `
-                -GroupId $ManagementPlaneDelegationGroupId `
-                -DefaultGroupName $ManagementPlaneGroupName `
-                -ConfigKey "ManagementPlaneDelegationGroupId" `
-                -logPrefix $logPrefix
-            $SkipManagementPlaneDelegation = $true
-
-            # Remove per-service ControlPlane, ManagementPlane, CatalogPlane groups from ServiceRoles
-            Write-Verbose "$logPrefix Removing ControlPlane/ManagementPlane/CatalogPlane from per-service groups"
-            foreach ($component in $LandingZoneComponents) {
-                $component.ServiceRole = @($component.ServiceRole | Where-Object {
-                    -not (($_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins") -or
-                          ($_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Admins") -or
-                          ($_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Members") -or
-                          ($_.accessLevel -eq "CatalogPlane" -and $_.name -eq "Members"))
-                })
+            # Issue 1.5: Add graceful fallback to PerService if delegation groups not found
+            $centralizedFailed = $false
+            $centralizedError = $null
+            
+            try {
+                $ControlPlaneDelegationGroupId = Resolve-EntraOpsServiceEMDelegationGroup `
+                    -Plane "ControlPlane" `
+                    -GroupId $ControlPlaneDelegationGroupId `
+                    -DefaultGroupName $ControlPlaneGroupName `
+                    -ConfigKey "ControlPlaneDelegationGroupId" `
+                    -logPrefix $logPrefix
+                $SkipControlPlaneDelegation = $true
+            } catch {
+                $centralizedFailed = $true
+                $centralizedError = $_
+                Write-Warning "$logPrefix Failed to resolve ControlPlane delegation group: $_"
+            }
+            
+            if (-not $centralizedFailed) {
+                try {
+                    $ManagementPlaneDelegationGroupId = Resolve-EntraOpsServiceEMDelegationGroup `
+                        -Plane "ManagementPlane" `
+                        -GroupId $ManagementPlaneDelegationGroupId `
+                        -DefaultGroupName $ManagementPlaneGroupName `
+                        -ConfigKey "ManagementPlaneDelegationGroupId" `
+                        -logPrefix $logPrefix
+                    $SkipManagementPlaneDelegation = $true
+                } catch {
+                    $centralizedFailed = $true
+                    $centralizedError = $_
+                    Write-Warning "$logPrefix Failed to resolve ManagementPlane delegation group: $_"
+                }
+            }
+            
+            if ($centralizedFailed) {
+                Write-Warning "$logPrefix =========================================="
+                Write-Warning "$logPrefix CENTRALIZED GOVERNANCE MODEL FAILED"
+                Write-Warning "$logPrefix =========================================="
+                Write-Warning "$logPrefix Falling back to PerService governance model."
+                Write-Warning "$logPrefix PerService will create per-service admin groups instead."
+                Write-Warning "$logPrefix "
+                Write-Warning "$logPrefix To use Centralized model, either:"
+                Write-Warning "$logPrefix   1. Create delegation groups manually and add IDs to EntraOpsConfig.json"
+                Write-Warning "$logPrefix   2. Grant RoleManagement.ReadWrite.Directory permission for auto-creation"
+                Write-Warning "$logPrefix =========================================="
+                
+                # Reset delegation group IDs to trigger per-service creation
+                $ControlPlaneDelegationGroupId = ""
+                $ManagementPlaneDelegationGroupId = ""
+                $SkipControlPlaneDelegation = $false
+                $SkipManagementPlaneDelegation = $false
+                $governanceModelValue = "PerService"
+            } else {
+                # Remove per-service ControlPlane, ManagementPlane, CatalogPlane groups from ServiceRoles
+                Write-Verbose "$logPrefix Removing ControlPlane/ManagementPlane/CatalogPlane from per-service groups"
+                foreach ($component in $LandingZoneComponents) {
+                    $component.ServiceRole = @($component.ServiceRole | Where-Object {
+                        -not (($_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins") -or
+                              ($_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Admins") -or
+                              ($_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Members") -or
+                              ($_.accessLevel -eq "CatalogPlane" -and $_.name -eq "Members"))
+                    })
+                }
             }
         } else {
             # PerService model: Keep per-service groups, but still resolve delegation if IDs provided
@@ -351,6 +444,16 @@ function New-EntraOpsSubscriptionLandingZone {
             $LandingZoneComponents[$i].ServiceRole = $LandingZoneComponents[$i].ServiceRole |
                 Where-Object { $_.accessLevel -ne "ControlPlane" }
         }
+        
+        # Issue 2.2: Log final switch states for troubleshooting
+        Write-Verbose "$logPrefix =========================================="
+        Write-Verbose "$logPrefix FINAL DELEGATION SWITCH STATES:"
+        Write-Verbose "$logPrefix   SkipControlPlaneDelegation:    $SkipControlPlaneDelegation"
+        Write-Verbose "$logPrefix   SkipManagementPlaneDelegation: $SkipManagementPlaneDelegation"
+        Write-Verbose "$logPrefix   ControlPlaneDelegationGroupId: $(if ($ControlPlaneDelegationGroupId) { 'SET' } else { 'NOT SET' })"
+        Write-Verbose "$logPrefix   ManagementPlaneDelegationGroupId: $(if ($ManagementPlaneDelegationGroupId) { 'SET' } else { 'NOT SET' })"
+        Write-Verbose "$logPrefix   GovernanceModel: $governanceModelValue"
+        Write-Verbose "$logPrefix =========================================="
     }
 
     process {

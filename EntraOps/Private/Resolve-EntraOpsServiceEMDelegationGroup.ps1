@@ -87,16 +87,37 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
     $requiredScope = "RoleManagement.ReadWrite.Directory"
     if ($mgContext.Scopes -notcontains $requiredScope) {
         $errorMsg = @(
-            "Cannot auto-create role-assignable delegation group for $Plane.",
-            "The connected identity does not have the required Microsoft Graph permission scope '$requiredScope'.",
-            "Please create the following role-assignable security group manually and set its Object ID in EntraOpsConfig.json under ServiceEM.$ConfigKey :",
+            "❌ CANNOT AUTO-CREATE ROLE-ASSIGNABLE DELEGATION GROUP FOR $Plane",
             "",
-            "  Suggested group name:  $DefaultGroupName",
-            "  IsAssignableToRole:    true",
-            "  SecurityEnabled:       true",
-            "  MailEnabled:           false",
+            "REASON:",
+            "  The connected identity does not have the required Microsoft Graph permission scope '$requiredScope'.",
             "",
-            "Then re-run the landing zone cmdlet."
+            "OPTIONS TO RESOLVE:",
+            "",
+            "  Option A - Create group manually (Recommended for production):",
+            "    1. Create a security group with these properties:",
+            "       • DisplayName: $DefaultGroupName",
+            "       • IsAssignableToRole: true",
+            "       • SecurityEnabled: true",
+            "       • MailEnabled: false",
+            "    2. Add the group ObjectId to EntraOpsConfig.json:",
+            "       {",
+            "         \"ServiceEM\": {",
+            "           \"$ConfigKey\": \"<group-object-id>\"",
+            "         }",
+            "       }",
+            "    3. Re-run the landing zone cmdlet",
+            "",
+            "  Option B - Switch to PerService governance model (No pre-existing groups required):",
+            "    • Set GovernanceModel to 'PerService' in EntraOpsConfig.json, OR",
+            "    • Wait for auto-fallback (if enabled) when Centralized groups are not found",
+            "",
+            "  Option C - Grant permissions (for dev/test only):",
+            "    • Grant RoleManagement.ReadWrite.Directory to the calling identity",
+            "    • This allows auto-creation of delegation groups",
+            "",
+            "DOCUMENTATION:",
+            "  See ServiceEM.md for detailed setup instructions."
         ) -join "`n"
         throw $errorMsg
     }
