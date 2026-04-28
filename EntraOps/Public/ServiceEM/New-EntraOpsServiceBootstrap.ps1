@@ -170,16 +170,30 @@ function New-EntraOpsServiceBootstrap {
         #todo move regions to cmdlets
         #region ServiceOwner
         try {
-            #$serviceOwner = Get-MgUser -UserId "adelev@contoso.onmicrosoft.com"
             Write-Verbose "$logPrefix Service Owner Graph API Lookup"
             if (-not $PSBoundParameters.ContainsKey("ServiceOwner")) {
                 Write-Verbose "$logPrefix ServiceOwner not specified, looking up $((Get-MgContext).Account)"
                 $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$((Get-MgContext).Account)" -OutputType PSObject
+                $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
             } else {
                 Write-Verbose "$logPrefix ServiceOwner set, looking up $ServiceOwner"
-                $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$ServiceOwner" -OutputType PSObject
+                # Handle both user and service principal URLs
+                if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/') {
+                    # Service principal URL provided
+                    $spId = $ServiceOwner -replace '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/', ''
+                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals/$spId" -OutputType PSObject
+                    $owner = "https://graph.microsoft.com/v1.0/servicePrincipals/$($graphOwner.Id)"
+                } elseif ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/users/') {
+                    # User URL provided
+                    $userId = $ServiceOwner -replace '^https://graph\.microsoft\.com/v1\.0/users/', ''
+                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$userId" -OutputType PSObject
+                    $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
+                } else {
+                    # Assume it's a UPN or user ID
+                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$ServiceOwner" -OutputType PSObject
+                    $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
+                }
             }
-            $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
             Write-Verbose "$logPrefix Setting owner as $owner"
         } catch {
             Write-Verbose "$logPrefix Failed to process Service Owner"
@@ -441,19 +455,24 @@ ManagementPlane,Admins,
             }
             $ServiceEMAssignmentPolicies = New-EntraOpsServiceEMAssignmentPolicy @ServiceEMAssignmentPolicyOptions
             $report.AssignmentPolicies = $ServiceEMAssignmentPolicies
-            Write-Verbose "$logPrefix Service Access Package Assignment Policy IDs: $($report.AssignmentPolicies.Id|ConvertTo-Json -Compress)"
+            
+            if ($ServiceEMAssignmentPolicies -and ($ServiceEMAssignmentPolicies | Measure-Object).Count -gt 0) {
+                Write-Verbose "$logPrefix Service Access Package Assignment Policy IDs: $($report.AssignmentPolicies.Id|ConvertTo-Json -Compress)"
 
-            Write-Verbose "$logPrefix Processing access package assignments"
-            $ServiceEMAssignmentOptions = @{
-                ServiceCatalogId          = $ServiceEMCatalog.Id
-                ServiceMembers            = $graphMembers
-                ServiceOwner              = $graphOwner
-                ServiceAssignmentPolicies = $ServiceEMAssignmentPolicies
-                ServicePackages           = $ServiceEMAccessPackages
+                Write-Verbose "$logPrefix Processing access package assignments"
+                $ServiceEMAssignmentOptions = @{
+                    ServiceCatalogId          = $ServiceEMCatalog.Id
+                    ServiceMembers            = $graphMembers
+                    ServiceOwner              = $graphOwner
+                    ServiceAssignmentPolicies = $ServiceEMAssignmentPolicies
+                    ServicePackages           = $ServiceEMAccessPackages
+                }
+                $ServiceEMAssignments = New-EntraOpsServiceEMAssignment @ServiceEMAssignmentOptions
+                $report.Assignments = $ServiceEMAssignments
+                Write-Verbose "$logPrefix Service Access Package Assignment IDs: $($report.Assignments.Id|ConvertTo-Json -Compress)"
+            } else {
+                Write-Verbose "$logPrefix No assignment policies created — skipping access package assignments"
             }
-            $ServiceEMAssignments = New-EntraOpsServiceEMAssignment @ServiceEMAssignmentOptions
-            $report.Assignments = $ServiceEMAssignments
-            Write-Verbose "$logPrefix Service Access Package Assignment IDs: $($report.Assignments.Id|ConvertTo-Json -Compress)"
         } else {
             Write-Verbose "$logPrefix No access packages to configure — skipping resource assignment, policies, and member assignments"
         }

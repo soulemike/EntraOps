@@ -125,7 +125,18 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
             Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
             $checkCatalogAssignments = @()
             $checkCatalogAssignments = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogRolesUri -OutputType PSObject
-            if((Compare-Object @($catalogAssignments.id) @($checkCatalogAssignments.id)|Measure-Object).Count -eq 0){
+            
+            # Handle null or empty arrays
+            $expectedIds = @($catalogAssignments | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+            $actualIds = @($checkCatalogAssignments | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+            
+            if($expectedIds.Count -eq 0 -and $actualIds.Count -eq 0){
+                Write-Verbose "$logPrefix No catalog role assignments to verify"
+                $confirmed = $true
+                continue
+            }
+            
+            if((Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0){
                 Write-Verbose "$logPrefix Graph consistency found confirming"
                 $confirmed = $true
                 continue

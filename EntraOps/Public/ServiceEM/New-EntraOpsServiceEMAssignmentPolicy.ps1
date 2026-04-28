@@ -348,7 +348,18 @@ function New-EntraOpsServiceEMAssignmentPolicy {
             Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
             $checkPolicies = @()
             $checkPolicies = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentPolicyUri -OutputType PSObject -DisableCache
-            if((Compare-Object @($policies.id) @($checkPolicies.id)|Measure-Object).Count -eq 0){
+            
+            # Handle null or empty arrays
+            $expectedIds = @($policies | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+            $actualIds = @($checkPolicies | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+            
+            if($expectedIds.Count -eq 0 -and $actualIds.Count -eq 0){
+                Write-Verbose "$logPrefix No assignment policies to verify"
+                $confirmed = $true
+                continue
+            }
+            
+            if((Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0){
                 Write-Verbose "$logPrefix Graph consistency found confirming"
                 $confirmed = $true
                 continue
