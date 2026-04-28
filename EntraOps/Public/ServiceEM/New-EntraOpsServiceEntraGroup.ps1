@@ -207,7 +207,7 @@ function New-EntraOpsServiceEntraGroup {
             }
             
             # Issue 4.2: Log payload for debugging
-            Write-Verbose "$logPrefix Validated group parameters for '$($ServiceRole.Name)''
+            Write-Verbose "$logPrefix Validated group parameters for '$($ServiceRole.Name)'"
             try{
                 if($ServiceRole.groupType -eq "Unified" -and $groups.MailNickname -notcontains $unifiedParams.MailNickname){
                     Write-Verbose "$logPrefix $($unifiedParams|ConvertTo-Json -Compress)"

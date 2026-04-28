@@ -1,0 +1,60 @@
+# Certificate files (contain private keys)
+*.pfx
+*.key
+*.p12
+*.pem
+
+# Test certificates directory
+Tests/ServiceEM/TestCertificates/
+TestCertificates/
+
+# Log files
+*.log
+test-*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# PowerShell
+*.ps1.log
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+bin/
+obj/
+dist/
+build/
+
+# Node modules (if any)
+node_modules/
+
+# Python (if any)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Config files with potential secrets
+EntraOpsConfig.json
+config.json
+service-principal.json

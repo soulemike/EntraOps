@@ -140,6 +140,11 @@
         'Update-EntraOpsPrivilegedConditionalAccessGroup'
         'Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
         'Update-EntraOpsRequiredWorkflowParameters'
+        # ServiceEM Functions
+        'New-EntraOpsSubscriptionLandingZone'
+        'New-EntraOpsServiceEntraGroup'
+        'New-EntraOpsServiceBootstrap'
+        'Resolve-EntraOpsServiceEMDelegationGroup'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
