@@ -1,0 +1,12 @@
+{
+  "ServiceEM": {
+    "DefaultServiceOwner": "Adams@M365x60294116.OnMicrosoft.com",
+    "GovernanceModel": "PerService",
+    "DefaultServiceMembers": [
+      "AdeleV@M365x60294116.OnMicrosoft.com",
+      "admin@M365x60294116.onmicrosoft.com"
+    ]
+  },
+  "TenantName": "M365x60294116.onmicrosoft.com",
+  "TenantId": "d2280e3f-26e4-4d90-b991-8933a2aac6c7"
+}

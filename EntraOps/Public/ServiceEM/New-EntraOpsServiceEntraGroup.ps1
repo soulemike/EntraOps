@@ -192,15 +192,6 @@ function New-EntraOpsServiceEntraGroup {
                 $validationErrors += "MailNickname '$($unifiedParams.MailNickname)' contains invalid characters. Only alphanumeric, underscore, dot, and hyphen allowed."
             }
             
-            # Check for duplicate mailNickname in current batch
-            $currentNicknames = $groups | ForEach-Object { $_.MailNickname }
-            if ($currentNicknames -contains $secParams.MailNickname) {
-                $validationErrors += "MailNickname '$($secParams.MailNickname)' is already used by another group in this deployment"
-            }
-            if ($currentNicknames -contains $unifiedParams.MailNickname) {
-                $validationErrors += "MailNickname '$($unifiedParams.MailNickname)' is already used by another group in this deployment"
-            }
-            
             # Throw if validation errors found
             if ($validationErrors.Count -gt 0) {
                 throw "VALIDATION FAILED for ServiceRole '$($ServiceRole.Name)':`n  - $($validationErrors -join "`n  - ")"
