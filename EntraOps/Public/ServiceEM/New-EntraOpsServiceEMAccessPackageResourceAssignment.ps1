@@ -196,7 +196,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 Write-Verbose "$logPrefix Consistency check lookup failed (transient?) — retrying"
                 Write-Error $_
                 $i++
-                if($i -gt 5){ throw "Access Package role assignment consistency with Entra not achieved" }
+                if($i -gt 10){ throw "Access Package role assignment consistency with Entra not achieved" }
                 continue
             }
             $checkAssignments = @($checkServiceAccessPackages.ResourceRoleScopes | ForEach-Object {"$($_.Role.OriginId)_$($_.Scope.OriginId)"})
@@ -208,7 +208,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 continue
             }
             $i++
-            if($i -gt 5){
+            if($i -gt 10){
                 throw "Access Package role assignment consistency with Entra not achieved"
             }
             Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"

@@ -238,7 +238,7 @@ function New-EntraOpsServiceEntraGroup {
                 continue
             }
             $i++
-            if($i -gt 5){
+            if($i -gt 10){
                 throw "Group object consistency with Entra not achieved"
             }
             Write-Verbose "$logPrefix Graph objects are not available, sleeping $([Math]::Pow(2,$i)-1) seconds"

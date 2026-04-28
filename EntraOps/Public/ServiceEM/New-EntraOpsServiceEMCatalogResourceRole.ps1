@@ -142,7 +142,7 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
                 continue
             }
             $i++
-            if($i -gt 5){
+            if($i -gt 10){
                 throw "Catalog Resource Role Assignment consistency with Entra not achieved"
             }
             Write-Verbose "$logPrefix Graph objects are not available, sleeping $([Math]::Pow(2,$i)-1) seconds"

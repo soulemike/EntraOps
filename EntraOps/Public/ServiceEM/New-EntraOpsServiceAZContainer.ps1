@@ -102,7 +102,7 @@ function New-EntraOpsServiceAZContainer {
                         continue
                     }
                     $i++
-                    if($i -gt 5){
+                    if($i -gt 10){
                         throw "Resource Group consistency with Azure not achieved"
                     }
                     Write-Verbose "$logPrefix Azure resources not available, sleeping $([Math]::Pow(2,$i)-1) seconds"

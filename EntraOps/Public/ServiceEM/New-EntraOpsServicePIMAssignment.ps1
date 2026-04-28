@@ -144,7 +144,7 @@ function New-EntraOpsServicePIMAssignment {
                 continue
             }
             $i++
-            if($i -gt 5){
+            if($i -gt 10){
                 throw "Access Package object consistency with Entra not achieved"
             }
             Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
