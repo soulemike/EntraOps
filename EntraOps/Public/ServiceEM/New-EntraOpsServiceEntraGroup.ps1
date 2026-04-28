@@ -98,8 +98,8 @@ function New-EntraOpsServiceEntraGroup {
             throw "ServiceOwner parameter is required. Provide either a full OData URL (https://graph.microsoft.com/v1.0/users/<ObjectId>) or just the user ObjectId (GUID)."
         }
         
-        # Check if ServiceOwner is already in OData URL format
-        if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/users/') {
+        # Check if ServiceOwner is already in OData URL format (users or servicePrincipals)
+        if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/(users|servicePrincipals)/') {
             $ownerUri = $ServiceOwner
             Write-Verbose "$logPrefix ServiceOwner provided as OData URL: $ownerUri"
         } else {
@@ -109,7 +109,7 @@ function New-EntraOpsServiceEntraGroup {
                 $ownerUri = "https://graph.microsoft.com/v1.0/users/$ServiceOwner"
                 Write-Verbose "$logPrefix ServiceOwner converted to OData URL: $ownerUri"
             } else {
-                throw "ServiceOwner must be either a valid GUID (ObjectId) or a full OData URL (https://graph.microsoft.com/v1.0/users/<ObjectId>). Received: $ServiceOwner"
+                throw "ServiceOwner must be either a valid GUID (ObjectId) or a full OData URL (https://graph.microsoft.com/v1.0/users/<ObjectId> or https://graph.microsoft.com/v1.0/servicePrincipals/<ObjectId>). Received: $ServiceOwner"
             }
         }
         
