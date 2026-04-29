@@ -172,8 +172,13 @@ function New-EntraOpsServiceBootstrap {
         try {
             Write-Verbose "$logPrefix Service Owner Graph API Lookup"
             if (-not $PSBoundParameters.ContainsKey("ServiceOwner")) {
-                Write-Verbose "$logPrefix ServiceOwner not specified, looking up $((Get-MgContext).Account)"
-                $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$((Get-MgContext).Account)" -OutputType PSObject
+                $mgContext = Get-MgContext
+                # Check if using AppOnly auth (service principal) without explicit owner
+                if ([string]::IsNullOrWhiteSpace($mgContext.Account) -or $mgContext.AuthType -eq "AppOnly") {
+                    throw "ServiceOwner parameter is required when using service principal (AppOnly) authentication. Please specify -ServiceOwner with a user UPN (e.g., 'user@contoso.com') or user ID."
+                }
+                Write-Verbose "$logPrefix ServiceOwner not specified, looking up $($mgContext.Account)"
+                $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$($mgContext.Account)" -OutputType PSObject
                 $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
             } else {
                 Write-Verbose "$logPrefix ServiceOwner set, looking up $ServiceOwner"
@@ -206,9 +211,17 @@ function New-EntraOpsServiceBootstrap {
             Write-Verbose "$logPrefix Service Members Graph API Lookup"
             $graphMembers = @()
             if (-not $PSBoundParameters.ContainsKey("ServiceMembers")) {
-                $graphMembers = @(
-                    $(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$((Get-MgContext).Account)" -OutputType PSObject)
-                )
+                $mgContext = Get-MgContext
+                # Check if using AppOnly auth (service principal) without explicit members
+                if ([string]::IsNullOrWhiteSpace($mgContext.Account) -or $mgContext.AuthType -eq "AppOnly") {
+                    # For service principal auth, default to empty members list
+                    Write-Verbose "$logPrefix ServiceMembers not specified with AppOnly auth, defaulting to empty members list"
+                    $graphMembers = @()
+                } else {
+                    $graphMembers = @(
+                        $(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$($mgContext.Account)" -OutputType PSObject)
+                    )
+                }
             } else {
                 foreach ($serviceMember in $ServiceMembers) {
                     $graphMembers += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$serviceMember" -OutputType PSObject
