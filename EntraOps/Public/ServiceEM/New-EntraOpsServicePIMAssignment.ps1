@@ -138,7 +138,11 @@ function New-EntraOpsServicePIMAssignment {
             foreach($group in $ServiceGroups|Where-Object{$_.DisplayName -notlike "*Members*"}){
                 $checkPimEligibility += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
             }
-            if((Compare-Object @($pimEligibilities.id) @($checkPimEligibility.id) | Measure-Object).Count -eq 0){
+            # Handle null values in comparison
+            $expectedIds = @($pimEligibilities | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+            $actualIds = @($checkPimEligibility | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+            
+            if((Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0){
                 Write-Verbose "$logPrefix Graph consistency found confirming"
                 $confirmed = $true
                 continue
