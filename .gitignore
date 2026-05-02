@@ -38,6 +38,7 @@ bin/
 obj/
 dist/
 build/
+TestingAl/
 
 # Node modules (if any)
 node_modules/
