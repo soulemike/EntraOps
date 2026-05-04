@@ -173,7 +173,7 @@ function New-EntraOpsServiceEMAssignment {
             Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
             $checkAssignments = @()
             $checkAssignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentsSplat -OutputType PSObject -DisableCache
-            $uniqueExpected = @(($ServiceMembers.Id + $ServiceOwner.Id) | Where-Object { $_ } | Sort-Object -Unique)
+            $uniqueExpected = @(($ServiceMembers.Id, $ServiceOwner.Id) | Where-Object { $_ } | Sort-Object -Unique)
             $uniqueFound    = @($checkAssignments.Target.ObjectId | Where-Object { $_ } | Sort-Object -Unique)
             Write-Verbose "$logPrefix Expected assignee IDs: $($uniqueExpected|ConvertTo-Json -Compress)"
             Write-Verbose "$logPrefix Found assignment target IDs: $($uniqueFound|ConvertTo-Json -Compress)"
