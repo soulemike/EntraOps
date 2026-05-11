@@ -123,13 +123,14 @@ Describe "New-EntraOpsServiceEntraGroup - Unit Tests" {
     
     Context "Parameter Validation" {
         It "Should throw when ServiceName is null or empty" {
-            { New-EntraOpsServiceEntraGroup -ServiceName "" -ServiceOwner "https://graph.microsoft.com/v1.0/users/test" -ServiceRoles @() } | 
-                Should -Throw -ExpectedMessage "*ServiceOwner parameter is required*"
+            { New-EntraOpsServiceEntraGroup -ServiceName "" -ServiceRoles @() } | 
+                Should -Throw
         }
         
-        It "Should throw when ServiceOwner is null or empty" {
-            { New-EntraOpsServiceEntraGroup -ServiceName "Test" -ServiceOwner "" -ServiceRoles @() } | 
-                Should -Throw -ExpectedMessage "*ServiceOwner parameter is required*"
+        It "Should allow no ServiceOwner" {
+            Mock Invoke-EntraOpsMsGraphQuery { return @() }
+            { New-EntraOpsServiceEntraGroup -ServiceName "Test" -ServiceRoles @() } | 
+                Should -Not -Throw
         }
         
         It "Should accept valid OData URL format for ServiceOwner" {

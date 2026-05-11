@@ -21,11 +21,12 @@
     and DisplayName.
 
 .PARAMETER ServiceOwner
-    Graph API owner URL for the group owner, in the form:
+    Optional Graph API owner URL for the group owner, in the form:
     "https://graph.microsoft.com/v1.0/users/<ObjectId>"
     
     This can also be provided as just the ObjectId (GUID), and the function
-    will automatically construct the proper OData bind URL.
+    will automatically construct the proper OData bind URL. Omit to create
+    groups without owners.
 
 .PARAMETER GroupPrefix
     Prefix prepended to all group DisplayNames and MailNicknames. Defaults to "SG".
@@ -75,7 +76,6 @@ function New-EntraOpsServiceEntraGroup {
         [Parameter(Mandatory)]
         [string]$ServiceName,
 
-        [Parameter(Mandatory)]
         [string]$ServiceOwner,
 
         [string]$GroupPrefix = "SG",
@@ -94,25 +94,25 @@ function New-EntraOpsServiceEntraGroup {
 
     begin {
         # Issue 4.1: Validate and normalize ServiceOwner to proper OData bind format
-        if ([string]::IsNullOrWhiteSpace($ServiceOwner)) {
-            throw "ServiceOwner parameter is required. Provide either a full OData URL (https://graph.microsoft.com/v1.0/users/<ObjectId>) or just the user ObjectId (GUID)."
-        }
-        
-        # Check if ServiceOwner is already in OData URL format (users or servicePrincipals)
-        if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/(users|servicePrincipals)/') {
-            $ownerUri = $ServiceOwner
-            Write-Verbose "$logPrefix ServiceOwner provided as OData URL: $ownerUri"
-        } else {
-            # Assume it's just an ObjectId and construct the OData URL
-            # Validate it looks like a GUID
-            if ($ServiceOwner -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
-                $ownerUri = "https://graph.microsoft.com/v1.0/users/$ServiceOwner"
-                Write-Verbose "$logPrefix ServiceOwner converted to OData URL: $ownerUri"
+        if (-not [string]::IsNullOrWhiteSpace($ServiceOwner)) {
+            # Check if ServiceOwner is already in OData URL format (users or servicePrincipals)
+            if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/(users|servicePrincipals)/') {
+                $ownerUri = $ServiceOwner
+                Write-Verbose "$logPrefix ServiceOwner provided as OData URL: $ownerUri"
             } else {
-                throw "ServiceOwner must be either a valid GUID (ObjectId) or a full OData URL (https://graph.microsoft.com/v1.0/users/<ObjectId> or https://graph.microsoft.com/v1.0/servicePrincipals/<ObjectId>). Received: $ServiceOwner"
+                # Assume it's just an ObjectId and construct the OData URL
+                # Validate it looks like a GUID
+                if ($ServiceOwner -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+                    $ownerUri = "https://graph.microsoft.com/v1.0/users/$ServiceOwner"
+                    Write-Verbose "$logPrefix ServiceOwner converted to OData URL: $ownerUri"
+                } else {
+                    throw "ServiceOwner must be either a valid GUID (ObjectId) or a full OData URL (https://graph.microsoft.com/v1.0/users/<ObjectId> or https://graph.microsoft.com/v1.0/servicePrincipals/<ObjectId>). Received: $ServiceOwner"
+                }
             }
+        } else {
+            Write-Verbose "$logPrefix ServiceOwner not provided; creating groups without owners"
         }
-        
+
         try{
             #Groups
             $groups = @()
@@ -129,7 +129,9 @@ function New-EntraOpsServiceEntraGroup {
             description = ""
             securityEnabled = $true
             isAssignableToRole = [bool]$IsAssignableToRole
-            "owners@odata.bind" = @($ownerUri)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ownerUri)) {
+            $groupParams["owners@odata.bind"] = @($ownerUri)
         }
         $unifiedParams = $groupParams + @{
             displayName = ""

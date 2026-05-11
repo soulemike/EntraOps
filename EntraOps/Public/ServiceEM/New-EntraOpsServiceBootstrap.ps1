@@ -136,6 +136,7 @@ function New-EntraOpsServiceBootstrap {
         [string]$GroupPrefix = "SG",
         [string]$GroupNamingDelimiter = "-",
 
+        [AllowEmptyString()]
         [string]$ServiceOwner,
 
         [switch]$AssignOwner,
@@ -176,19 +177,14 @@ function New-EntraOpsServiceBootstrap {
 
         #todo move regions to cmdlets
         #region ServiceOwner
-        if($AssignOwner){
+        if ($AssignOwner) {
             try {
                 Write-Verbose "$logPrefix Service Owner Graph API Lookup"
-                if (-not $PSBoundParameters.ContainsKey("ServiceOwner")) {
-                    $mgContext = Get-MgContext
-                    # Check if using AppOnly auth (service principal) without explicit owner
-                    if ([string]::IsNullOrWhiteSpace($mgContext.Account) -or $mgContext.AuthType -eq "AppOnly") {
-                        throw "ServiceOwner parameter is required when using service principal (AppOnly) authentication. Please specify -ServiceOwner with a user UPN (e.g., 'user@contoso.com') or user ID."
+                if ($PSBoundParameters.ContainsKey("ServiceOwner")) {
+                    if ([string]::IsNullOrWhiteSpace($ServiceOwner)) {
+                        throw "ServiceOwner was supplied but is empty. Specify a valid owner UPN, object ID, or OData URL."
                     }
-                    Write-Verbose "$logPrefix ServiceOwner not specified, looking up $($mgContext.Account)"
-                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$($mgContext.Account)" -OutputType PSObject
-                    $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
-                } else {
+
                     Write-Verbose "$logPrefix ServiceOwner set, looking up $ServiceOwner"
                     # Handle both user and service principal URLs
                     if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/') {
@@ -206,12 +202,25 @@ function New-EntraOpsServiceBootstrap {
                         $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$ServiceOwner" -OutputType PSObject
                         $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
                     }
+                } else {
+                    $mgContext = Get-MgContext
+                    # Check if using AppOnly auth (service principal) without explicit owner
+                    if ([string]::IsNullOrWhiteSpace($mgContext.Account) -or $mgContext.AuthType -eq "AppOnly") {
+                        throw "ServiceOwner parameter is required when using service principal (AppOnly) authentication. Please specify -ServiceOwner with a user UPN (e.g., 'user@contoso.com') or user ID."
+                    }
+                    Write-Verbose "$logPrefix ServiceOwner not specified, looking up $($mgContext.Account)"
+                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$($mgContext.Account)" -OutputType PSObject
+                    $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
                 }
                 Write-Verbose "$logPrefix Setting owner as $owner"
             } catch {
                 Write-Verbose "$logPrefix Failed to process Service Owner"
                 Write-Error $_
             }
+        } else {
+            Write-Verbose "$logPrefix AssignOwner not set; skipping ServiceOwner resolution"
+            $graphOwner = $null
+            $owner = $null
         }
         #endregion
 
@@ -236,7 +245,7 @@ function New-EntraOpsServiceBootstrap {
                     $graphMembers += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$serviceMember" -OutputType PSObject
                 }
             }
-            if ($graphOwner.Id -notin $graphMembers.Id -and -not $OwnerIsNotMember) {
+            if ($graphOwner -and $graphOwner.Id -and $graphOwner.Id -notin $graphMembers.Id -and -not $OwnerIsNotMember) {
                 $graphMembers += $graphOwner
             }
         } catch {
@@ -339,11 +348,13 @@ ManagementPlane,Admins,
         Write-Verbose "$logPrefix Processing Roles to Groups"
         $ServiceEntraGroupOptions = @{
             ServiceName             = $ServiceName
-            ServiceOwner            = $owner
             ServiceRoles            = $ServiceRoles
             GroupPrefix             = $GroupPrefix
             GroupNamingDelimiter    = $GroupNamingDelimiter
             ProhibitDirectElevation = $ProhibitDirectElevation
+        }
+        if ($AssignOwner -and -not [string]::IsNullOrWhiteSpace($owner)) {
+            $ServiceEntraGroupOptions.ServiceOwner = $owner
         }
         # Cast to [object[]] so PSCustomObject synthetic delegated entries can be appended
         # with +=. New-EntraOpsServiceEntraGroup returns typed MicrosoftGraphGroup objects;
@@ -515,7 +526,9 @@ ManagementPlane,Admins,
                 GroupPrefix             = $GroupPrefix
                 GroupNamingDelimiter    = $GroupNamingDelimiter
                 EnableOwnerAssignment   = $EnablePIMOwnerAssignment
-                ServiceOwnerPrincipalId = $graphOwner.Id
+            }
+            if ($graphOwner -and $graphOwner.Id) {
+                $ServicePIMAssignmentOptions.ServiceOwnerPrincipalId = $graphOwner.Id
             }
             $ServicePIMAssignments = New-EntraOpsServicePIMAssignment @ServicePIMAssignmentOptions
             $report.PimAssignments = $ServicePIMAssignments

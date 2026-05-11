@@ -60,14 +60,16 @@ Describe "New-EntraOpsServiceEntraGroup" {
             } | Should -Throw
         }
         
-        It "Should throw when ServiceOwner is empty" {
+        It "Should allow no ServiceOwner" {
+            $roles = @(
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+            )
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName "TestService" `
-                    -ServiceOwner "" `
-                    -ServiceRoles @() `
+                    -ServiceRoles $roles `
                     -ErrorAction Stop
-            } | Should -Throw
+            } | Should -Not -Throw
         }
         
         It "Should accept valid OData URL format for ServiceOwner" {

@@ -476,7 +476,6 @@ function New-EntraOpsSubscriptionLandingZone {
             $splatServiceBootstrap = @{
                 ServiceName                      = $component.Role + "-" + $DeploymentPrefix
                 OwnerIsNotMember                 = $OwnerIsNotMember
-                AssignOwner                      = $AssignOwner
                 ProhibitDirectElevation          = $ProhibitDirectElevation
                 EnablePIMOwnerAssignment         = $EnablePIMOwnerAssignment
                 AzureRegion                      = $AzureRegion
@@ -496,15 +495,21 @@ function New-EntraOpsSubscriptionLandingZone {
                     SkipAzureResourceGroup = $SkipAzureResourceGroup
                 }
             }
-            # Forward ServiceOwner and ServiceMembers to every component so that all
-            # scopes (Sub, Rg, etc.) use the same owner and member list rather than
+            # Forward ServiceMembers to every component so that all
+            # scopes (Sub, Rg, etc.) use the same member list rather than
             # defaulting to the calling account for non-Sub components.
-            if ($PSBoundParameters.ContainsKey('ServiceOwner')) {
-                $splatServiceBootstrap.ServiceOwner = $ServiceOwner
-            }
             if ($PSBoundParameters.ContainsKey('ServiceMembers')) {
                 $splatServiceBootstrap.ServiceMembers = $ServiceMembers
             }
+
+            # Only forward owner information when explicit owner assignment is requested.
+            if ($AssignOwner) {
+                if ($PSBoundParameters.ContainsKey('ServiceOwner') -and -not [string]::IsNullOrWhiteSpace($ServiceOwner)) {
+                    $splatServiceBootstrap.ServiceOwner = $ServiceOwner
+                }
+                $splatServiceBootstrap.AssignOwner = $AssignOwner
+            }
+
             $report += New-EntraOpsServiceBootstrap @splatServiceBootstrap
         }
 

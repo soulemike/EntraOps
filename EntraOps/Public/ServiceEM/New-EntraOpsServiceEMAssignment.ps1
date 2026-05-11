@@ -55,7 +55,6 @@ function New-EntraOpsServiceEMAssignment {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceMembers,
 
-        [Parameter(Mandatory)]
         [psobject]$ServiceOwner,
 
         [Parameter(Mandatory)]
@@ -140,7 +139,7 @@ function New-EntraOpsServiceEMAssignment {
             $mgmtAdminsPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*WorkloadPlane-Admins"}
             $mgmtAdminsPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Workload Plane Policy"}
         }
-        if($mgmtAdminsPackage -and $mgmtAdminsPolicy){
+        if($mgmtAdminsPackage -and $mgmtAdminsPolicy -and $ServiceOwner){
             # Update this to `in` if upstream function ever switches to array
             if($ServiceOwner.Id -notin $assignments.Target.ObjectId -and $ServiceOwner.Id -notin $assignmentRequests.Assignment.Target.ObjectId){
                 try{
@@ -156,7 +155,7 @@ function New-EntraOpsServiceEMAssignment {
                 }
             }
         } else {
-            Write-Verbose "$logPrefix No suitable owner access package found (ManagementPlane-Admins / WorkloadPlane-Admins), skipping owner assignment"
+            Write-Verbose "$logPrefix No suitable owner assignment conditions met, skipping owner assignment"
         }
     }
 
@@ -173,7 +172,7 @@ function New-EntraOpsServiceEMAssignment {
             Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
             $checkAssignments = @()
             $checkAssignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentsSplat -OutputType PSObject -DisableCache
-            $uniqueExpected = @(($ServiceMembers.Id, $ServiceOwner.Id) | Where-Object { $_ } | Sort-Object -Unique)
+            $uniqueExpected = @((@($ServiceMembers.Id) + @($ServiceOwner.Id)) | Where-Object { $_ } | Sort-Object -Unique)
             $uniqueFound    = @($checkAssignments.Target.ObjectId | Where-Object { $_ } | Sort-Object -Unique)
             Write-Verbose "$logPrefix Expected assignee IDs: $($uniqueExpected|ConvertTo-Json -Compress)"
             Write-Verbose "$logPrefix Found assignment target IDs: $($uniqueFound|ConvertTo-Json -Compress)"
