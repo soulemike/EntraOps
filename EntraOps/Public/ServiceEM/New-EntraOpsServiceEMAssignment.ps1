@@ -134,7 +134,7 @@ function New-EntraOpsServiceEMAssignment {
         }
 
         # Enroll the owner: prefer ManagementPlane-Admins; fall back to WorkloadPlane-Admins
-        # (Rg scope with Centralized governance — no ManagementPlane-Admins package is created).
+        # (Centralized governance — ManagementPlane-Admins is delegated to tenant-wide group).
         $mgmtAdminsPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*ManagementPlane-Admins"}
         $mgmtAdminsPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Management Admin Policy"}
         if(-not $mgmtAdminsPackage){

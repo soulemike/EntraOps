@@ -293,6 +293,64 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         }
                         $params = $policyParams + $params
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                    }elseif($package.displayName -like "*ManagementPlane-Admins"){
+                        # Create Initial Management Admin Policy for admin-driven service owner assignment
+                        $params = $initialPolicyParams.Clone()
+                        $params.displayName = "Initial Management Admin Policy"
+                        $params.allowedTargetScope = "specificDirectoryUsers"
+                        $params.specificAllowedTargets = @()  # Empty - admin-driven only via adminAdd
+                        $params.requestApprovalSettings = @{
+                            isApprovalRequiredForAdd = $false  # No approval needed for adminAdd
+                            isApprovalRequiredForUpdate = $false
+                        }
+                        $params.expiration = @{
+                            type = "noExpiration"  # Permanent for service owner
+                        }
+                        $params = $policyParams + $params
+                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                        
+                        # Create Management Plane Policy for self-service elevation with strong controls
+                        $mgmtPlanePolicyParams = @{
+                            displayName = "Management Plane Policy"
+                            description = "The Management Plane Policy for $ServiceName ManagementPlane-Admins access package."
+                            allowedTargetScope = "specificDirectoryUsers"
+                            specificAllowedTargets = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.groupMembers"
+                                    groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*ManagementPlane-Members"}).Id)
+                                }
+                            )
+                            expiration = @{
+                                duration = "P5D"
+                                type = "afterDuration"
+                            }
+                            requestApprovalSettings = @{
+                                isApprovalRequiredForAdd = $true
+                                isApprovalRequiredForUpdate = $false
+                                stages = @(
+                                    @{
+                                        durationBeforeAutomaticDenial = "P1D"
+                                        isApproverJustificationRequired = $true
+                                        isEscalationEnabled = $true
+                                        durationBeforeEscalation = "PT12H"
+                                        primaryApprovers = @(
+                                            @{
+                                                "@odata.type" = "#microsoft.graph.groupMembers"
+                                                groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*ControlPlane-Admins"}).Id)
+                                            }
+                                        )
+                                        fallbackPrimaryApprovers = @(
+                                            @{
+                                                "@odata.type" = "#microsoft.graph.groupMembers"
+                                                groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id)
+                                            }
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                        $params = $policyParams + $mgmtPlanePolicyParams
+                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
                     }elseif($package.displayName -like "*WorkloadPlane-Admins"){
                         $params = $policyParams + $workloadPlanePolicyParams
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
