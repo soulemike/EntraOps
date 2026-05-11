@@ -82,6 +82,8 @@ function New-EntraOpsServicePIMAssignment {
     }
 
     process {
+        Write-Host "$logPrefix Beginning PIM Assignment"
+
         foreach($group in $ServiceGroups|Where-Object{$_.DisplayName -notlike "*Members*"}){
             $pimEligibilityParams.groupId = $group.Id
             Write-Verbose "$logPrefix Looking up eligibility for group ID: $($group.Id)"

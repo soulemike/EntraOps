@@ -312,6 +312,8 @@ ManagementPlane,Admins,
 
     process {
 
+        Write-Host "$logPrefix Beginning Bootstrap"
+
         Write-Verbose "$logPrefix Removing Control Plane Delegation roles if specified"
         if ($SkipControlPlaneDelegation) {
             $filteredRoles = @()

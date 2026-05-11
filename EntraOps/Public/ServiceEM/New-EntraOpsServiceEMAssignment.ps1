@@ -112,6 +112,8 @@ function New-EntraOpsServiceEMAssignment {
     }
 
     process {
+        Write-Host "$logPrefix Beginning EM Assignment"
+
         if(-not $wlMembersPackage -or -not $wlMembersPolicy){
             Write-Verbose "$logPrefix WorkloadPlane-Members access package or policy not found (Sub-only landing zone?), skipping member assignments"
         } else {

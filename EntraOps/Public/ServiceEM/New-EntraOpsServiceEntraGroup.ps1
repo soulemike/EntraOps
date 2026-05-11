@@ -148,6 +148,8 @@ function New-EntraOpsServiceEntraGroup {
     }
 
     process {
+        Write-Host "$logPrefix Beginning EntraGroup"
+
         Write-Verbose "$logPrefix Processing $(($ServiceRoles|Measure-Object).Count) Groups"
         foreach($ServiceRole in $ServiceRoles){
             # Issue 4.2: Validate and sanitize parameters

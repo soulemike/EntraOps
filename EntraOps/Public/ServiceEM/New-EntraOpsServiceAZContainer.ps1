@@ -160,6 +160,8 @@ function New-EntraOpsServiceAZContainer {
     }
 
     process {
+        Write-Host "$logPrefix Beginning AZ Container"
+
         if($rbacModel -in ("Azure","Both")){
             $rbacSet = @()
             try{

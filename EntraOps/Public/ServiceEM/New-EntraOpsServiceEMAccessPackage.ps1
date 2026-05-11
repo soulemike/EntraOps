@@ -62,6 +62,8 @@ function New-EntraOpsServiceEMAccessPackage {
     }
 
     process {
+        Write-Host "$logPrefix Beginning EM Access Package"
+
         Write-Verbose "$logPrefix Processing $(($ServiceRoles|Where-Object{$_.groupType -ne "Unified"}|Measure-Object).Count) Access Package Roles"
         foreach($role in $ServiceRoles|Where-Object{$_.groupType -ne "Unified" -and -not ($_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins") -and -not ($_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Admins")}){
             $packageParams = @{

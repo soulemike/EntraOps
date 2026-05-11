@@ -89,6 +89,7 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
     }
 
     process {
+        Write-Host "$logPrefix Beginning EM Catalog Resource Role"
 
         if($SkipControlPlaneDelegation){
             Write-Verbose "$logPrefix Skipping Control Plane catalog roles"

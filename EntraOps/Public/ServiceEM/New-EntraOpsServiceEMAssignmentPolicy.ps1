@@ -237,6 +237,8 @@ function New-EntraOpsServiceEMAssignmentPolicy {
     }
 
     process {
+        Write-Host "$logPrefix Beginning EM Assignment Policy"
+
         foreach($package in $ServicePackages){
             $policyParams.accessPackage.id = $package.Id
             if($package.Id -notin $policies.AccessPackage.Id){

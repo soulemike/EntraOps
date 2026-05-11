@@ -19,6 +19,9 @@ BeforeAll {
     $ModulePath = Join-Path $PSScriptRoot ".." ".." "EntraOps" "EntraOps.psd1"
     Import-Module $ModulePath -Force -ErrorAction Stop
     
+    # Script-scoped storage for mock groups (simulates Graph API state)
+    $script:MockGroups = @{}
+    
     # Mock Invoke-EntraOpsMsGraphQuery to avoid actual API calls
     function Mock-InvokeEntraOpsMsGraphQuery {
         param(
@@ -31,17 +34,28 @@ BeforeAll {
         )
         
         if ($Method -eq "GET") {
-            # Return empty array for group lookups (groups don't exist yet)
-            return @()
+            # Return groups matching the search criteria from mock storage
+            $result = @()
+            foreach ($group in $script:MockGroups.Values) {
+                if ($Uri -match "mailNickname:([^`"]+)") {
+                    $searchNickname = $matches[1]
+                    if ($group.MailNickname -like "$searchNickname*") {
+                        $result += $group
+                    }
+                }
+            }
+            return $result
         } elseif ($Method -eq "POST") {
-            # Simulate successful group creation
+            # Simulate successful group creation and store in mock
             $bodyObj = $Body | ConvertFrom-Json
-            return [pscustomobject]@{
+            $newGroup = [pscustomobject]@{
                 Id = [guid]::NewGuid().ToString()
                 DisplayName = $bodyObj.displayName
                 MailNickname = $bodyObj.mailNickname
                 GroupTypes = $bodyObj.groupTypes
             }
+            $script:MockGroups[$newGroup.Id] = $newGroup
+            return $newGroup
         }
     }
     
@@ -49,6 +63,11 @@ BeforeAll {
 }
 
 Describe "New-EntraOpsServiceEntraGroup" {
+    BeforeEach {
+        # Reset mock group storage for each test
+        $script:MockGroups = @{}
+    }
+    
     Context "Parameter Validation" {
         It "Should throw when ServiceName is empty" {
             { 

@@ -72,6 +72,8 @@ function New-EntraOpsServicePIMPolicy {
     }
 
     process {
+        Write-Host "$logPrefix Beginning PIM Policy"
+
         foreach($group in $ServiceGroups|Where-Object{$_.DisplayName -notlike "*Members*"}){
             # Determine access level from group DisplayName
             $accessLevel = $null

@@ -84,6 +84,8 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
     }
 
     process {
+        Write-Host "$logPrefix Beginning EM Access Package Resource Assignment"
+
         Write-Verbose "$logPrefix Processing Access Package Assignments for $(($ServiceGroups|Measure-Object).Count) Groups"
         foreach($group in $ServiceGroups){
             # Skip PIM groups and delegated groups — delegated groups are not catalog resources

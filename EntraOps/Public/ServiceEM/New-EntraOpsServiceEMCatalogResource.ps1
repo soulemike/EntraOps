@@ -59,6 +59,8 @@ function New-EntraOpsServiceEMCatalogResource {
     }
 
     process {
+        Write-Host "$logPrefix Beginning EM Catalog Resource"
+
         Write-Verbose "$logPrefix Processing $(($ServiceGroups|Measure-Object).Count) Catalog Resources"
         foreach($group in $ServiceGroups){
             $resourceRequestParam = @{

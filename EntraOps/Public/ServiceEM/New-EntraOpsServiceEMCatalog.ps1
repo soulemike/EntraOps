@@ -44,6 +44,8 @@ function New-EntraOpsServiceEMCatalog {
     }
 
     process {
+        Write-Host "$logPrefix Beginning EM Catalog"
+
         try{
             if(-not $catalog){
                 Write-Verbose "$logPrefix Creating Catalog"
