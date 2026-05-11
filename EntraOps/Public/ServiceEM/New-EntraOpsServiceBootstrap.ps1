@@ -17,6 +17,11 @@
     The UserId (i.e., UPN) of the Service owner
     Will default to the identity logged on to Graph
 
+.PARAMETER AssignOwner
+    By default the module does not assign an owner to objects due to the 
+    potential privileged escalation concerns. Setting this switch will assign
+    the supplied owner from ServiceOwner.
+
 .PARAMETER OwnerIsNotMember
     Set this flag to not include the Service owner as a member of the service
 
@@ -133,6 +138,8 @@ function New-EntraOpsServiceBootstrap {
 
         [string]$ServiceOwner,
 
+        [switch]$AssignOwner,
+
         [switch]$OwnerIsNotMember,  
 
         [switch]$ProhibitDirectElevation,
@@ -169,40 +176,42 @@ function New-EntraOpsServiceBootstrap {
 
         #todo move regions to cmdlets
         #region ServiceOwner
-        try {
-            Write-Verbose "$logPrefix Service Owner Graph API Lookup"
-            if (-not $PSBoundParameters.ContainsKey("ServiceOwner")) {
-                $mgContext = Get-MgContext
-                # Check if using AppOnly auth (service principal) without explicit owner
-                if ([string]::IsNullOrWhiteSpace($mgContext.Account) -or $mgContext.AuthType -eq "AppOnly") {
-                    throw "ServiceOwner parameter is required when using service principal (AppOnly) authentication. Please specify -ServiceOwner with a user UPN (e.g., 'user@contoso.com') or user ID."
-                }
-                Write-Verbose "$logPrefix ServiceOwner not specified, looking up $($mgContext.Account)"
-                $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$($mgContext.Account)" -OutputType PSObject
-                $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
-            } else {
-                Write-Verbose "$logPrefix ServiceOwner set, looking up $ServiceOwner"
-                # Handle both user and service principal URLs
-                if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/') {
-                    # Service principal URL provided
-                    $spId = $ServiceOwner -replace '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/', ''
-                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals/$spId" -OutputType PSObject
-                    $owner = "https://graph.microsoft.com/v1.0/servicePrincipals/$($graphOwner.Id)"
-                } elseif ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/users/') {
-                    # User URL provided
-                    $userId = $ServiceOwner -replace '^https://graph\.microsoft\.com/v1\.0/users/', ''
-                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$userId" -OutputType PSObject
+        if($AssignOwner){
+            try {
+                Write-Verbose "$logPrefix Service Owner Graph API Lookup"
+                if (-not $PSBoundParameters.ContainsKey("ServiceOwner")) {
+                    $mgContext = Get-MgContext
+                    # Check if using AppOnly auth (service principal) without explicit owner
+                    if ([string]::IsNullOrWhiteSpace($mgContext.Account) -or $mgContext.AuthType -eq "AppOnly") {
+                        throw "ServiceOwner parameter is required when using service principal (AppOnly) authentication. Please specify -ServiceOwner with a user UPN (e.g., 'user@contoso.com') or user ID."
+                    }
+                    Write-Verbose "$logPrefix ServiceOwner not specified, looking up $($mgContext.Account)"
+                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$($mgContext.Account)" -OutputType PSObject
                     $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
                 } else {
-                    # Assume it's a UPN or user ID
-                    $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$ServiceOwner" -OutputType PSObject
-                    $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
+                    Write-Verbose "$logPrefix ServiceOwner set, looking up $ServiceOwner"
+                    # Handle both user and service principal URLs
+                    if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/') {
+                        # Service principal URL provided
+                        $spId = $ServiceOwner -replace '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/', ''
+                        $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals/$spId" -OutputType PSObject
+                        $owner = "https://graph.microsoft.com/v1.0/servicePrincipals/$($graphOwner.Id)"
+                    } elseif ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/users/') {
+                        # User URL provided
+                        $userId = $ServiceOwner -replace '^https://graph\.microsoft\.com/v1\.0/users/', ''
+                        $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$userId" -OutputType PSObject
+                        $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
+                    } else {
+                        # Assume it's a UPN or user ID
+                        $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$ServiceOwner" -OutputType PSObject
+                        $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
+                    }
                 }
+                Write-Verbose "$logPrefix Setting owner as $owner"
+            } catch {
+                Write-Verbose "$logPrefix Failed to process Service Owner"
+                Write-Error $_
             }
-            Write-Verbose "$logPrefix Setting owner as $owner"
-        } catch {
-            Write-Verbose "$logPrefix Failed to process Service Owner"
-            Write-Error $_
         }
         #endregion
 

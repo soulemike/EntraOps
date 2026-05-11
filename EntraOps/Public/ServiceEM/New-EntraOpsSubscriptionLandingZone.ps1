@@ -41,6 +41,11 @@
     UPN of the service owner (sets group ownership in both scopes). Defaults
     to the signed-in identity.
 
+.PARAMETER AssignOwner
+    By default the module does not assign an owner to objects due to the 
+    potential privileged escalation concerns. Setting this switch will assign
+    the supplied owner from ServiceOwner.
+
 .PARAMETER OwnerIsNotMember
     When set, the owner is not automatically added as a WorkloadPlane member.
 
@@ -183,16 +188,22 @@
 #>
 function New-EntraOpsSubscriptionLandingZone {
     [OutputType([System.String])]
-    [cmdletbinding()]
+    [cmdletbinding(DefaultParameterSetName="Default")]
     param(
         [string[]]$ServiceMembers,
 
+        [Parameter(Mandatory, ParameterSetName = "SetOwner")]
         [string]$ServiceOwner,
 
+        [Parameter(ParameterSetName = "SetOwner")]
         [switch]$OwnerIsNotMember,
+
+        [Parameter(Mandatory, ParameterSetName = "SetOwner")]
+        [switch]$AssignOwner,
 
         [switch]$ProhibitDirectElevation,
 
+        [Parameter(ParameterSetName = "SetOwner")]
         [switch]$EnablePIMOwnerAssignment,
 
         [switch]$SkipAzureResourceGroup,
@@ -465,6 +476,7 @@ function New-EntraOpsSubscriptionLandingZone {
             $splatServiceBootstrap = @{
                 ServiceName                      = $component.Role + "-" + $DeploymentPrefix
                 OwnerIsNotMember                 = $OwnerIsNotMember
+                AssignOwner                      = $AssignOwner
                 ProhibitDirectElevation          = $ProhibitDirectElevation
                 EnablePIMOwnerAssignment         = $EnablePIMOwnerAssignment
                 AzureRegion                      = $AzureRegion
