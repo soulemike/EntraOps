@@ -21,9 +21,123 @@ ServiceEM creates and manages:
 - **Configuration-Driven**: All settings managed through `EntraOpsConfig.json` for consistent, repeatable deployments
 - **Smart Provisioning**: Detects inherited permissions to avoid redundant role assignments
 
-## Quick Start
+## Getting Started
+
+### For Human Users (5-Minute Quick Start)
+
+Get your first landing zone deployed in 3 steps:
+
+#### Step 1: Install Prerequisites (One-time)
+
+```powershell
+# Install required modules
+Install-Module Microsoft.Graph -Scope CurrentUser
+Install-Module Az -Scope CurrentUser
+
+# Import EntraOps
+Import-Module ./EntraOps
+
+# Connect to services
+Connect-MgGraph -Scopes "Group.ReadWrite.All","EntitlementManagement.ReadWrite.All"
+Connect-AzAccount
+```
+
+#### Step 2: Deploy Your First Landing Zone
+
+```powershell
+New-EntraOpsSubscriptionLandingZone `
+    -DeploymentPrefix "MyFirstApp" `
+    -AzureRegion "westeurope" `
+    -ServiceOwner "alice@contoso.com" `
+    -ServiceMembers @("bob@contoso.com") `
+    -Verbose
+```
+
+**That's it!** This creates:
+- ✅ Entra ID security groups with tiered access (ControlPlane, ManagementPlane, WorkloadPlane)
+- ✅ Entitlement Management catalog and access packages
+- ✅ PIM policies for just-in-time elevation
+- ✅ Azure Resource Group with RBAC assignments
+
+#### Step 3: Verify Deployment
+
+```powershell
+# Check created groups
+Get-MgGroup -Filter "startswith(DisplayName,'MyFirstApp')"
+
+# Check access packages
+Get-MgEntitlementManagementAccessPackage -Filter "startswith(DisplayName,'AP-')"
+```
+
+**Next Steps:**
+- See [Detailed Setup Guide](#detailed-setup-guide) for production configurations
+- See [Governance Models](#governance-models-and-persona-based-groups) to choose between PerService and Centralized
+- See [Common Deployment Scenarios](#common-deployment-scenarios) for advanced examples
+
+---
+
+### For AI Users
+
+If you're an AI assistant working with ServiceEM, here's what you need to know:
+
+#### Core Capability
+ServiceEM automates the creation of **tiered, service-scoped landing zones** following Microsoft's Enterprise Access Model. It provisions Entra ID groups, access packages, PIM policies, and Azure RBAC as a unified capability.
+
+#### Key Concepts
+- **Three Tiers**: ControlPlane (highest privilege), ManagementPlane (resource management), WorkloadPlane (application access)
+- **Two Governance Models**:
+  - **PerService** (default): Creates dedicated admin groups per service - use for dev/test or isolated services
+  - **Centralized**: Uses shared tenant-wide admin groups - use for production with dedicated ops teams
+- **Access Packages**: Self-service group membership with approval workflows via Entra ID Governance
+
+#### When to Use ServiceEM
+- ✅ Creating new service landing zones in Azure
+- ✅ Implementing tiered administration with least-privilege access
+- ✅ Setting up delegated administration with PIM
+- ✅ Enabling self-service access requests via access packages
+
+#### Key Parameters for AI
+```powershell
+New-EntraOpsSubscriptionLandingZone `
+    -DeploymentPrefix <string>          # Required: Service name prefix
+    -AzureRegion <string>               # Required: Azure region (e.g., "westeurope")
+    -ServiceOwner <string>              # Required: Owner's email
+    -ServiceMembers <array>             # Optional: Member emails
+    -GovernanceModel <string>           # Optional: "PerService" (default) or "Centralized"
+    -SkipAzureResourceGroup             # Optional: Skip Azure RG creation (Entra only)
+    -ProhibitDirectElevation            # Optional: No emergency bypass groups
+    -Verbose                            # Recommended: See what's being created
+```
+
+#### AI Context Checklist
+Before suggesting ServiceEM commands, verify:
+1. **User has required permissions**: Group.ReadWrite.All, EntitlementManagement.ReadWrite.All
+2. **For Centralized model**: Pre-existing delegation groups exist in EntraOpsConfig.json
+3. **For Azure resources**: User has Azure subscription permissions (UAA or Owner)
+4. **ServiceOwner and ServiceMembers**: Valid email addresses in the tenant
+
+#### Common AI Patterns
+```powershell
+# Dev/Test (simplest)
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "DevApp" -AzureRegion "westeurope" -ServiceOwner "dev@contoso.com"
+
+# Production with Centralized governance
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "ProdAPI" -AzureRegion "westeurope" -ServiceOwner "api-owner@contoso.com" -ServiceMembers @("dev1@contoso.com") -GovernanceModel "Centralized"
+
+# Entra-only (no Azure resources)
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -AzureRegion "westeurope" -ServiceOwner "admin@contoso.com" -SkipAzureResourceGroup
+```
+
+#### Troubleshooting for AI
+- **Missing groups**: Check if `-SkipAzureResourceGroup` was used (skips some Rg-scope groups)
+- **Assignment policy errors**: Usually caused by invalid ServiceOwner/ServiceMembers emails
+- **Azure RBAC failures**: User lacks Azure subscription permissions
 
 > **💡 Visual Learner?** See the **[ServiceEM Landing Zone Visualization](./EntraOps/Public/ServiceEM/ServiceEM-LandingZone-Visualization.md)** for interactive Mermaid diagrams showing group structures, access packages, policies, and RBAC assignments for both Centralized and PerService governance models.
+
+---
+
+## Detailed Setup Guide
 
 ### Prerequisites
 
@@ -1012,16 +1126,88 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 | `SG-Sub-{Prefix}-ControlPlane-Admins` | Security | Catalog owner; PIM eligible for User Access Administrator |
 | `SG-Sub-{Prefix}-PIM-ManagementPlane-Admins` | Security (optional) | PIM proxy group (created unless `-ProhibitDirectElevation` used) |
 
-**Rg Scope:**
+> **Note on PIM Staging Groups:** The `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` group is created as a staging group for PIM elevation workflows. This group is not documented in the original table above but is consistently created during deployment. It enables the PIM elevation path from Members to ManagementPlane-Admins.
+
+**Rg Scope (Default - without -Smb):**
+| Group | Type | Purpose |
+|---|---|---|
+| `Rg-{Prefix} Members` | Unified (M365) | Team collaboration group |
+| `SG-Rg-{Prefix}-CatalogPlane-Members` | Security | Catalog administrators |
+| `SG-Rg-{Prefix}-ManagementPlane-Members` | Security | Management tier membership |
+| `SG-Rg-{Prefix}-WorkloadPlane-Users` | Security | End-user data-plane access |
+| `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Security | Workload admin elevation |
+
+**Rg Scope (with -Smb parameter):**
 | Group | Type | Purpose |
 |---|---|---|
 | `Rg-{Prefix} Members` | Unified (M365) | Team collaboration group |
 | `SG-Rg-{Prefix}-CatalogPlane-Members` | Security | Catalog administrators |
 | `SG-Rg-{Prefix}-ManagementPlane-Members` | Security | Management tier membership |
 | `SG-Rg-{Prefix}-ManagementPlane-Admins` | Security | Management tier elevation |
-| `SG-Rg-{Prefix}-WorkloadPlane-Members` | Security | Workload tier membership |
 | `SG-Rg-{Prefix}-WorkloadPlane-Users` | Security | End-user data-plane access |
 | `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Security | Workload admin elevation |
+
+> **Note:** The `-Smb` parameter shifts ManagementPlane-Admins from Sub scope to Rg scope. By default (without `-Smb`), ManagementPlane-Admins is created in Sub scope only. WorkloadPlane-Members is not created in either scope by default.
+
+### Subscription-Level Azure RBAC Implementation
+
+When deploying a ServiceEM landing zone with Azure resource creation enabled (without `-SkipAzureResourceGroup`), the following Azure RBAC assignments are implemented at the subscription level:
+
+#### PIM Eligible Assignments (Sub Scope)
+
+| Group | Azure RBAC Role | Scope | Purpose |
+|-------|----------------|-------|---------|
+| `SG-Sub-{Prefix}-ControlPlane-Admins` | User Access Administrator | Subscription | Manage access to all Azure resources in subscription |
+| `SG-Sub-{Prefix}-ManagementPlane-Admins` | Contributor | Subscription | Full access to Azure resources (excluding RBAC) |
+
+#### Prerequisites for Azure RBAC
+
+To create Azure RBAC assignments, the service principal requires:
+
+1. **Entra ID Permissions:**
+   - `RoleManagement.ReadWrite.Directory` (for PIM operations)
+   
+2. **Azure Permissions:**
+   - User Access Administrator or Owner role at subscription scope
+   - Or custom role with `Microsoft.Authorization/roleAssignments/write`
+
+#### When Azure RBAC is NOT Created
+
+Azure RBAC assignments are **skipped** when:
+- `-SkipAzureResourceGroup` parameter is used
+- Service principal lacks Azure subscription permissions
+- Azure subscription is not accessible
+- `-WhatIf` parameter is used (preview mode)
+
+> **Important:** When using `-SkipAzureResourceGroup`, only Entra ID objects (groups, catalogs, access packages) are created. Azure RBAC assignments and resource groups are not created. This is useful for testing or when Azure resources will be managed separately.
+
+#### PIM for Groups Integration
+
+ServiceEM creates PIM eligible assignments that enable just-in-time elevation:
+
+1. **Members Group to Admin Groups:**
+   - `Sub-{Prefix} Members` is made eligible for `SG-Sub-{Prefix}-ControlPlane-Admins`
+   - `Sub-{Prefix} Members` is made eligible for `SG-Sub-{Prefix}-ManagementPlane-Admins`
+   - `Rg-{Prefix} Members` is made eligible for `SG-Rg-{Prefix}-WorkloadPlane-Admins`
+
+2. **PIM Policies:**
+   - Default policy requires approval for elevation
+   - Authentication context can be enforced (if configured in EntraOpsConfig.json)
+   - Time-bound access with maximum duration
+
+#### Verification Commands
+
+```powershell
+# Check PIM eligible assignments
+Get-MgPrivilegedAccessGroupEligibilitySchedule `
+    -PrivilegedAccessId "aadGroups" `
+    -Filter "groupId eq '$groupId'"
+
+# Check Azure RBAC assignments
+Get-AzRoleAssignment `
+    -ObjectId $groupId `
+    -Scope "/subscriptions/$subscriptionId"
+```
 
 ### Access Packages Created
 
@@ -1043,18 +1229,137 @@ Access packages are **only created for groups**, not for delegated groups. The n
 |---|---|---|---|---|
 | `AP-Sub-{Prefix}-CatalogPlane-Members` | `SG-Sub-{Prefix}-CatalogPlane-Members` | CatalogPlane-Members | CatalogPlane-Members | 5 days |
 | `AP-Sub-{Prefix}-ManagementPlane-Members` | `SG-Sub-{Prefix}-ManagementPlane-Members` | WorkloadPlane-Members | ManagementPlane-Admins | None |
+| `AP-Sub-{Prefix}-ManagementPlane-Admins` | `SG-Sub-{Prefix}-ManagementPlane-Admins` | ManagementPlane-Members | ManagementPlane-Admins | 5 days |
 
-**Rg Scope:**
+**Rg Scope (Default - 4 access packages):**
 | Access Package | Grants Membership To | Requestors | Approver | Expiration |
 |---|---|---|---|---|
 | `AP-Rg-{Prefix}-CatalogPlane-Members` | `SG-Rg-{Prefix}-CatalogPlane-Members` | CatalogPlane-Members | CatalogPlane-Members | 5 days |
 | `AP-Rg-{Prefix}-ManagementPlane-Members` | `SG-Rg-{Prefix}-ManagementPlane-Members` | WorkloadPlane-Members | ManagementPlane-Admins | None |
-| `AP-Rg-{Prefix}-WorkloadPlane-Members` | `SG-Rg-{Prefix}-WorkloadPlane-Members` | All directory members | Org-chart manager (L1), fallback CatalogPlane-Members | None |
 | `AP-Rg-{Prefix}-WorkloadPlane-Users` | `SG-Rg-{Prefix}-WorkloadPlane-Users` | CatalogPlane-Members | WorkloadPlane-Admins | 5 days |
 | `AP-Rg-{Prefix}-WorkloadPlane-Admins` | `SG-Rg-{Prefix}-WorkloadPlane-Admins` | WorkloadPlane-Members | ManagementPlane-Admins | 5 days |
-| `AP-Rg-{Prefix}-ManagementPlane-Admins` | `SG-Rg-{Prefix}-ManagementPlane-Admins` | ManagementPlane-Members | ManagementPlane-Admins | 5 days |
 
-> **Note**: No access packages are created for ControlPlane-Admins or ManagementPlane-Admins in PerService model either — membership is managed directly by ControlPlane admins.
+**Rg Scope (with -Smb parameter - 6 access packages):**
+| Access Package | Grants Membership To | Requestors | Approver | Expiration |
+|---|---|---|---|---|
+| `AP-Rg-{Prefix}-CatalogPlane-Members` | `SG-Rg-{Prefix}-CatalogPlane-Members` | CatalogPlane-Members | CatalogPlane-Members | 5 days |
+| `AP-Rg-{Prefix}-ManagementPlane-Members` | `SG-Rg-{Prefix}-ManagementPlane-Members` | WorkloadPlane-Members | ManagementPlane-Admins | None |
+| `AP-Rg-{Prefix}-ManagementPlane-Admins` | `SG-Rg-{Prefix}-ManagementPlane-Admins` | ManagementPlane-Members | ManagementPlane-Admins | 5 days |
+| `AP-Rg-{Prefix}-WorkloadPlane-Users` | `SG-Rg-{Prefix}-WorkloadPlane-Users` | CatalogPlane-Members | WorkloadPlane-Admins | 5 days |
+| `AP-Rg-{Prefix}-WorkloadPlane-Admins` | `SG-Rg-{Prefix}-WorkloadPlane-Admins` | WorkloadPlane-Members | ManagementPlane-Admins | 5 days |
+
+> **Note:** Access packages are only created for groups that exist. The `-Smb` parameter creates additional access packages by adding ManagementPlane-Admins to Rg scope. WorkloadPlane-Members access package is not created by default as the group is not created.
+
+> **Note**: No access packages are created for ControlPlane-Admins — membership is managed directly by ControlPlane admins.
+
+### Assignment Policies
+
+Each access package has an **assignment policy** that controls who can request access, who must approve, and how long access lasts. ServiceEM automatically creates assignment policies with default configurations.
+
+#### Default Assignment Policy Configuration
+
+| Setting | Default Value | Description |
+|---------|--------------|-------------|
+| **Allowed Requestors** (`allowedTargetScope`) | `specificDirectoryUsers` | Only specific users/groups can request access |
+| **Approval Required** | Yes | All requests require approval (except CatalogPlane-Members) |
+| **Approvers** | Tier-specific admins | ManagementPlane-Admins, WorkloadPlane-Admins, or CatalogPlane-Members |
+| **Access Duration** (`expiration`) | 5 days | Access expires after 5 days (can be renewed) |
+| **Access Reviews** | Not configured | Optional - must be added manually post-deployment |
+| **Questions** | None | No custom questions configured by default |
+
+#### Assignment Policy Creation Behavior
+
+**Successfully Created:**
+- Most assignment policies are created successfully during deployment
+- Policies are linked to their respective access packages
+
+**Common Issues:**
+- **BadRequest errors**: Some assignment policies may fail to create due to:
+  - Missing approver groups (if groups haven't replicated yet)
+  - Invalid user references in ServiceMembers
+  - Graph API replication delays
+  
+> **Note:** If assignment policy creation fails, the access package is still created but won't have an assignment policy. You must manually create the policy in the Azure Portal or via PowerShell.
+
+#### Post-Deployment Actions
+
+After deployment, review and customize assignment policies:
+
+1. **Review in Azure Portal:**
+   - Navigate to Identity Governance > Access packages
+   - Select the access package
+   - Review the "Policy" tab
+
+2. **Customize Approvers:**
+   - Adjust approver groups based on your organization structure
+   - Add fallback approvers
+   - Configure multi-stage approval if needed
+
+3. **Adjust Access Duration:**
+   - Modify expiration settings per organizational requirements
+   - Configure access reviews for compliance
+
+4. **Add Custom Questions:**
+   - Add justification questions
+   - Configure required fields
+
+#### PowerShell Commands
+
+```powershell
+# Get all assignment policies for an access package
+Get-MgEntitlementManagementAssignmentPolicy `
+    -AccessPackageId $accessPackageId
+
+# Create a new assignment policy
+$newPolicy = @{
+    displayName = "Custom Policy"
+    accessPackageId = $accessPackageId
+    allowedTargetScope = "specificDirectoryUsers"
+    specificAllowedTargets = @(
+        @{
+            targetObjectId = $groupId
+            targetType = "groupMembers"
+        }
+    )
+    requestApprovalSettings = @{
+        isApprovalRequired = $true
+        approvalStages = @(
+            @{
+                approvalStageTimeOutInDays = 14
+                isApproverJustificationRequired = $true
+                escalationTimeInMinutes = 11520
+                primaryApprovers = @(
+                    @{
+                        id = $approverGroupId
+                        type = "groupMembers"
+                    }
+                )
+            }
+        )
+    }
+    expiration = @{
+        durationDays = 5
+        type = "afterDuration"
+    }
+}
+
+New-MgEntitlementManagementAssignmentPolicy `
+    -BodyParameter $newPolicy
+```
+
+#### Troubleshooting Assignment Policy Failures
+
+**Symptom:**
+```
+WARNING: Failed to execute .../assignmentPolicies
+Error: Response status code does not indicate success: BadRequest
+```
+
+**Resolution Steps:**
+1. Wait 5-10 minutes for group replication, then retry
+2. Verify ServiceOwner and ServiceMembers are valid users
+3. Check that all referenced groups exist
+4. Manually create the assignment policy in Azure Portal
 
 ### Module Dependencies
 
@@ -1101,6 +1406,320 @@ When a delegation Group ID is provided (via `EntraOpsConfig.json` or parameter),
 | **Access package created** | No | No | No |
 
 The delegated groups are **read-only** from ServiceEM's perspective — they receive role assignments and policy references but are never modified (no PIM policies, no eligibility assignments).
+
+### Parameter Impact Matrix
+
+This matrix shows how each parameter affects the objects created during deployment:
+
+#### New-EntraOpsSubscriptionLandingZone Parameters
+
+| Parameter | Sub Scope Groups | Rg Scope Groups | Azure Resources | Access Packages | Assignment Policies |
+|-----------|-----------------|-----------------|-----------------|-----------------|---------------------|
+| **None (defaults)** | ✅ 6 created | ✅ 7 created | ✅ RG + RBAC | ✅ 9 created | ✅ Created |
+| `-SkipAzureResourceGroup` | ✅ 6 created | ⚠️ 5 created* | ❌ Skipped | ⚠️ 7 created* | ⚠️ Partial* |
+| `-ProhibitDirectElevation` | ✅ 6 created (no PIM staging) | ✅ 7 created (no PIM staging) | ✅ RG + RBAC | ✅ 9 created | ✅ Created |
+| `-GovernanceModel Centralized` | ⚠️ 1 created | ⚠️ 3 created | ✅ RG + RBAC | ⚠️ 2 created | ⚠️ Partial |
+| `-ServiceOwner` | ✅ Owned | ✅ Owned | N/A | ✅ Approver | ✅ Configured |
+| `-ServiceMembers` | ✅ Assigned | ✅ Assigned | N/A | ✅ Requestors | ✅ Configured |
+
+**Legend:**
+- ✅ Created/Configured as expected
+- ⚠️ Partial/Created with limitations
+- ❌ Not created/Skipped
+
+#### Detailed Impact Explanations
+
+**`-SkipAzureResourceGroup`**
+
+When this parameter is used:
+
+**Created:**
+- All Sub scope groups (6)
+- Most Rg scope groups (5 of 7)
+- All catalogs (2)
+- Most access packages (7 of 9)
+- PIM policies and assignments
+
+**Skipped:**
+- Azure Resource Group creation
+- Azure RBAC assignments
+- **Rg Scope Groups Missing:**
+  - SG-Rg-{Prefix}-ManagementPlane-Admins
+  - SG-Rg-{Prefix}-WorkloadPlane-Members
+- **Rg Scope Access Packages Missing:**
+  - AP-Rg-{Prefix}-WorkloadPlane-Members
+  - AP-Rg-{Prefix}-ManagementPlane-Admins
+
+> **Recommendation:** Only use `-SkipAzureResourceGroup` for testing Entra ID objects. For production deployments, omit this parameter to ensure complete Rg scope creation.
+
+**`-GovernanceModel Centralized`**
+
+When using Centralized governance:
+
+**Created:**
+- Sub-{Prefix} Members (Unified)
+- Rg-{Prefix} Members (Unified)
+- SG-Rg-{Prefix}-WorkloadPlane-Users
+- SG-Rg-{Prefix}-WorkloadPlane-Admins
+- 2 access packages (Rg scope only)
+
+**Delegated (Not Created):**
+- ControlPlane-Admins (uses tenant-wide delegation group)
+- ManagementPlane-Admins (uses tenant-wide delegation group)
+- CatalogPlane-Members (uses administrator group)
+
+**Prerequisites:**
+- ControlPlaneDelegationGroupId in EntraOpsConfig.json
+- ManagementPlaneDelegationGroupId in EntraOpsConfig.json
+- AdministratorGroupId in EntraOpsConfig.json
+
+**`-ProhibitDirectElevation`**
+
+When this parameter is used:
+
+**Impact:**
+- PIM staging groups (SG-PIM-*) are NOT created
+- Direct elevation paths are disabled
+- Members must use alternative elevation methods
+
+**Use Case:** Organizations with strict separation of duties requirements
+
+**`-ServiceOwner` and `-ServiceMembers`**
+
+**ServiceOwner:**
+- Set as owner of all created groups
+- Configured as approver in assignment policies
+- Must be a valid user object (not service principal)
+
+**ServiceMembers:**
+- Assigned to appropriate access packages
+- Configured as requestors in assignment policies
+- Must be valid user objects
+
+> **Note:** If ServiceOwner or ServiceMembers are invalid, assignment policy creation may fail with BadRequest errors.
+
+### Troubleshooting
+
+This section provides solutions for common issues encountered during ServiceEM deployment.
+
+#### Issue: Assignment Policy Creation Fails
+
+**Symptom:**
+```
+WARNING: Failed to execute .../assignmentPolicies
+Error: Response status code does not indicate success: BadRequest
+```
+
+**Causes:**
+1. **Invalid approver references** - Approver group doesn't exist or hasn't replicated
+2. **Missing ServiceOwner** - ServiceOwner parameter not provided or invalid
+3. **Invalid ServiceMembers** - User not found in directory
+4. **Graph replication delay** - Groups created but not yet indexed
+
+**Resolution:**
+
+1. **Wait and Retry:**
+   ```powershell
+   # Wait 5-10 minutes for Graph replication
+   Start-Sleep -Seconds 300
+   
+   # Retry deployment
+   New-EntraOpsSubscriptionLandingZone @params
+   ```
+
+2. **Verify Users:**
+   ```powershell
+   # Check ServiceOwner exists
+   Get-MgUser -UserId $ServiceOwner
+   
+   # Check ServiceMembers exist
+   $ServiceMembers | ForEach-Object {
+       Get-MgUser -UserId $_
+   }
+   ```
+
+3. **Manual Creation:**
+   If retry fails, manually create assignment policies:
+   ```powershell
+   # See Assignment Policies section for PowerShell examples
+   ```
+
+#### Issue: Incomplete Rg Scope
+
+**Symptom:**
+Rg scope has fewer groups or access packages than expected.
+
+**Example:**
+- Expected: 7 Rg scope groups
+- Actual: 5 Rg scope groups
+- Missing: ManagementPlane-Admins, WorkloadPlane-Members
+
+**Cause:**
+Using `-SkipAzureResourceGroup` parameter
+
+**Resolution:**
+
+1. **For Testing (Accept Incomplete Scope):**
+   - Current behavior is expected when using `-SkipAzureResourceGroup`
+   - Document the limitation
+
+2. **For Production (Complete Scope):**
+   ```powershell
+   # Remove -SkipAzureResourceGroup parameter
+   New-EntraOpsSubscriptionLandingZone `
+       -DeploymentPrefix "MyApp" `
+       -AzureRegion "westeurope" `
+       -ServiceOwner "admin@contoso.com" `
+       -ServiceMembers @("user@contoso.com")
+   ```
+
+#### Issue: Service Principal Authentication Fails
+
+**Symptom:**
+```
+Connect-MgGraph: Unix LocalMachine X509Store is limited to the Root and CertificateAuthority stores.
+```
+
+**Cause:**
+CertificateThumbprint parameter doesn't work on Unix/Linux systems
+
+**Resolution:**
+Use certificate file instead:
+```powershell
+$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+    "./path/to/certificate.pfx",
+    (ConvertTo-SecureString "password" -AsPlainText)
+)
+
+Connect-MgGraph `
+    -ClientId "your-client-id" `
+    -TenantId "your-tenant-id" `
+    -Certificate $cert
+```
+
+#### Issue: Access Package Assignment Stuck
+
+**Symptom:**
+```
+WARNING: [New-EntraOpsServiceEMAssignment] Fulfillment can take 5+ minutes to complete
+```
+
+**Cause:**
+Access package assignments require background processing
+
+**Resolution:**
+1. This is normal behavior - wait 5-10 minutes
+2. Check assignment status:
+   ```powershell
+   Get-MgEntitlementManagementAssignment `
+       -AccessPackageId $accessPackageId
+   ```
+3. If still pending after 30 minutes, check for errors in Azure Portal
+
+#### Issue: Catalog Resource Creation Fails
+
+**Symptom:**
+```
+WARNING: Failed to execute .../resourceRequests
+Error: Response status code does not indicate success: BadRequest
+```
+
+**Cause:**
+Groups not fully replicated before catalog resource registration
+
+**Resolution:**
+1. Wait 5-10 minutes for Graph replication
+2. Manually add groups to catalog:
+   ```powershell
+   New-MgEntitlementManagementCatalogResource `
+       -AccessPackageCatalogId $catalogId `
+       -RequestType "AdminAdd" `
+       -Resources @(@{originSystem = "AadGroup"; originId = $groupId})
+   ```
+
+#### Issue: Missing Azure RBAC Assignments
+
+**Symptom:**
+No Azure RBAC role assignments created after deployment
+
+**Causes:**
+1. Using `-SkipAzureResourceGroup`
+2. Service principal lacks Azure permissions
+3. Azure subscription not accessible
+
+**Resolution:**
+
+1. **Check Parameter:**
+   ```powershell
+   # Ensure -SkipAzureResourceGroup is NOT used
+   New-EntraOpsSubscriptionLandingZone `
+       -DeploymentPrefix "MyApp" `
+       -AzureRegion "westeurope" `
+       # ... other parameters
+       # Do NOT include -SkipAzureResourceGroup
+   ```
+
+2. **Verify Azure Permissions:**
+   ```powershell
+   # Check service principal has Azure RBAC permissions
+   Get-AzRoleAssignment `
+       -ObjectId $servicePrincipalObjectId `
+       -Scope "/subscriptions/$subscriptionId"
+   ```
+
+3. **Manual Assignment:**
+   ```powershell
+   # Manually create PIM eligible assignment
+   New-AzRoleAssignment `
+       -ObjectId $groupId `
+       -RoleDefinitionName "User Access Administrator" `
+       -Scope "/subscriptions/$subscriptionId" `
+       -AssignPrincipalId $groupId
+   ```
+
+#### Issue: PIM Policy Not Applied
+
+**Symptom:**
+Groups don't have PIM policies configured
+
+**Cause:**
+PIM for Groups not enabled in tenant or missing permissions
+
+**Resolution:**
+1. Verify PIM for Groups is enabled:
+   ```powershell
+   Get-MgPolicyPrivilegedAccessGroupPolicy `
+       -PrivilegedAccessId "aadGroups"
+   ```
+
+2. Check service principal has `RoleManagement.ReadWrite.Directory` permission
+
+3. Manually configure PIM policies in Azure Portal
+
+### Verification Checklist
+
+After deployment, verify the following:
+
+#### Entra ID Objects
+- [ ] All expected groups created (check count)
+- [ ] Groups have correct owners
+- [ ] Catalogs created and published
+- [ ] Access packages created
+- [ ] Assignment policies configured (or manually created if failed)
+- [ ] PIM policies applied to eligible groups
+- [ ] PIM eligibility assignments created
+
+#### Azure Resources (if not using -SkipAzureResourceGroup)
+- [ ] Resource group created
+- [ ] RBAC assignments created at subscription scope
+- [ ] RBAC assignments created at resource group scope
+- [ ] PIM eligible assignments configured
+
+#### Access and Permissions
+- [ ] ServiceOwner can manage all groups
+- [ ] ServiceMembers can request access packages
+- [ ] Approvers receive approval requests
+- [ ] Elevation through PIM works correctly
 
 ## References
 
