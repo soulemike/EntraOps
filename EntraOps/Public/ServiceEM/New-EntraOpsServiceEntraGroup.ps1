@@ -20,7 +20,7 @@
     Name of the service. Forms the central segment of the group MailNickname
     and DisplayName.
 
-.PARAMETER ServiceOwner
+.PARAMETER WorkloadPlaneAdmin
     Optional Graph API owner URL for the group owner, in the form:
     "https://graph.microsoft.com/v1.0/users/<ObjectId>"
     
@@ -43,7 +43,7 @@
     Entra ID role assignment. Requires the calling identity to have the
     Privileged Role Administrator role.
 
-.PARAMETER ProhibitDirectElevation
+.PARAMETER NoPimEscalation
     When set, skips creation of PIM staging groups (*-PIM-*). Use this when PIM
     for Groups is not required (e.g. access-package-only elevation).
 
@@ -53,7 +53,7 @@
 .EXAMPLE
     New-EntraOpsServiceEntraGroup `
         -ServiceName "MyService" `
-        -ServiceOwner "https://graph.microsoft.com/v1.0/users/00000000-0000-0000-0000-000000000001" `
+        -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/00000000-0000-0000-0000-000000000001" `
         -ServiceRoles $roles
 
     Creates all security and Microsoft 365 groups for "MyService", including PIM
@@ -62,9 +62,9 @@
 .EXAMPLE
     New-EntraOpsServiceEntraGroup `
         -ServiceName "MyService" `
-        -ServiceOwner "https://graph.microsoft.com/v1.0/users/00000000-0000-0000-0000-000000000001" `
+        -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/00000000-0000-0000-0000-000000000001" `
         -ServiceRoles $roles `
-        -ProhibitDirectElevation
+        -NoPimEscalation
 
     Creates groups without PIM staging groups.
 
@@ -76,7 +76,7 @@ function New-EntraOpsServiceEntraGroup {
         [Parameter(Mandatory)]
         [string]$ServiceName,
 
-        [string]$ServiceOwner,
+        [string]$WorkloadPlaneAdmin,
 
         [string]$GroupPrefix = "SG",
         [string]$GroupNamingDelimiter = "-",
@@ -87,30 +87,30 @@ function New-EntraOpsServiceEntraGroup {
         [Parameter()]
         [switch]$IsAssignableToRole,
 
-        [switch]$ProhibitDirectElevation,
+        [switch]$NoPimEscalation,
 
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
     begin {
-        # Issue 4.1: Validate and normalize ServiceOwner to proper OData bind format
-        if (-not [string]::IsNullOrWhiteSpace($ServiceOwner)) {
-            # Check if ServiceOwner is already in OData URL format (users or servicePrincipals)
-            if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/(users|servicePrincipals)/') {
-                $ownerUri = $ServiceOwner
-                Write-Verbose "$logPrefix ServiceOwner provided as OData URL: $ownerUri"
+        # Issue 4.1: Validate and normalize WorkloadPlaneAdmin to proper OData bind format
+        if (-not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
+            # Check if WorkloadPlaneAdmin is already in OData URL format (users or servicePrincipals)
+            if ($WorkloadPlaneAdmin -match '^https://graph\.microsoft\.com/v1\.0/(users|servicePrincipals)/') {
+                $ownerUri = $WorkloadPlaneAdmin
+                Write-Verbose "$logPrefix WorkloadPlaneAdmin provided as OData URL: $ownerUri"
             } else {
                 # Assume it's just an ObjectId and construct the OData URL
                 # Validate it looks like a GUID
-                if ($ServiceOwner -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
-                    $ownerUri = "https://graph.microsoft.com/v1.0/users/$ServiceOwner"
-                    Write-Verbose "$logPrefix ServiceOwner converted to OData URL: $ownerUri"
+                if ($WorkloadPlaneAdmin -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+                    $ownerUri = "https://graph.microsoft.com/v1.0/users/$WorkloadPlaneAdmin"
+                    Write-Verbose "$logPrefix WorkloadPlaneAdmin converted to OData URL: $ownerUri"
                 } else {
-                    throw "ServiceOwner must be either a valid GUID (ObjectId) or a full OData URL (https://graph.microsoft.com/v1.0/users/<ObjectId> or https://graph.microsoft.com/v1.0/servicePrincipals/<ObjectId>). Received: $ServiceOwner"
+                    throw "WorkloadPlaneAdmin must be either a valid GUID (ObjectId) or a full OData URL (https://graph.microsoft.com/v1.0/users/<ObjectId> or https://graph.microsoft.com/v1.0/servicePrincipals/<ObjectId>). Received: $WorkloadPlaneAdmin"
                 }
             }
         } else {
-            Write-Verbose "$logPrefix ServiceOwner not provided; creating groups without owners"
+            Write-Verbose "$logPrefix WorkloadPlaneAdmin not provided; creating groups without owners"
         }
 
         try{
@@ -118,7 +118,7 @@ function New-EntraOpsServiceEntraGroup {
             $groups = @()
             Write-Verbose "$logPrefix Looking up Groups"
             $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject
-            if(-not $ProhibitDirectElevation){
+            if(-not $NoPimEscalation){
                 $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject
             }
         }catch{
@@ -210,7 +210,7 @@ function New-EntraOpsServiceEntraGroup {
                 }elseif($ServiceRole.groupType -like "" -and $groups.MailNickname -notcontains $secParams.MailNickname){
                     Write-Verbose "$logPrefix $($secParams|ConvertTo-Json -Compress)"
                     $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject
-                    if($ServiceRole.accessLevel -eq "ManagementPlane" -and $ServiceRole.name -eq "Admins" -and -not $ProhibitDirectElevation){
+                    if($ServiceRole.accessLevel -eq "ManagementPlane" -and $ServiceRole.name -eq "Admins" -and -not $NoPimEscalation){
                         $secParams.DisplayName = "$($GroupPrefix)$($GroupNamingDelimiter)PIM$($GroupNamingDelimiter)$ServiceName$($GroupNamingDelimiter)$($ServiceRole.accessLevel)$($GroupNamingDelimiter)$($ServiceRole.Name)"
                         $secParams.MailNickname = "PIM.$ServiceName.$($ServiceRole.accessLevel).$($ServiceRole.Name)"
                         $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject
@@ -231,7 +231,7 @@ function New-EntraOpsServiceEntraGroup {
             Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
             $checkGroups = @()
             $checkGroups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
-            if(-not $ProhibitDirectElevation){
+            if(-not $NoPimEscalation){
                 $checkGroups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
             }
             $refIds = @($groups.id | Where-Object { $_ })

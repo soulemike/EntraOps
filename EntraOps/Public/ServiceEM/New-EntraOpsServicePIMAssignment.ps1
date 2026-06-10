@@ -20,13 +20,13 @@
     excluded). PIM staging groups (*-PIM-*) are automatically matched to
     their base group.
 
-.PARAMETER ServiceOwnerPrincipalId
-    Object ID of the service owner. Required when -EnableOwnerAssignment is set.
-    When provided, an eligible-owner assignment is created so the service owner
+.PARAMETER WorkloadPlaneAdminPrincipalId
+    Object ID of the workload plane admin. Required when -EnableOwnerAssignment is set.
+    When provided, an eligible-owner assignment is created so the workload plane admin
     can activate ownership of each admin group via PIM.
 
 .PARAMETER EnableOwnerAssignment
-    When set, creates PIM for Groups eligible-owner assignments for the service owner
+    When set, creates PIM for Groups eligible-owner assignments for the workload plane admin
     in addition to the default eligible-member assignments for the Members group.
     Disabled by default — use this switch to opt in.
 
@@ -57,7 +57,7 @@ function New-EntraOpsServicePIMAssignment {
         [string]$GroupPrefix = "SG",
         [string]$GroupNamingDelimiter = "-",
 
-        [string]$ServiceOwnerPrincipalId = "",
+        [string]$WorkloadPlaneAdminPrincipalId = "",
 
         [switch]$EnableOwnerAssignment,
 
@@ -104,11 +104,11 @@ function New-EntraOpsServicePIMAssignment {
                 $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
             }
 
-            # Eligible-owner assignment for the service owner (opt-in only).
-            if($EnableOwnerAssignment -and -not [string]::IsNullOrWhiteSpace($ServiceOwnerPrincipalId)){
+            # Eligible-owner assignment for the workload plane admin (opt-in only).
+            if($EnableOwnerAssignment -and -not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdminPrincipalId)){
                 $ownerParams = @{
                     accessId    = "owner"
-                    principalId = $ServiceOwnerPrincipalId
+                    principalId = $WorkloadPlaneAdminPrincipalId
                     groupId     = $group.Id
                     action      = "AdminAssign"
                     scheduleInfo = @{
@@ -116,10 +116,10 @@ function New-EntraOpsServicePIMAssignment {
                         expiration    = @{ type = "noExpiration" }
                     }
                 }
-                $neOwner = $ServiceOwnerPrincipalId + "_noExpiration"
+                $neOwner = $WorkloadPlaneAdminPrincipalId + "_noExpiration"
                 $eeOwner = $pimEligibilities | Where-Object { $_.groupId -eq $group.Id -and $_.accessId -eq "owner" } | ForEach-Object { $_.principalId+"_"+$_.targetSchedule.scheduleInfo.expiration.type }
                 if($neOwner -notin $eeOwner){
-                    Write-Verbose "$logPrefix Creating owner eligible assignment for $ServiceOwnerPrincipalId on group $($group.Id)"
+                    Write-Verbose "$logPrefix Creating owner eligible assignment for $WorkloadPlaneAdminPrincipalId on group $($group.Id)"
                     Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($ownerParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
                     $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
                 }

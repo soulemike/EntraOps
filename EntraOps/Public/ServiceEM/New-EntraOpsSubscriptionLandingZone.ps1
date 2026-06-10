@@ -37,23 +37,23 @@
     UPN(s) of users to add as initial WorkloadPlane-Members in both scopes.
     Defaults to the signed-in identity.
 
-.PARAMETER ServiceOwner
-    UPN of the service owner (sets group ownership in both scopes). Defaults
+.PARAMETER WorkloadPlaneAdmin
+    UPN of the workload plane admin (sets group ownership in both scopes). Defaults
     to the signed-in identity.
 
 .PARAMETER AssignOwner
     By default the module does not assign an owner to objects due to the 
     potential privileged escalation concerns. Setting this switch will assign
-    the supplied owner from ServiceOwner.
+    the supplied owner from WorkloadPlaneAdmin.
 
 .PARAMETER OwnerIsNotMember
     When set, the owner is not automatically added as a WorkloadPlane member.
 
-.PARAMETER ProhibitDirectElevation
+.PARAMETER NoPimEscalation
     When set, skips PIM policy configuration and PIM eligible assignment creation
 
 .PARAMETER EnablePIMOwnerAssignment
-    When set, creates PIM for Groups eligible-owner assignments for the service owner
+    When set, creates PIM for Groups eligible-owner assignments for the workload plane admin
     in addition to the default eligible-member assignments for the Members group.
     Disabled by default — use this switch to opt in.
     for all groups in both scopes.
@@ -135,7 +135,7 @@
     .EXAMPLE
     New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Management" `
         -AzureRegion "westeurope" `
-        -ServiceOwner "owner@contoso.com" `
+        -WorkloadPlaneAdmin "admin@contoso.com" `
         -ServiceMembers @("alice@contoso.com", "bob@contoso.com")
 
     Creates the full Sub + Rg EAM structure for "Sub-Management" with resource
@@ -153,9 +153,9 @@
     groups for ControlPlane-Admins, ManagementPlane-Admins, and CatalogPlane-Members
     across both scopes.
 
-.EXAMPLE
+    .EXAMPLE
     New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Dev" `
-        -SkipAzureResourceGroup -ProhibitDirectElevation
+        -SkipAzureResourceGroup -NoPimEscalation
 
     Creates all Entra ID groups, EM catalogs, and access packages for both Sub and
     Rg scopes without Azure resource groups and without PIM. Useful for development
@@ -188,22 +188,18 @@
 #>
 function New-EntraOpsSubscriptionLandingZone {
     [OutputType([System.String])]
-    [cmdletbinding(DefaultParameterSetName="Default")]
+    [cmdletbinding()]
     param(
         [string[]]$ServiceMembers,
 
-        [Parameter(Mandatory, ParameterSetName = "SetOwner")]
-        [string]$ServiceOwner,
+        [string]$WorkloadPlaneAdmin,
 
-        [Parameter(ParameterSetName = "SetOwner")]
         [switch]$OwnerIsNotMember,
 
-        [Parameter(Mandatory, ParameterSetName = "SetOwner")]
         [switch]$AssignOwner,
 
-        [switch]$ProhibitDirectElevation,
+        [switch]$NoPimEscalation,
 
-        [Parameter(ParameterSetName = "SetOwner")]
         [switch]$EnablePIMOwnerAssignment,
 
         [switch]$SkipAzureResourceGroup,
@@ -476,7 +472,7 @@ function New-EntraOpsSubscriptionLandingZone {
             $splatServiceBootstrap = @{
                 ServiceName                      = $component.Role + "-" + $DeploymentPrefix
                 OwnerIsNotMember                 = $OwnerIsNotMember
-                ProhibitDirectElevation          = $ProhibitDirectElevation
+                NoPimEscalation                  = $NoPimEscalation
                 EnablePIMOwnerAssignment         = $EnablePIMOwnerAssignment
                 AzureRegion                      = $AzureRegion
                 ServiceRoles                     = $component.ServiceRole
@@ -504,8 +500,8 @@ function New-EntraOpsSubscriptionLandingZone {
 
             # Only forward owner information when explicit owner assignment is requested.
             if ($AssignOwner) {
-                if ($PSBoundParameters.ContainsKey('ServiceOwner') -and -not [string]::IsNullOrWhiteSpace($ServiceOwner)) {
-                    $splatServiceBootstrap.ServiceOwner = $ServiceOwner
+                if ($PSBoundParameters.ContainsKey('WorkloadPlaneAdmin') -and -not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
+                    $splatServiceBootstrap.WorkloadPlaneAdmin = $WorkloadPlaneAdmin
                 }
                 $splatServiceBootstrap.AssignOwner = $AssignOwner
             }

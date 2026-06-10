@@ -13,19 +13,19 @@
     The UserId (i.e., UPN) of the Service members
     Will default to the identity logged on to Graph
 
-.PARAMETER ServiceOwner
-    The UserId (i.e., UPN) of the Service owner
+.PARAMETER WorkloadPlaneAdmin
+    The UserId (i.e., UPN) of the Workload Plane Admin
     Will default to the identity logged on to Graph
 
 .PARAMETER AssignOwner
     By default the module does not assign an owner to objects due to the 
     potential privileged escalation concerns. Setting this switch will assign
-    the supplied owner from ServiceOwner.
+    the supplied owner from WorkloadPlaneAdmin.
 
 .PARAMETER OwnerIsNotMember
-    Set this flag to not include the Service owner as a member of the service
+    Set this flag to not include the Workload Plane Admin as a member of the service
 
-.PARAMETER ProhibitDirectElevation
+.PARAMETER NoPimEscalation
     Set this flag to skip configuration of Entra Priviliged Identity Management
 
 .PARAMETER EnablePIMOwnerAssignment
@@ -87,14 +87,14 @@
 
 .EXAMPLE
     New-EntraOpsServiceBootstrap -ServiceName "MyService" -AzureRegion "westeurope" `
-        -ServiceOwner "owner@contoso.com" -ServiceMembers @("alice@contoso.com","bob@contoso.com")
+        -WorkloadPlaneAdmin "admin@contoso.com" -ServiceMembers @("alice@contoso.com","bob@contoso.com")
 
-    Creates the authorization structure for "MyService" with an explicit owner and two members.
-    The owner is also added as a member unless -OwnerIsNotMember is specified.
+    Creates the authorization structure for "MyService" with an explicit workload plane admin and two members.
+    The admin is also added as a member unless -OwnerIsNotMember is specified.
 
 .EXAMPLE
     New-EntraOpsServiceBootstrap -ServiceName "MyService" -SkipAzureResourceGroup `
-        -ProhibitDirectElevation
+        -NoPimEscalation
 
     Creates all Entra ID groups, catalog, and access packages without an Azure resource group and
     without configuring PIM eligible assignments.
@@ -137,13 +137,13 @@ function New-EntraOpsServiceBootstrap {
         [string]$GroupNamingDelimiter = "-",
 
         [AllowEmptyString()]
-        [string]$ServiceOwner,
+        [string]$WorkloadPlaneAdmin,
 
         [switch]$AssignOwner,
 
         [switch]$OwnerIsNotMember,  
 
-        [switch]$ProhibitDirectElevation,
+        [switch]$NoPimEscalation,
 
         [switch]$EnablePIMOwnerAssignment,
 
@@ -176,49 +176,49 @@ function New-EntraOpsServiceBootstrap {
         $report = @{}
 
         #todo move regions to cmdlets
-        #region ServiceOwner
+        #region WorkloadPlaneAdmin
         if ($AssignOwner) {
             try {
-                Write-Verbose "$logPrefix Service Owner Graph API Lookup"
-                if ($PSBoundParameters.ContainsKey("ServiceOwner")) {
-                    if ([string]::IsNullOrWhiteSpace($ServiceOwner)) {
-                        throw "ServiceOwner was supplied but is empty. Specify a valid owner UPN, object ID, or OData URL."
+                Write-Verbose "$logPrefix Workload Plane Admin Graph API Lookup"
+                if ($PSBoundParameters.ContainsKey("WorkloadPlaneAdmin")) {
+                    if ([string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
+                        throw "WorkloadPlaneAdmin was supplied but is empty. Specify a valid admin UPN, object ID, or OData URL."
                     }
 
-                    Write-Verbose "$logPrefix ServiceOwner set, looking up $ServiceOwner"
+                    Write-Verbose "$logPrefix WorkloadPlaneAdmin set, looking up $WorkloadPlaneAdmin"
                     # Handle both user and service principal URLs
-                    if ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/') {
+                    if ($WorkloadPlaneAdmin -match '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/') {
                         # Service principal URL provided
-                        $spId = $ServiceOwner -replace '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/', ''
+                        $spId = $WorkloadPlaneAdmin -replace '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/', ''
                         $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals/$spId" -OutputType PSObject
                         $owner = "https://graph.microsoft.com/v1.0/servicePrincipals/$($graphOwner.Id)"
-                    } elseif ($ServiceOwner -match '^https://graph\.microsoft\.com/v1\.0/users/') {
+                    } elseif ($WorkloadPlaneAdmin -match '^https://graph\.microsoft\.com/v1\.0/users/') {
                         # User URL provided
-                        $userId = $ServiceOwner -replace '^https://graph\.microsoft\.com/v1\.0/users/', ''
+                        $userId = $WorkloadPlaneAdmin -replace '^https://graph\.microsoft\.com/v1\.0/users/', ''
                         $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$userId" -OutputType PSObject
                         $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
                     } else {
                         # Assume it's a UPN or user ID
-                        $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$ServiceOwner" -OutputType PSObject
+                        $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$WorkloadPlaneAdmin" -OutputType PSObject
                         $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
                     }
                 } else {
                     $mgContext = Get-MgContext
                     # Check if using AppOnly auth (service principal) without explicit owner
                     if ([string]::IsNullOrWhiteSpace($mgContext.Account) -or $mgContext.AuthType -eq "AppOnly") {
-                        throw "ServiceOwner parameter is required when using service principal (AppOnly) authentication. Please specify -ServiceOwner with a user UPN (e.g., 'user@contoso.com') or user ID."
+                        throw "WorkloadPlaneAdmin parameter is required when using service principal (AppOnly) authentication. Please specify -WorkloadPlaneAdmin with a user UPN (e.g., 'user@contoso.com') or user ID."
                     }
-                    Write-Verbose "$logPrefix ServiceOwner not specified, looking up $($mgContext.Account)"
+                    Write-Verbose "$logPrefix WorkloadPlaneAdmin not specified, looking up $($mgContext.Account)"
                     $graphOwner = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$($mgContext.Account)" -OutputType PSObject
                     $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
                 }
                 Write-Verbose "$logPrefix Setting owner as $owner"
             } catch {
-                Write-Verbose "$logPrefix Failed to process Service Owner"
+                Write-Verbose "$logPrefix Failed to process Workload Plane Admin"
                 Write-Error $_
             }
         } else {
-            Write-Verbose "$logPrefix AssignOwner not set; skipping ServiceOwner resolution"
+            Write-Verbose "$logPrefix AssignOwner not set; skipping WorkloadPlaneAdmin resolution"
             $graphOwner = $null
             $owner = $null
         }
@@ -353,10 +353,10 @@ ManagementPlane,Admins,
             ServiceRoles            = $ServiceRoles
             GroupPrefix             = $GroupPrefix
             GroupNamingDelimiter    = $GroupNamingDelimiter
-            ProhibitDirectElevation = $ProhibitDirectElevation
+            NoPimEscalation         = $NoPimEscalation
         }
         if ($AssignOwner -and -not [string]::IsNullOrWhiteSpace($owner)) {
-            $ServiceEntraGroupOptions.ServiceOwner = $owner
+            $ServiceEntraGroupOptions.WorkloadPlaneAdmin = $owner
         }
         # Cast to [object[]] so PSCustomObject synthetic delegated entries can be appended
         # with +=. New-EntraOpsServiceEntraGroup returns typed MicrosoftGraphGroup objects;
@@ -498,7 +498,7 @@ ManagementPlane,Admins,
                 $ServiceEMAssignmentOptions = @{
                     ServiceCatalogId          = $ServiceEMCatalog.Id
                     ServiceMembers            = $graphMembers
-                    ServiceOwner              = $graphOwner
+                    WorkloadPlaneAdmin       = $graphOwner
                     ServiceAssignmentPolicies = $ServiceEMAssignmentPolicies
                     ServicePackages           = $ServiceEMAccessPackages
                 }
@@ -512,7 +512,7 @@ ManagementPlane,Admins,
             Write-Verbose "$logPrefix No access packages to configure — skipping resource assignment, policies, and member assignments"
         }
 
-        if (-not $ProhibitDirectElevation) {
+        if (-not $NoPimEscalation) {
             Write-Verbose "$logPrefix Processing PIM policies"
             $ServicePIMPolicyOptions = @{
                 ServiceGroups = $ownedGroups
@@ -530,7 +530,7 @@ ManagementPlane,Admins,
                 EnableOwnerAssignment   = $EnablePIMOwnerAssignment
             }
             if ($graphOwner -and $graphOwner.Id) {
-                $ServicePIMAssignmentOptions.ServiceOwnerPrincipalId = $graphOwner.Id
+                $ServicePIMAssignmentOptions.WorkloadPlaneAdminPrincipalId = $graphOwner.Id
             }
             $ServicePIMAssignments = New-EntraOpsServicePIMAssignment @ServicePIMAssignmentOptions
             $report.PimAssignments = $ServicePIMAssignments

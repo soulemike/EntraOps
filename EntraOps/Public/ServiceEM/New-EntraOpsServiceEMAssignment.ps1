@@ -20,8 +20,8 @@
     Graph User objects to assign to the WorkloadPlane-Members access package.
     Typically the output of Get-MgUser for each service member UPN.
 
-.PARAMETER ServiceOwner
-    Graph User object for the service owner. Added to WorkloadPlane-Members
+.PARAMETER WorkloadPlaneAdmin
+    Graph User object for the workload plane admin. Added to WorkloadPlane-Members
     unless already present via ServiceMembers.
 
 .PARAMETER ServiceAssignmentPolicies
@@ -37,11 +37,11 @@
     New-EntraOpsServiceEMAssignment `
         -ServiceCatalogId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
         -ServiceMembers $graphMembers `
-        -ServiceOwner $graphOwner `
+        -WorkloadPlaneAdmin $graphOwner `
         -ServiceAssignmentPolicies $policies `
         -ServicePackages $packages
 
-    Assigns every user in $graphMembers (plus the owner) to the
+    Assigns every user in $graphMembers (plus the workload plane admin) to the
     AP-<ServiceName>-WorkloadPlane-Members access package via adminAdd.
 
 #>
@@ -55,7 +55,7 @@ function New-EntraOpsServiceEMAssignment {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceMembers,
 
-        [psobject]$ServiceOwner,
+        [psobject]$WorkloadPlaneAdmin,
 
         [Parameter(Mandatory)]
         [psobject[]]$ServiceAssignmentPolicies,
@@ -93,7 +93,7 @@ function New-EntraOpsServiceEMAssignment {
 
         $wlMembersPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*WorkloadPlane-Members"}
         $wlMembersPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Workload Membership Policy"}
-        # Rg scope fallback: no WorkloadPlane-Members access package → use WorkloadPlane-Users
+        # Rg scope fallback: no WorkloadPlane-Members access package - use WorkloadPlane-Users
         if(-not $wlMembersPackage){
             $wlMembersPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*WorkloadPlane-Users"}
             $wlMembersPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Workload Plane Users Policy"}
@@ -133,31 +133,31 @@ function New-EntraOpsServiceEMAssignment {
             }
         }
 
-        # Enroll the owner: prefer ManagementPlane-Admins; fall back to WorkloadPlane-Admins
-        # (Centralized governance — ManagementPlane-Admins is delegated to tenant-wide group).
+        # Enroll the workload plane admin: prefer ManagementPlane-Admins; fall back to WorkloadPlane-Admins
+        # (Centralized governance - ManagementPlane-Admins is delegated to tenant-wide group).
         $mgmtAdminsPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*ManagementPlane-Admins"}
         $mgmtAdminsPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Management Admin Policy"}
         if(-not $mgmtAdminsPackage){
             $mgmtAdminsPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*WorkloadPlane-Admins"}
             $mgmtAdminsPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Workload Plane Policy"}
         }
-        if($mgmtAdminsPackage -and $mgmtAdminsPolicy -and $ServiceOwner){
+        if($mgmtAdminsPackage -and $mgmtAdminsPolicy -and $WorkloadPlaneAdmin){
             # Update this to `in` if upstream function ever switches to array
-            if($ServiceOwner.Id -notin $assignments.Target.ObjectId -and $ServiceOwner.Id -notin $assignmentRequests.Assignment.Target.ObjectId){
+            if($WorkloadPlaneAdmin.Id -notin $assignments.Target.ObjectId -and $WorkloadPlaneAdmin.Id -notin $assignmentRequests.Assignment.Target.ObjectId){
                 try{
-                    $assignmentParams.assignment.targetId = $ServiceOwner.Id
+                    $assignmentParams.assignment.targetId = $WorkloadPlaneAdmin.Id
                     $assignmentParams.assignment.assignmentPolicyId = $mgmtAdminsPolicy.Id
                     $assignmentParams.assignment.accessPackageId = $mgmtAdminsPackage.Id
-                    Write-Verbose "$logPrefix Creating Assignment Request for Service Owner - $($assignmentParams|ConvertTo-Json -Compress)"
+                    Write-Verbose "$logPrefix Creating Assignment Request for Workload Plane Admin - $($assignmentParams|ConvertTo-Json -Compress)"
                     $postResult = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests" -Body ($assignmentParams | ConvertTo-Json -Depth 10) -OutputType PSObject
                     if($null -ne $postResult){ $assignmentRequests += $postResult; $newAssignmentCount++ }
                 }catch{
-                    Write-Verbose "$logPrefix Failed to create Assignment Request for Service Owner"
+                    Write-Verbose "$logPrefix Failed to create Assignment Request for Workload Plane Admin"
                     Write-Error $_
                 }
             }
         } else {
-            Write-Verbose "$logPrefix No suitable owner assignment conditions met, skipping owner assignment"
+            Write-Verbose "$logPrefix No suitable workload plane admin assignment conditions met, skipping workload plane admin assignment"
         }
     }
 
@@ -174,7 +174,7 @@ function New-EntraOpsServiceEMAssignment {
             Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
             $checkAssignments = @()
             $checkAssignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentsSplat -OutputType PSObject -DisableCache
-            $uniqueExpected = @((@($ServiceMembers.Id) + @($ServiceOwner.Id)) | Where-Object { $_ } | Sort-Object -Unique)
+            $uniqueExpected = @((@($ServiceMembers.Id) + @($WorkloadPlaneAdmin.Id)) | Where-Object { $_ } | Sort-Object -Unique)
             $uniqueFound    = @($checkAssignments.Target.ObjectId | Where-Object { $_ } | Sort-Object -Unique)
             Write-Verbose "$logPrefix Expected assignee IDs: $($uniqueExpected|ConvertTo-Json -Compress)"
             Write-Verbose "$logPrefix Found assignment target IDs: $($uniqueFound|ConvertTo-Json -Compress)"
