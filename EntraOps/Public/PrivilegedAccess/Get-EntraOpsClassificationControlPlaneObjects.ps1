@@ -1,63 +1,81 @@
 <#
 .SYNOPSIS
-    Get list of Control Plane objects by classification of various sources (e.g., EntraOps, Microsoft Security Exposure Management and Azure Resource Graph).
+    Returns a deduplicated list of Control Plane objects identified from one or more classification sources.
 
 .DESCRIPTION
-    Classification of Control Plane needs to consider the scope of sensitive permissions. For example, managing group membership of security groups should be managed as Control Plane by default.
-    This function creates a list of high-privileged objects by classification of various sources (e.g., EntraOps, Microsoft Security Exposure Management and Azure Resource Graph).
+    Queries multiple data sources to identify Entra ID objects that hold Control Plane-level permissions and returns them as a unified, deduplicated list with classification metadata (source and reason).
+    Supported sources are:
+      - EntraOps       : objects already classified as ControlPlane in the EntraOps EAM JSON files (object-level tier or Control Plane role assignments).
+      - PrivilegedRolesFromAzGraph : permanent Azure RBAC role assignments for high-privileged roles queried via Azure Resource Graph.
+      - PrivilegedEdgesFromExposureManagement : objects with attack-path edges to critical assets in Microsoft Security Exposure Management.
+      - PrivilegedObjectIds : a manually supplied list of Entra object IDs.
+      - All (default)  : runs all four sources and merges the results.
+
+    Each returned object includes ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, management restriction flags, assigned administrative units, and a Classification property that lists every source and reason the object was identified.
 
 .PARAMETER PrivilegedObjectClassificationSource
-    Source of privileged objects to identify the scope of privileged objects and update the classification definition file for Microsoft Entra ID.
-    Possible values are "All", "EntraOps", "PrivilegedObjectIds", "PrivilegedRolesFromAzGraph" and "PrivilegedEdgesFromExposureManagement".
+    One or more sources used to identify Control Plane objects.
+    Valid values: "All", "EntraOps", "PrivilegedObjectIds", "PrivilegedRolesFromAzGraph", "PrivilegedEdgesFromExposureManagement".
+    Defaults to "All".
 
 .PARAMETER EntraIdClassificationParameterFile
-    Path to the classification parameter file for Microsoft Entra ID. Default is ./Classification/Templates/Classification_AadResources.Param.json.
+    Path to the Entra ID classification parameter template file.
+    Defaults to ./Classification/Templates/Classification_AadResources.Param.json.
 
 .PARAMETER EntraIdCustomizedClassificationFile
-    Path to the customized classification file for Microsoft Entra ID. Default is ./Classification/<TenantName>/Classification_AadResources.json.
-    The file path will be recognized by the tenant name in the context of EntraOps and used for the classification.
+    Path to the tenant-specific Entra ID classification file.
+    Defaults to ./Classification/<TenantName>/Classification_AadResources.json, resolved from the active EntraOps tenant context.
 
 .PARAMETER EntraOpsEamFolder
-    Path to the folder where the EntraOps classification definition files are stored. Default is ./Classification.
+    Path to the root folder containing the EntraOps EAM JSON files (one subfolder per scope).
+    Defaults to the EntraOps default classified EAM folder.
 
 .PARAMETER EntraOpsScopes
-    Array of EntraOps scopes which should be considered for the analysis. Default selection are all available scopes: Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement and ResourceApps.
+    One or more EntraOps RBAC scopes to include when reading EAM data.
+    Valid values: "Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender".
+    Defaults to all available scopes.
 
 .PARAMETER AzureHighPrivilegedRoles
-    Array of high privileged roles in Azure RBAC which should be considered for the analysis. Default selection are high-privileged roles: Owner, Role Based Access Control Administrator and User Access Administrator.
+    Azure RBAC role names that are considered high-privileged when using the PrivilegedRolesFromAzGraph source.
+    Defaults to: "Owner", "Role Based Access Control Administrator", "User Access Administrator".
 
 .PARAMETER AzureHighPrivilegedScopes
-    Scope of high privileged roles in Azure RBAC which should be considered for the analysis. Default selection is all scopes including management groups.
+    Azure resource scopes (management group or subscription paths) to restrict the Azure Resource Graph query.
+    Use "*" (default) to include all scopes, including management groups.
 
 .PARAMETER ExposureCriticalityLevel
-    Criticality level of assets in Exposure Management which should be considered for the analysis. Default selection is criticality level <1.
+    KQL comparison expression applied to the criticalityLevel field in Exposure Management when using PrivilegedEdgesFromExposureManagement.
+    Defaults to "<1" (Tier-0 / critical assets).
 
 .PARAMETER PrivilegedObjectIds
-    Manual list of privileged object IDs to identify the scope of privileged objects and update the classification definition file for Microsoft Entra ID.
+    Array of Entra object IDs to classify as Control Plane when using the PrivilegedObjectIds source.
 
 .EXAMPLE
-    Get privileged objects from various Microsoft Entra RBACs and Microsoft Azure roles to identify the scope of privileged objects and update the classification definition file for Microsoft Entra ID.
-    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "EntraOps" -RBACSystems ("Azure","EntraID","IdentityGovernance","DeviceManagement","ResourceApps")
+    Return Control Plane objects identified by EntraOps EAM data across all available RBAC scopes.
+    Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "EntraOps"
 
 .EXAMPLE
-    Get exposure graph edges from Microsoft Security Exposure Management with relation of "has permissions to", "can authenticate as", "has role on", "has credentials of" or "affecting" to assets with criticality level <1.
-    This identitfies objects with direct/indirect permissions which leads in attack/access paths to high sensitive assets which can be identified as Control Plane.
-    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "PrivilegedEdgesFromExposureManagement" -ExposureCriticalityLevel = "<1"
+    Return Control Plane objects identified by EntraOps EAM data for a specific subset of RBAC scopes.
+    Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "EntraOps" -EntraOpsScopes ("Azure", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
 
 .EXAMPLE
-    Get permanent role assignments in Azure RBAC from Azure Resource Graph for high privileged roles (Owner, Role Based Access Control Administrator or User Access Administrator) on specific high-privileged scope ("/", "/providers/microsoft.management/managementgroups/8693dc7e-63c1-47ab-a7ee-acfe488bf52a").
-    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "PrivilegedRolesFromAzGraph" -AzureHighPrivilegedRoles ("Owner", "Role Based Access Control Administrator", "User Access Administrator") -AzureHighPrivilegedScopes ("/", "/providers/microsoft.management/managementgroups/8693dc7e-63c1-47ab-a7ee-acfe488bf52a")
+    Return objects with attack-path edges to critical assets (criticalityLevel < 1) in Microsoft Security Exposure Management.
+    Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "PrivilegedEdgesFromExposureManagement" -ExposureCriticalityLevel "<1"
 
 .EXAMPLE
-    Use previous named data sources to identify high-privileged or sensitive objects from EntraOps, Azure RBAC and Exposure Management to update EntraOps classification definition file.
-    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "All"
+    Return objects holding high-privileged Azure RBAC roles on specific management group or subscription scopes queried via Azure Resource Graph.
+    Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "PrivilegedRolesFromAzGraph" -AzureHighPrivilegedRoles ("Owner", "Role Based Access Control Administrator", "User Access Administrator") -AzureHighPrivilegedScopes ("/", "/providers/microsoft.management/managementgroups/8693dc7e-63c1-47ab-a7ee-acfe488bf52a")
 
 .EXAMPLE
-    Get list of privileged object IDs to identify the scope of privileged objects and update the classification definition file for Microsoft Entra ID.
-    $PrivilegedUser = Get-AzAdUser -filter "startswith(DisplayName,'adm')"
-    $PrivilegedGroups = Get-AzAdGroup -filter "startswith(DisplayName,'prg')"
-    $PrivilegedObjects = $PrivilegedUser + $PrivilegedGroups
-    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "PrivilegedObjectIds" -PrivilegedObjectIds $PrivilegedObjects
+    Return a merged and deduplicated list of Control Plane objects from all supported classification sources.
+    Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "All"
+
+.EXAMPLE
+    Return Control Plane objects for a manually compiled list of privileged users and groups.
+    $PrivilegedUsers  = Get-AzAdUser  -Filter "startswith(DisplayName,'adm')"
+    $PrivilegedGroups = Get-AzAdGroup -Filter "startswith(DisplayName,'prg')"
+    $PrivilegedObjectIds = ($PrivilegedUsers + $PrivilegedGroups).Id
+    Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "PrivilegedObjectIds" -PrivilegedObjectIds $PrivilegedObjectIds
 
 #>
 
@@ -194,6 +212,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     #region Get list of all privileged objects by Microsoft Exposure Management
     if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "PrivilegedEdgesFromExposureManagement") {
         Write-Host "Get privileged objects from exposure graph edges and nodes in Exposure Management..."
+        $Timespan = "P1D"
         $Query = '
         let Tier0CloudResources = ExposureGraphNodes
         | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.environmentName == "Azure");
@@ -220,6 +239,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         $Query = $Query.Replace("%CriticalLevel%", $ExposureCriticalityLevel)
         $Body = @{
             "Query" = $Query;
+            "Timespan" = $Timespan;
         } | ConvertTo-Json
         $PrivilegedObjectsGraphEdges = (Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/security/runHuntingQuery" -Body $Body).results
         if ($null -ne $PrivilegedObjectsGraphEdges) {

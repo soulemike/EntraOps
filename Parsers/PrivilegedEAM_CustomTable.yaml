@@ -1,7 +1,7 @@
 Parser:
   Title: PrivilegedEAM (Custom Table)
-  Version: 0.3
-  LastUpdated: 2026-05-07
+  Version: 0.2
+  LastUpdated: 2024-11-26
 Product:
   Name: EntraOps
 References:
@@ -22,9 +22,9 @@ ParserQuery: |
           RoleAssignments,
           bag_pack(
               "EligibilityBy", case(
-                  RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible" and (RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType == "Eligible member"), "PIM for Entra ID Roles and Groups",
                   RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible", "PIM for Entra ID Roles",
-                  RoleAssignments.RoleAssignmentSubType == "Nested Eligible group member" or RoleAssignments.RoleAssignmentSubType == "Eligible member", "PIM for Groups",
+                  RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible" and (RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member"), "PIM for Entra ID Roles and Groups",
+                  RoleAssignments.RoleAssignmentSubType == "Nested Eligible group member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member", "PIM for Groups",
                   "N/A"),
               "TransitiveByPim", iff((RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member"), true, false)
               )
@@ -34,7 +34,6 @@ ParserQuery: |
   | project-reorder 
       TimeGenerated,
       ObjectId,
-      ObjectTenantId,
       ObjectType,
       ObjectSubType,
       ObjectDisplayName,
@@ -50,11 +49,8 @@ ParserQuery: |
       Classification,
       RoleAssignments,
       Owners,
-      Sponsors,
       OwnedObjects,
       OwnedDevices,
-      IdentityParent,
       AssociatedWorkAccount,
       AssociatedPawDevice,
       Type
-  | sort by ObjectDisplayName asc, RoleSystem asc, ObjectType asc, ObjectSubType asc

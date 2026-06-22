@@ -272,7 +272,12 @@ function Update-EntraOpsClassificationControlPlaneScope {
             }
         })
     $PrivilegedDevicesWithoutProtection = @($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $False })
-    $ScopeNamePrivilegedDevices = $PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $True } | ForEach-Object { $_.AUs } | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+    $ScopeNamePrivilegedDevices = @(
+        # RMAU AUs from RMAU-protected devices
+        ($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $True } | ForEach-Object { $_.AUs } | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+        # All AUs from unprotected devices (no RMAU)
+        ($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $False } | ForEach-Object { $_.AUs } | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+    ) | Where-Object { $null -ne $_ }
 
     Write-Host "  Unprotected  : $($PrivilegedDevicesWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedDevicesWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
     if ($PrivilegedDevicesWithoutProtection.Count -gt 0) {
@@ -313,7 +318,12 @@ function Update-EntraOpsClassificationControlPlaneScope {
     Write-Host "  Protected(RMAU): $($PrivilegedGroupWithRMAU.Count)" -ForegroundColor DarkGreen
     Write-Host "  Unprotected  : $($PrivilegedGroupsWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedGroupsWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
 
-    $ScopeNamePrivilegedGroups = $PrivilegedGroupWithRMAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+    $ScopeNamePrivilegedGroups = @(
+        # RMAU AUs from RMAU-protected groups
+        ($PrivilegedGroupWithRMAU.AssignedAdministrativeUnits | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+        # All AUs from unprotected groups (no RMAU)
+        ($PrivilegedGroupsWithoutProtection.AssignedAdministrativeUnits | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+    ) | Where-Object { $null -ne $_ }
     if ($PrivilegedGroupsWithoutProtection.Count -gt 0) {
         Write-Warning "  Control Plane groups without RMAU protection - directory scope required!"
         $WarningMessages.Add([PSCustomObject]@{ Type = "UnprotectedGroups"; Message = "$($PrivilegedGroupsWithoutProtection.Count) Control Plane group(s) without RMAU protection - directory scope required" })
@@ -931,6 +941,79 @@ function Update-EntraOpsClassificationControlPlaneScope {
         }
     }
     if ($Tier1DeviceIds.Count -eq 0) { Write-Verbose "      (none)" }
+    Write-Host ""
+    #endregion
+
+    #region Persist group → device member mapping for BloodHound export
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Persisting Group → Device Member Mapping" -ForegroundColor DarkCyan
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+
+    # Collect all classified device IDs (Tier0 + Tier1)
+    $AllClassifiedDeviceIds = @($Tier0DeviceIds + $Tier1DeviceIds | Select-Object -Unique)
+
+    # Batch-resolve device display names
+    $DeviceNameCache = @{}
+    if ($AllClassifiedDeviceIds.Count -gt 0) {
+        try {
+            $Body = @{ ids = @($AllClassifiedDeviceIds); types = @("device") } | ConvertTo-Json -Depth 3
+            $DeviceObjects = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "https://graph.microsoft.com/beta/directoryObjects/getByIds" -Body $Body -OutputType PSObject
+            foreach ($DevObj in $DeviceObjects) {
+                $DeviceNameCache[$DevObj.id] = $DevObj.displayName
+            }
+        } catch {
+            Write-Warning "Failed to batch-resolve device display names: $($_.Exception.Message)"
+        }
+        # Fallback for unresolved IDs
+        foreach ($DevId in $AllClassifiedDeviceIds) {
+            if (-not $DeviceNameCache.ContainsKey($DevId)) {
+                $DeviceNameCache[$DevId] = $DevId
+            }
+        }
+    }
+
+    # Build reverse mapping: groupId → device members
+    $GroupDeviceMembers = @{}
+    foreach ($DeviceGroupsMap in @($Tier0DeviceGroups, $Tier1DeviceGroups)) {
+        foreach ($entry in $DeviceGroupsMap.GetEnumerator()) {
+            $deviceId = $entry.Key
+            $deviceName = $DeviceNameCache[$deviceId] ?? $deviceId
+            foreach ($grp in $entry.Value) {
+                $grpId = $grp.id
+                if (-not $GroupDeviceMembers.ContainsKey($grpId)) {
+                    $GroupDeviceMembers[$grpId] = [PSCustomObject]@{
+                        displayName   = $grp.displayName
+                        deviceMembers = [System.Collections.Generic.List[PSCustomObject]]::new()
+                    }
+                }
+                # Avoid duplicate devices in the same group
+                if (-not ($GroupDeviceMembers[$grpId].deviceMembers | Where-Object { $_.id -eq $deviceId })) {
+                    $GroupDeviceMembers[$grpId].deviceMembers.Add([PSCustomObject]@{
+                        id          = $deviceId
+                        displayName = $deviceName
+                    })
+                }
+            }
+        }
+    }
+
+    # Build allClassifiedDevices flat list
+    $AllClassifiedDevices = @($AllClassifiedDeviceIds | ForEach-Object {
+        [PSCustomObject]@{
+            id          = $_
+            displayName = $DeviceNameCache[$_] ?? $_
+        }
+    })
+
+    # Save to JSON alongside the classification file
+    $DeviceMembersOutputFile = Join-Path (Split-Path $DeviceMgmtCustomizedClassificationFile -Parent) "DeviceManagement_ScopeGroupDeviceMembers.json"
+    $DeviceMembersPayload = [PSCustomObject]@{
+        groupDeviceMembers  = $GroupDeviceMembers
+        allClassifiedDevices = $AllClassifiedDevices
+    }
+    $DeviceMembersPayload | ConvertTo-Json -Depth 5 | Out-File -FilePath $DeviceMembersOutputFile -Force
+    Write-Host "  Persisted group → device mapping: $($GroupDeviceMembers.Count) group(s), $($AllClassifiedDevices.Count) device(s)" -ForegroundColor Green
+    Write-Host "  Output file: $DeviceMembersOutputFile" -ForegroundColor Cyan
     Write-Host ""
     #endregion
 

@@ -150,7 +150,7 @@ function New-EntraOpsConfigFile {
         }
         AutomatedClassificationUpdate                 = [ordered]@{
             ApplyAutomatedClassificationUpdate = $ApplyAutomatedClassificationUpdate
-            Classifications                    = ("AadResources", "AadResources.Param", "AppRoles", "Defender", "DeviceManagement", "DeviceManagement.Param", "IdentityGovernance")
+            Classifications                    = ("AadResources", "AadResources.Param", "ApiPermissions", "Defender", "DeviceManagement", "DeviceManagement.Param", "IdentityGovernance")
         }
         AutomatedEntraOpsUpdate                       = [ordered]@{
             ApplyAutomatedEntraOpsUpdate = $ApplyAutomatedEntraOpsUpdate

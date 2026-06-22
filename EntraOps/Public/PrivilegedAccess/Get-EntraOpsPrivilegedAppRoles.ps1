@@ -35,7 +35,7 @@ function Get-EntraOpsPrivilegedAppRoles {
     # Using $expand=appRoleAssignments allows us to get the permissions granted TO the SPs in the same call (pagination handled by Invoke-EntraOpsMsGraphQuery)
     # This replaces the need to query /servicePrincipals/{id}/appRoleAssignments for every SP.
     Write-Verbose "Fetching Service Principals with AppRoleAssignments..."
-    $ServicePrincipals = Invoke-EntraOpsMsGraphQuery -Uri "/beta/servicePrincipals?`$select=id,appDisplayName,appRoles,publishedPermissionScopes,principalType&`$expand=appRoleAssignments" -OutputType PSObject
+    $ServicePrincipals = Invoke-EntraOpsMsGraphQuery -Uri "/beta/servicePrincipals?`$select=id,appId,appDisplayName,appRoles,publishedPermissionScopes,principalType&`$expand=appRoleAssignments" -OutputType PSObject
 
     # 3. Create Optimized Lookup Hashtable for Resources (Id -> Metadata)
     # Includes nested hashtables for AppRoles (Id -> Name) and Scopes (Value -> Id) for O(1) lookup
@@ -63,6 +63,7 @@ function Get-EntraOpsPrivilegedAppRoles {
 
         $ResourceLookup[$Sp.Id] = @{
             DisplayName = $Sp.appDisplayName
+            AppId       = $Sp.appId
             AppRoles    = $AppRoleLookup
             Scopes      = $ScopeLookup
         }
@@ -114,6 +115,7 @@ function Get-EntraOpsPrivilegedAppRoles {
                     RoleAssignmentId                      = $AppRole.Id
                     RoleAssignmentScopeId                 = $AppRole.resourceId
                     RoleAssignmentScopeName               = $ResourceName
+                    ResourceAppId                         = if ($null -ne $AppRole.resourceId -and $ResourceLookup.ContainsKey($AppRole.resourceId)) { $ResourceLookup[$AppRole.resourceId].AppId } else { $null }
                     RoleAssignmentType                    = "Direct"
                     PIMManagedRole                        = $False
                     PIMAssignmentType                     = "Permanent"
@@ -181,6 +183,7 @@ function Get-EntraOpsPrivilegedAppRoles {
                         RoleAssignmentId                      = $Grant.Id
                         RoleAssignmentScopeId                 = $Grant.resourceId
                         RoleAssignmentScopeName               = if ($ResourceMeta) { $ResourceMeta.DisplayName } else { $null }
+                        ResourceAppId                         = if ($ResourceMeta) { $ResourceMeta.AppId } else { $null }
                         RoleAssignmentType                    = "Direct"
                         PIMManagedRole                        = $False
                         PIMAssignmentType                     = "Permanent"

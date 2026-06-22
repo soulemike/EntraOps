@@ -41,8 +41,21 @@ function Update-EntraOps {
 
     if (-not [string]::IsNullOrWhiteSpace($PersonalAccessToken)) {
         Write-Output "Cloning repository 'Cloud-Architekt/$($Repository)' (branch: $Branch) using Personal Access Token..."
-        $CloneUrl = "https://$($PersonalAccessToken):@github.com/Cloud-Architekt/$($Repository).git"
-        git clone -b $Branch $CloneUrl $TemporaryUpdateFolder
+        # Pass credentials via environment-based HTTP header to avoid exposing the PAT in process listings, logs, or error messages
+        $PreviousConfigCount = $env:GIT_CONFIG_COUNT
+        $PreviousConfigKey0 = $env:GIT_CONFIG_KEY_0
+        $PreviousConfigValue0 = $env:GIT_CONFIG_VALUE_0
+        try {
+            $env:GIT_CONFIG_COUNT = "1"
+            $env:GIT_CONFIG_KEY_0 = "http.https://github.com/.extraheader"
+            $env:GIT_CONFIG_VALUE_0 = "AUTHORIZATION: basic $([Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$PersonalAccessToken")))"
+            git clone -b $Branch "https://github.com/Cloud-Architekt/$($Repository).git" $TemporaryUpdateFolder
+        } finally {
+            # Restore previous env state
+            if ($null -eq $PreviousConfigCount) { Remove-Item env:GIT_CONFIG_COUNT -ErrorAction SilentlyContinue } else { $env:GIT_CONFIG_COUNT = $PreviousConfigCount }
+            if ($null -eq $PreviousConfigKey0) { Remove-Item env:GIT_CONFIG_KEY_0 -ErrorAction SilentlyContinue } else { $env:GIT_CONFIG_KEY_0 = $PreviousConfigKey0 }
+            if ($null -eq $PreviousConfigValue0) { Remove-Item env:GIT_CONFIG_VALUE_0 -ErrorAction SilentlyContinue } else { $env:GIT_CONFIG_VALUE_0 = $PreviousConfigValue0 }
+        }
     } else {
         Write-Output "Cloning repository 'Cloud-Architekt/$($Repository)' (branch: $Branch) without authentication..."
         git clone -b $Branch "https://github.com/Cloud-Architekt/$($Repository).git" $TemporaryUpdateFolder

@@ -66,7 +66,11 @@ function Get-EntraOpsPrivilegedEamIdGov {
     $EntraRolesDefaultClassification = Invoke-RestMethod -Method Get -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzurePrivilegedIAM/refs/heads/main/Classification/Classification_EntraIdDirectoryRoles.json"
 
     # Classification for API permissions
-    $AppRolesClassification = Get-Content -Path $($FolderClassification + "/Templates/Classification_AppRoles.json") | ConvertFrom-Json -Depth 10
+    $ApiPermissionsFilePath = $FolderClassification + "/Templates/Classification_ApiPermissions.json"
+    if (-not (Test-Path -Path $ApiPermissionsFilePath)) {
+        $ApiPermissionsFilePath = $FolderClassification + "/Templates/Classification_AppRoles.json"
+    }
+    $ApiPermissionsClassification = Get-Content -Path $ApiPermissionsFilePath | ConvertFrom-Json -Depth 10
 
     # Get all role assignments and global exclusions
     #region Stage 1: Fetch Identity Governance Assignments
@@ -130,16 +134,16 @@ function Get-EntraOpsPrivilegedEamIdGov {
         }
     }
 
-    # Optimization: Build hashtable lookup for App Role classifications
-    $AppRoleClassLookup = @{}
-    foreach ($AppRoleClass in $AppRolesClassification) {
-        foreach ($RoleDef in $AppRoleClass.TierLevelDefinition) {
+    # Optimization: Build hashtable lookup for Api Permissions classifications
+    $ApiPermissionsClassLookup = @{}
+    foreach ($ApiPermissionsClass in $ApiPermissionsClassification) {
+        foreach ($RoleDef in $ApiPermissionsClass.TierLevelDefinition) {
             foreach ($RoleAction in $RoleDef.RoleDefinitionActions) {
                 $key = "$($RoleDef.ResourceAppId)|$($RoleAction)"
-                if (-not $AppRoleClassLookup.ContainsKey($key)) {
-                    $AppRoleClassLookup[$key] = @{
-                        EAMTierLevelName     = $AppRoleClass.EAMTierLevelName
-                        EAMTierLevelTagValue = $AppRoleClass.EAMTierLevelTagValue
+                if (-not $ApiPermissionsClassLookup.ContainsKey($key)) {
+                    $ApiPermissionsClassLookup[$key] = @{
+                        EAMTierLevelName     = $ApiPermissionsClass.EAMTierLevelName
+                        EAMTierLevelTagValue = $ApiPermissionsClass.EAMTierLevelTagValue
                         Service              = $RoleDef.Service
                     }
                 }
@@ -274,7 +278,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
                         
                         foreach ($AppRoleScope in $AssignedCatalogResource.accessPackageResourceRoles) {
                             $lookupKey = "$($AssignedCatalogResource.originId)|$($AppRoleScope.displayName)"
-                            $AppRoleMatch = $AppRoleClassLookup[$lookupKey]
+                            $AppRoleMatch = $ApiPermissionsClassLookup[$lookupKey]
                             
                             if ($null -ne $AppRoleMatch) {
                                 $Classification = [PSCustomObject]@{
@@ -405,16 +409,30 @@ function Get-EntraOpsPrivilegedEamIdGov {
 
 
         if (($IdGovRoleActionsInJsonDefinition.Count -gt 0)) {
-            $ClassifiedIdGovRbacRoleWithActions = @()
+            $ClassifiedWithMatchedActions = @()
             foreach ($IdGovRoleAction in $IdGovRoleActions.rolePermissions.allowedResourceActions) {
-                $ClassifiedIdGovRbacRoleWithActions += $IdGovResourcesByClassificationJSON | Where-Object { $IdGovRoleAction -in $_.RoleDefinitionActions }
+                $ClassifiedWithMatchedActions += $IdGovResourcesByClassificationJSON | Where-Object { $IdGovRoleAction -in $_.RoleDefinitionActions } | ForEach-Object {
+                    [PSCustomObject]@{
+                        EAMTierLevelName     = $_.EAMTierLevelName
+                        EAMTierLevelTagValue = $_.EAMTierLevelTagValue
+                        Service              = $_.Service
+                        MatchedAction        = $IdGovRoleAction
+                    }
+                }
             }
-            $ClassifiedIdGovRbacRoleWithActions = $ClassifiedIdGovRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
-            $Classification = $ClassifiedIdGovRbacRoleWithActions | ForEach-Object {
+            $UniqueClassifications = $ClassifiedWithMatchedActions | Select-Object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
+            $Classification = foreach ($UniqueClass in $UniqueClassifications) {
+                [array]$MatchedActions = @($ClassifiedWithMatchedActions | Where-Object {
+                    $_.EAMTierLevelName -eq $UniqueClass.EAMTierLevelName -and
+                    $_.EAMTierLevelTagValue -eq $UniqueClass.EAMTierLevelTagValue -and
+                    $_.Service -eq $UniqueClass.Service
+                } | Select-Object -ExpandProperty MatchedAction | Select-Object -Unique)
                 [PSCustomObject]@{
-                    'AdminTierLevel'             = $_.EAMTierLevelTagValue
-                    'AdminTierLevelName'         = $_.EAMTierLevelName
-                    'Service'                    = $_.Service
+                    'AdminTierLevel'             = $UniqueClass.EAMTierLevelTagValue
+                    'AdminTierLevelName'         = $UniqueClass.EAMTierLevelName
+                    'Service'                    = $UniqueClass.Service
+                    'MatchedActions'             = if ($MatchedActions.Count -gt 0) { $MatchedActions } else { $null }
+                    'ScopedObjects'              = $null
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $null
                     'TaggedByObjectDisplayNames' = $null
@@ -438,7 +456,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
         $ClassificationCollection += ($IdGovRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -eq $IdGovRbacAssignment.RoleAssignmentScopeId }).Classification
         $ClassificationCollection += ($IdGovRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $IdGovRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $IdGovRbacAssignment.RoleDefinitionId }).Classification
         $Classification = @()
-        $Classification += $ClassificationCollection | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification += $ClassificationCollection | select-object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $IdGovRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $IdGovRbacAssignment
     }

@@ -1,7 +1,34 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
-## [0.7.0] - 2026-05-06
+## [0.8.0] - 2026-06-24
+### Added
+- **BloodHound OpenGraph exporter (`Export-EntraOpsPrivilegedEAMBloodHound`)**: New cmdlet that converts EntraOps Privileged EAM JSON into a BloodHound OpenGraph payload for enriching an AzureHound-ingested tenant graph. Acts as an AzureHound enrichment layer: reuses AzureHound-compatible kinds for principals, devices, groups, and Entra ID role definitions, and adds `EO_`-prefixed node/edge kinds for role assignments, assignment scope, classification evidence, PAW/device ownership, sponsor links, identity parent links, and Intune device permissions.
+- **BloodHound OpenGraph extension schema (`Integrations/BloodHound/OpenGraph_EntraOps_Extension_Schema.json`)**: Defines all EntraOps-owned node kinds (`EO_*RoleAssignment`, `EO_*Role`, `EO_AdministrativeUnit`) and relationship kinds used by the exporter, including active/eligible role relationships, assignment-context edges, scope edges, administrative unit membership, PAW/device ownership, sponsorship, identity parentage, and Intune role permission paths.
+- **BloodHound Cypher queries (`Integrations/BloodHound/EntraOps-queries.json`)**: Query library for BloodHound UI / queries.specterops.io covering Tier Zero administrative units, PAW usage by Tier Zero principals, Intune role assignments with device-wipe permissions, nested role assignments, PIM-for-Groups edges, sponsor relationships, and EntraOps tier classification edges.
+- **BloodHound schema and node/edge documentation (`Integrations/BloodHound/schema.md`, `descriptions/`)**: Graph model rationale, RBAC model Mermaid diagrams, node/edge kind descriptions, and icon assets for the extension.
+- **`EO_IntuneRolePermission` edges for DeviceManagement**: The exporter emits traversable edges from both the `EO_IntuneRoleAssignment` node and the assigned principal to scoped `AZDevice` nodes when matched Intune RBAC actions indicate device-impacting administrative capability. This makes cloud-managed PAW tier-boundary paths visible in BloodHound.
+- **`MatchedActions` in EAM output**: Tracks which specific RBAC actions matched each classification entry.
+- **`ScopedObjects` in Intune EAM output**: Resolves the concrete devices in scope (scope-group members for scoped assignments, all classified devices for tenant-wide assignments). Enables the exporter to create `EO_IntuneRolePermission` edges to concrete `AZDevice` nodes.
+- **`DeviceManagement_ScopeGroupDeviceMembers.json` persistence (`Update-EntraOpsClassificationControlPlaneScope`)**: After identifying classified devices, the scope update step now builds a reverse `groupId → deviceMembers` mapping, batch-resolves device display names via Microsoft Graph, and writes this file alongside the DeviceManagement classification output. Consumed by the BloodHound exporter to resolve Intune scope groups into actual device targets.
+- **First-Party App Roles (Non-Microsoft Graph APIs)**: Added support for classifying major first-party API permissions from Microsoft APIs (alongside Graph API).
+- **Advanced delegated permissions support**: Enhanced support for delegated permission classifications.
+- **Admin tier level attributes in `Get-EntraOpsPrivilegedEntraObject`**: New parameters to include admin tier level attributes (e.g., `adminTierLevel`, `adminTierLevelName`) in object resolution output
+- **Agent identity subtype normalization in `Get-EntraOpsPrivilegedEntraObject`**: Normalizes `agentIdentity` subtypes and gracefully handles unknown object types instead of failing
+- **Enhanced `Get-EntraOpsClassificationControlPlaneObjects`**: Improved function descriptions, detailed parameter documentation, and support for additional classification sources
+
+### Changed
+- **Classification templates**: Updated to latest classification templates
+- **EntraOps Privileged EAM Overview workbook**: Updated resource path references and query enhancements for improved dashboard accuracy
+
+### Breaking Changes
+- **`Classification_ApiPermissions.json` replaces `Classification_AppRoles.json`**: The API permissions classification template has been renamed from `Classification_AppRoles.json` to `Classification_ApiPermissions.json` to reflect support for all first-party Microsoft APIs (not only Microsoft Graph) and delegated/application permissions. The old template file is removed. Update any references to `AppRoles` in `EntraOps.config` or automation that reads or writes `Classification_AppRoles.json` to use `Classification_ApiPermissions.json`.
+
+### Fixed
+- **`Update-EntraOpsClassificationControlPlaneScope` — missing AU scopes for unprotected devices and groups**: Administrative Units assigned to unprotected devices (no RMAU membership) and unprotected groups were previously ignored when building scope entries. Only RMAU AUs from *protected* objects were collected, so unprotected objects only triggered the directory-level `/` fallback without contributing their own AU scopes. Now, AUs from unprotected devices and unprotected groups are also included in the scope list alongside the `/` fallback.
+- **`Get-EntraOpsPrivilegedEntraObject` — Linked Accounts lookup in Defender**: Fixed a bug where the XDR hunting query for associated work accounts (Linked Accounts) returned incorrect results.
+
+## [0.7.0] - 2026-03-25
 ### Added
 - **Tenant Governance Relationship support**: `Get-EntraOpsPrivilegedEntraIdRoles` now fetches active governance relationships from `/beta/directory/tenantGovernance/governanceRelationships` and processes delegated admin role assignments (`policySnapshot.delegatedAdministrationRoleAssignments`) from managing tenants (Tenant Governance Relationship).
 - **Cross-tenant object resolution**: New private function `Invoke-EntraOpsCrossTenantObjectResolution` implements a two-phase resolution strategy — Phase 1 resolves objects in the home tenant, Phase 2 switches context to the managing tenant to resolve objects that returned `unknown` type
@@ -17,6 +44,15 @@ All essential changes on EntraOps will be documented in this changelog.
 - New role classification section with enhanced details on classification category and capabilities in the Privileged EAM Overview workbook
 
 ### Changed
+- **Device Management classification**: Split and restructured multiple Tier 0 "Global" service definitions to correctly classify Intune role actions that do not support scope tags. These actions always grant Intune tenant-wide permissions regardless of the scope tag assigned to the role assignment and are now correctly classified as ControlPlane (Tier 0) even when assigned to a non-root scope tag (`/*`). The following changes were made:
+  - **Global Device Enrollment Management**: Scope-tag-unaware actions (`AppleDeviceSerialNumbers`, `CorporateDeviceIdentifiers`, `DeviceEnrollmentManagers`, `EnrollmentProfiles`, `EnrollmentProgramToken`) now match any scope (`/*`). Scope-tag-aware `AppleEnrollmentProfiles` actions moved to new "Global Apple Enrollment Management" service (root scope `/` only)
+  - **Global Application Management**: Scope-tag-unaware `MicrosoftStoreForBusiness/Modify` moved to new "Global Store Management" service (`/*`)
+  - **Global Mobile Device Management**: Scope-tag-unaware `AndroidSync/*` actions moved to new "Global Android Sync Management" service (`/*`)
+  - **Global Endpoint Security Management**: Scope-tag-unaware `MobileThreatDefense/Modify` moved to new "Global Threat Defense Management" service (`/*`)
+  - **Global Remote Assistance**: Scope-tag-unaware `RemoteAssistance/Update` moved to new "Global Remote Assistance Configuration" service (`/*`)
+  - **Global Certificate Management**: All actions are scope-tag-unaware — scope updated to `/*`
+  - **Organization Management**: All actions are scope-tag-unaware — scope updated to `/*`
+- **Intune RBAC scope matching aligned with other role systems**: Changed `Get-EntraOpsPrivilegedEAMIntune` scope matching from explicit `if/elseif` branches to `-like` operator, consistent with Defender, Entra ID, and Identity Governance implementations. The wildcard scope `/*` now matches both root (`/`) and scoped assignments, eliminating the need for dual scope entries (`["/*", "/"]`) in classification files. Existing `ExcludedRoleAssignmentScopeName` entries (which already exclude `/` for Tier 1 "User" definitions) ensure no unintended over-classification
 - **`Connect-EntraOps`**: Pre-authenticates to the managing tenant for all authentication types before connecting to the target tenant; verifies and corrects Azure/Graph context after auth if it landed on the wrong tenant; displays managing tenant info in the connection summary
 - **`Disconnect-EntraOps`**: Resets `AuthenticationType` in session state (`$__EntraOpsSession`) on disconnect and includes the reset in the overall "all cleared" check
 - **`Get-EntraOpsPrivilegedEntraIdRoles`**: `TenantId` now defaults to `(Get-AzContext).Tenant.Id` instead of requiring explicit passing; cache path handling is now null-safe (gracefully disables caching when `PersistentCachePath` is not set)
@@ -35,9 +71,14 @@ All essential changes on EntraOps will be documented in this changelog.
 ### Removed
 - Capabilities to classify by "AssignedDeviceObjects" (optional parameter: ApplyClassificationByAssignedObjects), use `Update-EntraOpsClassificationControlPlaneScope` to identify scope of devices by Control and Management Plane users
 
+### Security
+- **`Save-EntraOpsPrivilegedEAMWatchLists`**: Added path boundary validation for `ImportPath` parameter — the resolved path is now checked against `$EntraOpsBaseFolder` to prevent path traversal attacks that could read arbitrary files and exfiltrate data to Sentinel WatchLists (ZVE-2026-9F15DF)
+- **`Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists`**: Applied the same `ImportPath` path boundary validation
+- **`Update-EntraOps`**: PAT is no longer embedded in the `git clone` URL (visible in process listings, error messages, and logs); credentials are now passed via `GIT_CONFIG` environment variables with HTTP `extraheader`, and cleaned up in a `finally` block (ZVE-2026-DE86DC)
+- **`Save-EntraOpsEAMRbacSystemJson`**: Added validation of `ObjectType` and `ObjectId` against path traversal characters before constructing file paths; added a final resolved-path check in the parallel write block to ensure output stays within the export directory (ZVE-2026-EF0F9A)
+
 ### Fixed
-- Bug fix in `Get-EntraOpsPrivilegedEntraObject` for `agentIdentity` and `agentIdentityBlueprintPrincipal` with normalization to `servicePrincipal`, added null/empty guards for `ObjectType` and `ObjectSubType`
-- Bug fix in `Update-EntraOpsPrivilegedAdministrativeUnit` where role-assignable groups and PIM for Groups enabled groups could be added to Restricted Management Administrative Units (RMAU), which is not supported
+- Fixed a bug in `Update-EntraOpsPrivilegedAdministrativeUnit` where role-assignable groups and PIM for Groups enabled groups could be added to Restricted Management Administrative Units (RMAU), which is not supported
 
 ### Known issues
 - In multi-tenant environments using user interactive mode, EntraOps may prompt for sign-in multiple times during execution.

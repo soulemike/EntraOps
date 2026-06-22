@@ -72,7 +72,7 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         if ($RbacSystem -eq "EntraID") {
             $ClassificationTemplateSubFolder = "AadResources"
         } elseif ($RbacSystem -eq "ResourceApps") {
-            $ClassificationTemplateSubFolder = "AppRoles"
+            $ClassificationTemplateSubFolder = "ApiPermissions"
         } else {
             $ClassificationTemplateSubFolder = $RbacSystem
         }
@@ -141,8 +141,8 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                 $PimEnabledGroupIds = @($PrivilegedEam.RoleAssignments | Where-Object { $_.RoleAssignmentSubType -in @("Eligible member", "Active member", "Nested Eligible member") } | Select-Object -ExpandProperty TransitiveByObjectId -Unique)
 
                 $ExcludedGroups = @($EntraOpsPrivilegedObjects | Where-Object {
-                    $_.ObjectType -eq 'Group' -and ($_.ObjectSubType -eq 'Role-assignable' -or $_.ObjectId -in $PimEnabledGroupIds)
-                })
+                        $_.ObjectType -eq 'Group' -and ($_.ObjectSubType -eq 'Role-assignable' -or $_.ObjectId -in $PimEnabledGroupIds)
+                    })
                 if ($ExcludedGroups.Count -gt 0) {
                     foreach ($ExclGroup in $ExcludedGroups) {
                         $ExclReason = if ($ExclGroup.ObjectSubType -eq 'Role-assignable') { "role-assignable" } else { "PIM-enabled" }

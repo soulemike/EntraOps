@@ -1,17 +1,32 @@
-<#
-.SYNOPSIS
-    Get a JSON file with all classified Roles in Microsoft Endpoint Manager.
-
-.DESCRIPTION
-    Read JSON classification file and match roles in Microsoft Endpoint Manager to export it as JSON.
-
-.EXAMPLE
-    Export all classified built-in and custom Device Management Roles with a single classification based on Enterprise Access Model
-    to the file path ".\Classification\Classification_DeviceManagementRoles.json".
-    Export-EntraOpsClassificationDeviceManagementRoles -IncludeCustomRoles $True
-#>
-
 function Export-EntraOpsClassificationDeviceManagementRoles {
+
+    <#
+    .SYNOPSIS
+        Get a JSON file with all classified Device Management roles in Entra ID.
+
+    .DESCRIPTION
+        Read JSON classification file and match Device Management (Intune) role definitions in Entra ID tenant to export it as JSON.
+
+    .PARAMETER SingleClassification
+        Use the highest tier level classification only for each role definition. Default is $True.
+
+    .PARAMETER IncludeCustomRoles
+        Include custom role definitions in addition to built-in roles.
+
+    .PARAMETER DefaultScope
+        Default scope used for classification lookup. Default is "/".
+
+    .PARAMETER Exportfile
+        Path to the JSON file which should be exported. Default is ".\Classification\Classification_DeviceManagementRoles.json".
+
+    .EXAMPLE
+        Export all classified Device Management roles to the default export path.
+        Export-EntraOpsClassificationDeviceManagementRoles
+
+    .EXAMPLE
+        Export all classified Device Management roles including custom roles.
+        Export-EntraOpsClassificationDeviceManagementRoles -IncludeCustomRoles $true
+    #>
 
     [cmdletbinding()]
     param
@@ -32,9 +47,9 @@ function Export-EntraOpsClassificationDeviceManagementRoles {
     # Get EntraOps Classification
     $Classification = Get-Content -Path ./EntraOps_Classification/Classification_DeviceManagement.json | ConvertFrom-Json -Depth 10
 
-    # Single Classification (highest tier level only)
+    # Single classifcation (highest tier level only)
     Write-Output "Query directory role templates for mapping ID to name and further details"
-    $DeviceManagementRoleDefinitions = (Invoke-EntraOpsMsGraphQuery -Uri "https://graph.microsoft.com/beta/roleManagement/deviceManagement/roleDefinitions") | select-object displayName, templateId, isBuiltin, isPrivileged, rolePermissions
+    $DeviceManagementRoleDefinitions = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/roleManagement/deviceManagement/roleDefinitions").value | select-object displayName, templateId, isBuiltin, isPrivileged, rolePermissions
 
     if ($IncludeCustomRoles -eq $False) {
         $DeviceManagementRoleDefinitions = $DeviceManagementRoleDefinitions | where-object { $_.isBuiltin -eq "True" }
