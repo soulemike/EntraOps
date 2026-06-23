@@ -495,6 +495,7 @@
           "CustomDetection.ReadWrite.All",
           "PartnerSecurity.ReadWrite.All",
           "SecurityActions.ReadWrite.All",
+          "SecurityAlert.Create.All",
           "SecurityAlert.ReadWrite.All",
           "SecurityAnalyzedMessage.ReadWrite.All",
           "SecurityEvents.ReadWrite.All",
@@ -871,7 +872,7 @@
         "Category": "Microsoft.Graph",
         "Service": "Agent Identity",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
-        "ResourceScope": "Application",
+        "ResourceScope": "All",
         "RoleAssignmentScopeName": [
           "/"
         ],
@@ -1768,6 +1769,7 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "OneDrive.Provision.All",
           "Sites.FullControl.All"
         ]
       },
