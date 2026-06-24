@@ -34,6 +34,8 @@ function Expand-EntraOpsPrivilegedEAMJsonFile {
                     'EAMTierLevelTagValue'            = $EAMTierLevel.EAMTierLevelTagValue
                     'Category'                        = $Definition.Category
                     'Service'                         = $Definition.Service
+                    'ResourceAppId'                   = $Definition.ResourceAppId
+                    'ResourceScope'                   = $Definition.ResourceScope
                     'RoleAssignmentScopeName'         = $Definition.RoleAssignmentScopeName
                     'ExcludedRoleAssignmentScopeName' = $Definition.ExcludedRoleAssignmentScopeName
                     'RoleDefinitionActions'           = $Definition.RoleDefinitionActions
@@ -53,6 +55,8 @@ function Expand-EntraOpsPrivilegedEAMJsonFile {
                     'EAMTierLevelTagValue'            = $TierLevelDefinition.EAMTierLevelTagValue
                     'Category'                        = $TierLevelDefinition.Category
                     'Service'                         = $TierLevelDefinition.Service
+                    'ResourceAppId'                   = $TierLevelDefinition.ResourceAppId
+                    'ResourceScope'                   = $TierLevelDefinition.ResourceScope
                     'RoleAssignmentScopeName'         = $ScopeName
                     'ExcludedRoleAssignmentScopeName' = $TierLevelDefinition.ExcludedRoleAssignmentScopeName
                     'RoleDefinitionActions'           = $TierLevelDefinition.RoleDefinitionActions
@@ -72,6 +76,8 @@ function Expand-EntraOpsPrivilegedEAMJsonFile {
                     'EAMTierLevelTagValue'            = $TierLevelRoleScope.EAMTierLevelTagValue
                     'Category'                        = $TierLevelRoleScope.Category
                     'Service'                         = $TierLevelRoleScope.Service
+                    'ResourceAppId'                   = $TierLevelRoleScope.ResourceAppId
+                    'ResourceScope'                   = $TierLevelRoleScope.ResourceScope
                     'RoleAssignmentScopeName'         = $TierLevelRoleScope.RoleAssignmentScopeName
                     'ExcludedRoleAssignmentScopeName' = $TierLevelRoleScope.ExcludedRoleAssignmentScopeName
                     'RoleDefinitionActions'           = $RoleAction

@@ -15,6 +15,8 @@
     - [Parser for Custom Tables and WatchLists](#parser-for-custom-tables-and-watchlists)
     - [Examples to use EntraOps data in Unified SecOps Platform (Sentinel and XDR)](#examples-to-use-entraops-data-in-unified-secops-platform-sentinel-and-xdr)
     - [Workbook for visualization of EntraOps classification data](#workbook-for-visualization-of-entraops-classification-data)
+  - [EntraOps Integration to Attack Path Management](#entraops-integration-to-attack-path-management)
+    - [BloodHound](#bloodhound)
   - [Tenant Governance Relationship Support](#tenant-governance-relationship-support)
   - [Classify privileged objects by Custom Security Attributes](#classify-privileged-objects-by-custom-security-attributes)
   - [Classification of Identity Governance delegation and roles](#classification-of-identity-governance-delegation-and-roles)
@@ -52,6 +54,8 @@ Integration to customize Control Plane scope automatically by critical assets in
 - 🛡️ Automated assignment of privileged assets in Conditional Access Groups and Restricted Management Administrative Units (RMAU) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies. Privileged users and groups without existing restricted management by assignment to Administrative Unit (AU), role-assignable group or Entra ID role will be automatically covered by assignment to a RMAU (named "UnprotectedObjects").
 
 - 🏢 Tenant Governance Relationship Support to collect and classify privileged access across managed tenants in (cross-tenant) delegated admin relationships in Tenant Governance. EntraOps resolves object identities from governed tenants and correctly maps each principal to its source tenant via `ObjectTenantId`.
+
+- 🩸 Export EntraOps Privileged EAM data as OpenGraph JSON to enrich attack paths in BloodHound including classification, nested group assignments, relation to PAW devices and users.
 
 - 🕵️‍♂️ GitHub Custom Agents to identify and analyse privileged objects in EntraOps
   - EntraOps Report Agent: Applies Enterprise Access Model tiers and hygiene rules (cloud-only, no on-prem/guest for high privilege).
@@ -379,6 +383,27 @@ Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and 
 **EntraOps Privileged EAM - Workload Identities**
   
   [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Workload%20Identities.json)
+
+## EntraOps Integration to Attack Path Management
+
+### BloodHound Integration
+
+EntraOps can export its Privileged EAM classification data as a [BloodHound OpenGraph](https://bloodhound.specterops.io/opengraph/overview) JSON payload, enriching an existing AzureHound-ingested tenant graph with EntraOps node types and tier classifications. This makes Enterprise Access Model tier-boundary violations — including cloud-managed PAW paths — demoable as attack paths directly in BloodHound CE or Enterprise.
+
+The exporter is modeled as an AzureHound enrichment layer. It reuses AzureHound-compatible node and edge kinds for principals, devices, service principals, groups, and Entra ID role definitions, while adding `EO_`-prefixed kinds for EntraOps-owned context: concrete role assignments, assignment scope, classification evidence, PAW relationships, sponsor links, identity parent links, and Intune device permissions.
+
+**Key cmdlets:**
+
+- `Export-EntraOpsPrivilegedEAMBloodHound` — converts per-RBAC-system EAM export files (produced by `Save-EntraOpsPrivilegedEAMJson`) into a BloodHound-compatible OpenGraph JSON file, ready for upload alongside the custom extension schema.
+- `Save-EntraOpsPrivilegedEAMJson` / `Update-EntraOpsClassificationControlPlaneScope` — must run first to generate classified EAM JSON. The scope update step also writes `DeviceManagement_ScopeGroupDeviceMembers.json`, which the exporter uses to build traversable `EO_IntuneRolePermission` edges from Intune role assignments to concrete `AZDevice` nodes.
+
+**Graph model highlights:**
+
+- Entra ID, Intune, Identity Governance, Defender, and App Role assignments are all represented as first-class `EO_*RoleAssignment` nodes, preserving scope, PIM state, and classification evidence without replacing native AzureHound paths.
+- For DeviceManagement, `EO_IntuneRolePermission` edges connect role assignments and their principals to scoped `AZDevice` nodes when matched Intune actions indicate device-impacting capability, making PAW tier-boundary paths visible and traversable.
+- Classification decisions are linked via `EO_ClassifiedViaObject` edges, showing exactly which object drove an Enterprise Access Model tier assignment.
+
+For detailed setup steps, schema documentation, Cypher query examples, and privilege zone rules see the [BloodHound Integration README](./Integrations/BloodHound/README.md).
 
 ## Tenant Governance Relationship Support
 

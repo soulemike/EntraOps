@@ -1,0 +1,44 @@
+[
+  {
+    "name": "Administrative Units with assigned Tier Zero principals",
+    "platform": "Azure",
+    "description": "Show Administrative Units that have assigned Tier Zero principals.",
+    "query": "MATCH p=(principals:Tag_Tier_Zero)-[:EO_AssignedToAdministrativeUnit]-(au:EO_AdministrativeUnit)\nRETURN p\nLIMIT 1000"
+  },
+  {
+    "name": "PAWs used by Tier Zero principals",
+    "platform": "Azure",
+    "description": "Show Privileged Access Workstation devices used by Tier Zero principals.",
+    "query": "MATCH p=(principal:Tag_Tier_Zero)-[:EO_UsesPAW|EO_OwnsDevice]->(paw:AZDevice)\nRETURN p\nLIMIT 1000"
+  },
+  {
+    "name": "Role Assignments that can wipe Intune devices",
+    "platform": "Azure",
+    "description": "Display Intune role assignments with permissions to wipe company data from Intune-managed devices. Includes returning the assigned groups & principals and scopes.",
+    "query": "MATCH p1=(principal)-[:AZMemberOf*1..]->(:AZGroup)-[:EO_HasIntuneRoleAssignment]->(roleAssignment:EO_IntuneRoleAssignment)\nWHERE any(action IN roleAssignment.matchedactions WHERE action IN [\n        'Microsoft.Intune/RemoteTasks/Wipe',\n        'Microsoft.Intune/RemoteTasks/Retire',\n        'Microsoft.Intune/RemoteTasks/CleanPC',\n        'Microsoft.Intune/ManagedDevices/Delete'\n      ])\nOPTIONAL MATCH p2=(roleAssignment)-[:EO_ScopedTo]->(scope)\nRETURN p1,p2\nLIMIT 1000"
+  },
+  {
+    "name": "Principals sponsoring a Tier Zero principal",
+    "platform": "Azure",
+    "description": "Show principals that sponsor Tier Zero principals.",
+    "query": "// EntraOps Classification: Tier Zero\nMATCH p=(tierzero:Tag_Tier_Zero)-[:EO_IsSponsoredBy]->(principal)\nRETURN p\nLIMIT 1000"
+  },
+  {
+    "name": "Nested role assignments",
+    "platform": "Azure",
+    "description": "Show role assignments granted to nested groups.",
+    "query": "MATCH p=(group:AZGroup)-[:AZMemberOf*1..]->(:AZGroup)-[:EO_HasIntuneRoleAssignment|EO_HasDefenderRoleAssignment|EO_HasEntraRoleAssignment|EO_HasIdGovRoleAssignment|EO_HasAppRoleAssignment]->(ra)\nRETURN p"
+  },
+  {
+    "name": "PIM-for-Groups edges",
+    "platform": "Azure",
+    "description": "Show AZMemberOf edges that are assigned via PIM-for-Groups.",
+    "query": "MATCH p=()-[r:AZMemberOf]->(:AZGroup)\nWHERE r.pimassignmenttype IS NOT NULL\nRETURN p"
+  },
+  {
+    "name": "EntraOps tier classifications",
+    "platform": "Azure",
+    "description": "Show EntraOps tier classification edges.",
+    "query": "MATCH p=()-[:EO_ClassifiedViaObject]->()\nRETURN p"
+  }
+]

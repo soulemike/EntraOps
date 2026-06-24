@@ -1,33 +1,29 @@
-<#
-.SYNOPSIS
-    Get a JSON file with all classified Directory in Entra ID.
-
-.DESCRIPTION
-    Read JSON classification file and match directory roles in Entra ID tenant to export it as JSON.
-
-.PARAMETER SingleClassification
-    Export only the highest tier level classification for each directory role.
-
-.PARAMETER FilteredConditions
-    Filtered conditions to exclude from the classification. Default is '$ResourceIsSelf', '$SubjectIsOwner' which are additional permissions as object owner or resource self and not part of the Enterprise Access Model.
-
-.PARAMETER IncludeCustomRoles
-    Include custom directory roles in the export. Default is $False.
-
-.PARAMETER ShowOnly
-    Show the output in the console instead of exporting it to a file.
-
-.PARAMETER ExportFile
-    Path to the JSON file which should be exported.
-
-.EXAMPLE
-    Export all classified built-in and custom Directory Roles with a single classification based on Enterprise Access Model
-    to the file path ".\Classification\Classification_EntraIdDirectoryRoles.json".
-    By default, additional permissions as object owner or resource self will be excluded.
-    Export-EntraOpsClassificationAppRoles -IncludeCustomRoles $True
-#>
-
 function Export-EntraOpsClassificationDirectoryRoles {
+
+    <#
+    .SYNOPSIS
+        Get a JSON file with all classified Entra ID Directory roles.
+
+    .DESCRIPTION
+        Read JSON classification file and match Entra ID directory role definitions to export it as JSON.
+
+    .PARAMETER SingleClassification
+        Use the highest tier level classification only for each role definition. Default is $True.
+
+    .PARAMETER FilteredConditions
+        List of role permission conditions to exclude from classification. Default filters out '$ResourceIsSelf' and '$SubjectIsOwner'.
+
+    .PARAMETER IncludeCustomRoles
+        Include custom role definitions in addition to built-in roles.
+
+    .EXAMPLE
+        Export all classified Entra ID Directory roles to "Classification\Classification_EntraIdDirectoryRoles.json".
+        Export-EntraOpsClassificationDirectoryRoles
+
+    .EXAMPLE
+        Export all classified Entra ID Directory roles including custom roles.
+        Export-EntraOpsClassificationDirectoryRoles -IncludeCustomRoles $true
+    #>
 
     [cmdletbinding()]
     param
@@ -40,12 +36,6 @@ function Export-EntraOpsClassificationDirectoryRoles {
         ,
         [Parameter(Mandatory = $false)]
         $IncludeCustomRoles = $False
-        ,
-        [Parameter(Mandatory = $false)]
-        $Exportfile = ".\Classification\Classification_EntraIdDirectoryRoles.json"
-        ,
-        [Parameter(Mandatory = $false)]
-        [bool]$ShowOnly = $false           
     )
 
     # Define sensitive role definitions without actions to classify
@@ -56,21 +46,16 @@ function Export-EntraOpsClassificationDirectoryRoles {
         'db506228-d27e-4b7d-95e5-295956d6615f' # Agent ID Administrator is sensitive but has no corresponding role action
     )
 
-    # Get EntraOps Classification
-    # Check if classification file custom and/or template file exists, choose custom template for tenant if available
-    $ClassificationFileName = "Classification_AadResources.json"
-    if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
-        $AadClassificationFilePath = "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)"
-    }
-    elseif (Test-Path -Path "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)") {
-        $AadClassificationFilePath = "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)"
-    }
-    else {
-        Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
-    }
-    $Classification = Get-Content -Path $($AadClassificationFilePath) | ConvertFrom-Json -Depth 10
+    $ManagementPlaneRolesWithoutRoleActions = @(
+        '3f04f91a-4ad7-4bd3-bcfa-49882ea1a88a', # Purview Workload Content Administrator
+        'e07494ad-1654-4dd2-922e-6f81a71bf00f', # Purview Workload Content Reader
+        '02d5655b-c1cf-4e5f-98da-5fb919085bf6'  # Purview Workload Content Writer
+    )    
 
-    # Single Classification (highest tier level only)
+    # Get EntraOps Classification
+    $Classification = Get-Content -Path ./EntraOps_Classification/Classification_AadResources.json | ConvertFrom-Json -Depth 10
+
+    # Single classifcation (highest tier level only)
     Write-Output "Query directory role templates for mapping ID to name and further details"
     $DirectoryRoleDefinitions = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions").value | select-object displayName, templateId, isBuiltin, isPrivileged, rolePermissions, categories, richDescription
 
@@ -81,7 +66,8 @@ function Export-EntraOpsClassificationDirectoryRoles {
     $DirectoryRoles = $DirectoryRoleDefinitions | foreach-object {
 
         $DirectoryRolePermissions = ($_.RolePermissions | Where-Object { $_.condition -notin $FilteredConditions }).allowedResourceActions
-        $ClassifiedDirectoryRolePermissions = foreach ($RolePermission in $DirectoryRolePermissions) {
+        $ClassifiedDirectoryRolePermissions = New-Object System.Collections.ArrayList
+        foreach ($RolePermission in $DirectoryRolePermissions) {
             # Apply Classification
             $EntraRolePermissionTierLevelClassification = $Classification | where-object { $_.TierLevelDefinition.RoleDefinitionActions -contains $($RolePermission) } | select-object EAMTierLevelName, EAMTierLevelTagValue
             $EntraRolePermissionServiceClassification = $Classification | select-object -ExpandProperty TierLevelDefinition | where-object { $_.RoleDefinitionActions -contains $($RolePermission) } | select-object Service
@@ -103,12 +89,15 @@ function Export-EntraOpsClassificationDirectoryRoles {
                 }
             }
 
-            [PSCustomObject]@{
-                "AuthorizedResourceAction" = $RolePermission
-                "Category"                 = $EntraRolePermissionServiceClassification.Service
-                "EAMTierLevelName"         = $EntraRolePermissionTierLevelClassification.EAMTierLevelName
-                "EAMTierLevelTagValue"     = $EntraRolePermissionTierLevelClassification.EAMTierLevelTagValue
-            }
+            $ClassifiedDirectoryRolePermission = (
+                [PSCustomObject]@{
+                    "AuthorizedResourceAction" = $RolePermission
+                    "Category"                 = $EntraRolePermissionServiceClassification.Service
+                    "EAMTierLevelName"         = $EntraRolePermissionTierLevelClassification.EAMTierLevelName
+                    "EAMTierLevelTagValue"     = $EntraRolePermissionTierLevelClassification.EAMTierLevelTagValue
+                }
+            )
+            $ClassifiedDirectoryRolePermissions.Add($ClassifiedDirectoryRolePermission) | Out-Null
         }
         $ClassifiedDirectoryRolePermissions = $ClassifiedDirectoryRolePermissions | sort-object EAMTierLevelTagValue, Category, AuthorizedResourceAction
 
@@ -118,7 +107,7 @@ function Export-EntraOpsClassificationDirectoryRoles {
         else {
             $FilteredRoleClassifications = ($ClassifiedDirectoryRolePermissions | select-object -ExcludeProperty AuthorizedResourceAction -Unique | Sort-Object EAMTierLevelTagValue )
             $RoleDefinitionClassification = [System.Collections.Generic.List[object]]::new()
-            $RoleDefinitionClassification.Add($FilteredRoleClassifications)
+            $RoleDefinitionClassification.Add($FilteredRoleClassifications)        
         }
 
         if ($ControlPlaneRolesWithoutRoleActions -contains $_.templateId) {
@@ -128,23 +117,24 @@ function Export-EntraOpsClassificationDirectoryRoles {
             }
         }
 
+        if ($ManagementPlaneRolesWithoutRoleActions -contains $_.templateId) {
+            $RoleDefinitionClassification = [PSCustomObject]@{
+                "EAMTierLevelName"     = "ManagementPlane"
+                "EAMTierLevelTagValue" = "1"
+            }
+        }        
+
         [PSCustomObject]@{
             "RoleId"          = $_.templateId
             "RoleName"        = $_.displayName
             "isPrivileged"    = $_.isPrivileged
             "Categories"      = $_.categories
             "RichDescription" = $_.richDescription
-            "RolePermissions" = $ClassifiedDirectoryRolePermissions
+            "RolePermissions" = @($ClassifiedDirectoryRolePermissions) 
             "Classification"  = $RoleDefinitionClassification
-        }
+        }    
     }
 
     $DirectoryRoles = $DirectoryRoles | sort-object RoleName
-    
-    if ($ShowOnly -eq $true) {
-        $DirectoryRoles
-    }
-    else {
-        $DirectoryRoles | ConvertTo-Json -Depth 10 | Out-File $ExportFile -Force
-    }    
+    $DirectoryRoles | ConvertTo-Json -Depth 10 | Out-File .\Classification\Classification_EntraIdDirectoryRoles.json -Force
 }

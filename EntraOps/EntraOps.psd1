@@ -10,7 +10,7 @@
     RootModule           = 'EntraOps.psm1'
 
     # Version number of this module.
-    ModuleVersion        = '0.7.0'
+    ModuleVersion        = '0.8.0'
 
     # Supported PSEditions
     CompatiblePSEditions = 'Core'
@@ -92,9 +92,11 @@
         'Connect-EntraOps'
         'Disconnect-EntraOps'
         'Expand-EntraOpsPrivilegedEamJsonFile'
+        'Export-EntraOpsClassificationApiPermissions'
         'Export-EntraOpsClassificationAppRoles'
         'Export-EntraOpsClassificationDeviceManagementRoles'
         'Export-EntraOpsClassificationDirectoryRoles'
+        'Export-EntraOpsClassificationScopes'
         'Get-EntraOpsCacheStatistics'
         'Get-EntraOpsClassificationControlPlaneObjects'
         'Get-EntraOpsEntraObject'
@@ -132,7 +134,7 @@
         'Save-EntraOpsPrivilegedEAMJson'
         'Save-EntraOpsPrivilegedEAMWatchLists'
         'Save-EntraOpsWorkloadIdentityEnrichmentWatchLists'
-        'Save-EntraOpsWorkloadIdentityInfoWatchList'
+        'Save-EntraOpsWorkloadIdentityInfo'
         'Update-EntraOps'
         'Update-EntraOpsClassificationControlPlaneScope'
         'Update-EntraOpsClassificationFiles'

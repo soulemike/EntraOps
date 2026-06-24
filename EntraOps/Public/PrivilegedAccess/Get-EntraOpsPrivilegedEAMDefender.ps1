@@ -144,16 +144,30 @@ function Get-EntraOpsPrivilegedEamDefender {
         }
 
         if (($DefenderRoleActionsInJsonDefinition.Count -gt 0)) {
-            $ClassifiedDefenderMgmtRbacRoleWithActions = @()
+            $ClassifiedWithMatchedActions = @()
             foreach ($DefenderRoleAction in $DefenderRoleActions.rolePermissions.allowedResourceActions) {
-                $ClassifiedDefenderMgmtRbacRoleWithActions += $DefenderResourcesByClassificationJSON | Where-Object { $DefenderRoleAction -in $_.RoleDefinitionActions -and $DefenderRbacAssignment.RoleAssignmentScopeId -like $_.RoleAssignmentScopeName -and $DefenderRbacAssignment.RoleAssignmentScopeId -notin $_.ExcludedRoleAssignmentScopeName }
+                $ClassifiedWithMatchedActions += $DefenderResourcesByClassificationJSON | Where-Object { $DefenderRoleAction -in $_.RoleDefinitionActions -and $DefenderRbacAssignment.RoleAssignmentScopeId -like $_.RoleAssignmentScopeName -and $DefenderRbacAssignment.RoleAssignmentScopeId -notin $_.ExcludedRoleAssignmentScopeName } | ForEach-Object {
+                    [PSCustomObject]@{
+                        EAMTierLevelName     = $_.EAMTierLevelName
+                        EAMTierLevelTagValue = $_.EAMTierLevelTagValue
+                        Service              = $_.Service
+                        MatchedAction        = $DefenderRoleAction
+                    }
+                }
             }
-            $ClassifiedDefenderMgmtRbacRoleWithActions = $ClassifiedDefenderMgmtRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
-            $Classification = $ClassifiedDefenderMgmtRbacRoleWithActions | ForEach-Object {
+            $UniqueClassifications = $ClassifiedWithMatchedActions | Select-Object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
+            $Classification = foreach ($UniqueClass in $UniqueClassifications) {
+                [array]$MatchedActions = @($ClassifiedWithMatchedActions | Where-Object {
+                    $_.EAMTierLevelName -eq $UniqueClass.EAMTierLevelName -and
+                    $_.EAMTierLevelTagValue -eq $UniqueClass.EAMTierLevelTagValue -and
+                    $_.Service -eq $UniqueClass.Service
+                } | Select-Object -ExpandProperty MatchedAction | Select-Object -Unique)
                 [PSCustomObject]@{
-                    'AdminTierLevel'             = $_.EAMTierLevelTagValue
-                    'AdminTierLevelName'         = $_.EAMTierLevelName
-                    'Service'                    = $_.Service
+                    'AdminTierLevel'             = $UniqueClass.EAMTierLevelTagValue
+                    'AdminTierLevelName'         = $UniqueClass.EAMTierLevelName
+                    'Service'                    = $UniqueClass.Service
+                    'MatchedActions'             = if ($MatchedActions.Count -gt 0) { $MatchedActions } else { $null }
+                    'ScopedObjects'              = $null
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $null
                     'TaggedByObjectDisplayNames' = $null
@@ -196,7 +210,7 @@ function Get-EntraOpsPrivilegedEamDefender {
         $Classification = @()
         $Classification += ($DefenderRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -contains $DefenderRbacAssignment.RoleAssignmentScopeId }).Classification
         $Classification += ($DefenderRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -contains $DefenderRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DefenderRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $DefenderRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DefenderRbacAssignment
     }

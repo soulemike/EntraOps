@@ -80,26 +80,31 @@ function Get-EntraOpsPrivilegedEamEntraId {
     #region Define sensitive role definitions without actions to classify
     $ControlPlaneRolesWithoutRoleActions = [System.Collections.Generic.List[object]]::new()
     $ControlPlaneRolesWithoutRoleActions.Add([PSCustomObject]@{
+            "RoleId"  = 'd2562ede-74db-457e-a7b6-544e236ebb61' # AI Administrator
+            # Has permission similar to Application Admin (microsoft.directory/servicePrincipals/managePermissionGrantsForAll.microsoft-applications) but not listed as role action
+            "Service" = 'Application and Workload Identity'
+        }) | Out-Null    
+    $ControlPlaneRolesWithoutRoleActions.Add([PSCustomObject]@{
             "RoleId"  = 'd29b2b05-8046-44ba-8758-1e26182fcf32' # Directory Synchronization Accounts
+            # Has permission to overwrite synced identities but not listed as role action
             "Service" = 'Hybrid Identity Synchronization'
         }) | Out-Null
     $ControlPlaneRolesWithoutRoleActions.Add([PSCustomObject]@{
             "RoleId"  = "a92aed5d-d78a-4d16-b381-09adb37eb3b0" # On Premises Directory Sync Account
+            # Has permission to overwrite synced identities but not listed as role action
             "Service" = 'Hybrid Identity Synchronization'
         }) | Out-Null
     $ControlPlaneRolesWithoutRoleActions.Add([PSCustomObject]@{
             "RoleId"  = "9f06204d-73c1-4d4c-880a-6edb90606fd8" # Azure AD Joined Device Local Administrator
-            "Service" = 'Global Endpoint Management'
+            # Has permission to become local administrator on Azure AD joined devices but not listed as role action
+            "Service" = 'Global Endpoint Local Administrator'
         }) | Out-Null
     $ControlPlaneRolesWithoutRoleActions.Add([PSCustomObject]@{
             "RoleId"  = "7be44c8a-adaf-4e2a-84d6-ab2649e08a13" # Privileged Authentication Administrator
+            # Has permissions to manage authentication methods and password reset for privileged accounts and should be classified independently of scope
             "Service" = 'Privileged User Management'
         }) | Out-Null
-    $ControlPlaneRolesWithoutRoleActions.Add([PSCustomObject]@{
-            "RoleId"  = 'db506228-d27e-4b7d-95e5-295956d6615f' # Agent ID Administrator
-            "Service" = 'Agent Identity'
-        }) | Out-Null
-    
+
     # Create hashtable lookup for faster access
     $ControlPlaneRolesLookup = @{}
     foreach ($Role in $ControlPlaneRolesWithoutRoleActions) {
@@ -343,7 +348,12 @@ $AadRbacClassification = foreach ($CurrentAadRbacClassification in $AadRbacClass
             # Use hashtable lookup for faster matching when possible
             foreach ($MatchedClassification in $MatchedClassificationByScope) {
                 if ($MatchedClassification.RoleDefinitionActions -Contains $Action -and $MatchedClassification.ExcludedRoleDefinitionActions -notcontains $Action) {
-                    $AadRoleActionsInJsonDefinition.Add($MatchedClassification)
+                    $AadRoleActionsInJsonDefinition.Add([PSCustomObject]@{
+                        EAMTierLevelTagValue = $MatchedClassification.EAMTierLevelTagValue
+                        EAMTierLevelName     = $MatchedClassification.EAMTierLevelName
+                        Service              = $MatchedClassification.Service
+                        MatchedAction        = $Action
+                    })
                 }
             }
         }
@@ -358,6 +368,8 @@ $AadRbacClassification = foreach ($CurrentAadRbacClassification in $AadRbacClass
             'AdminTierLevel'             = "0"
             'AdminTierLevelName'         = "ControlPlane"
             'Service'                    = $ControlPlaneRole.Service
+            'MatchedActions'             = $null
+            'ScopedObjects'              = $null
             'TaggedBy'                   = "ControlPlaneWithoutRoleActions"
             'TaggedByObjectIds'          = $null
             'TaggedByObjectDisplayNames' = $null
@@ -368,7 +380,7 @@ $AadRbacClassification = foreach ($CurrentAadRbacClassification in $AadRbacClass
 
     $UniqueClassifications = @{}
     if ($AadRoleActionsInJsonDefinition.Count -gt 0) {
-        # Use hashtable to track unique combinations for better performance
+        # Use hashtable to track unique combinations and their matched actions
         foreach ($Item in $AadRoleActionsInJsonDefinition) {
             $key = "$($Item.EAMTierLevelTagValue)|$($Item.EAMTierLevelName)|$($Item.Service)"
             if (-not $UniqueClassifications.ContainsKey($key)) {
@@ -376,17 +388,24 @@ $AadRbacClassification = foreach ($CurrentAadRbacClassification in $AadRbacClass
                     'EAMTierLevelTagValue' = $Item.EAMTierLevelTagValue
                     'EAMTierLevelName'     = $Item.EAMTierLevelName
                     'Service'              = $Item.Service
+                    'MatchedActions'       = [System.Collections.Generic.List[string]]::new()
                 }
+            }
+            if (-not [string]::IsNullOrEmpty($Item.MatchedAction) -and -not $UniqueClassifications[$key].MatchedActions.Contains($Item.MatchedAction)) {
+                $UniqueClassifications[$key].MatchedActions.Add($Item.MatchedAction) | Out-Null
             }
         }
             
         # Sort and add to classification
         $SortedClassifications = $UniqueClassifications.Values | Sort-Object EAMTierLevelTagValue, Service
         foreach ($Item in $SortedClassifications) {
+            [array]$MatchedActionsArray = @($Item.MatchedActions)
             $ClassifiedRoleAction = [PSCustomObject]@{
                 'AdminTierLevel'             = $Item.EAMTierLevelTagValue
                 'AdminTierLevelName'         = $Item.EAMTierLevelName
                 'Service'                    = $Item.Service
+                'MatchedActions'             = if ($MatchedActionsArray.Count -gt 0) { $MatchedActionsArray } else { $null }
+                'ScopedObjects'              = $null
                 'TaggedBy'                   = "JSONwithAction"
                 'TaggedByObjectIds'          = $null
                 'TaggedByObjectDisplayNames' = $null

@@ -59,6 +59,13 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
         [object]$WatchListTemplates = "All"
     )
 
+    # --- Path safety: ensure ImportPath is under the expected base directory ---
+    $ResolvedImportPath = [System.IO.Path]::GetFullPath($ImportPath)
+    $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)
+    if (-not $ResolvedImportPath.StartsWith($ResolvedBaseFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Security check failed: ImportPath '$ResolvedImportPath' is not under the expected base directory '$ResolvedBaseFolder'."
+    }
+
     try {
         Import-Module "SentinelEnrichment" -ErrorAction Stop
     } catch {

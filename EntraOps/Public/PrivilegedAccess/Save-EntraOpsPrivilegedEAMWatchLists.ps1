@@ -78,6 +78,13 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         [boolean]$SkipUploadSaveLocal = $false        
     )
 
+    # --- Path safety: ensure ImportPath is under the expected base directory ---
+    $ResolvedImportPath = [System.IO.Path]::GetFullPath($ImportPath)
+    $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)
+    if (-not $ResolvedImportPath.StartsWith($ResolvedBaseFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Security check failed: ImportPath '$ResolvedImportPath' is not under the expected base directory '$ResolvedBaseFolder'."
+    }
+
     if ( -not $SkipUploadSaveLocal ) {
         Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment        
     }

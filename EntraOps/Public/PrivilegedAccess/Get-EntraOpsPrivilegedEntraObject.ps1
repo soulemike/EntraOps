@@ -26,6 +26,18 @@
 .PARAMETER XdrHunting
     Boolean to indicate if ThreatHunting.Read.All permission is granted for current session to get associated work account from XDR data. Default is set by scope of MgGraph.
 
+.PARAMETER PrivilegedUserAdminTierLevelAttribute
+    CSA field name for the admin tier level on user objects. Defaults to 'adminTierLevel'. Override via EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelAttribute.
+
+.PARAMETER PrivilegedUserAdminTierLevelNameAttribute
+    CSA field name for the admin tier level name on user objects. Defaults to 'adminTierLevelName'. Override via EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelNameAttribute.
+
+.PARAMETER PrivilegedServicePrincipalAdminTierLevelAttribute
+    CSA field name for the admin tier level on service principal and application objects. Defaults to 'adminTierLevel'. Override via EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelAttribute.
+
+.PARAMETER PrivilegedServicePrincipalAdminTierLevelNameAttribute
+    CSA field name for the admin tier level name on service principal and application objects. Defaults to 'adminTierLevelName'. Override via EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelNameAttribute.
+
 .EXAMPLE
     Details of privileged object by using ObjectId
     Get-EntraOpsPrivilegedEntraObject -AadObjectId "bdf10e92-30c7-4cc8-93e7-2982ea6cf371"
@@ -59,6 +71,18 @@ function Get-EntraOpsPrivilegedEntraObject {
         ,
         [Parameter(Mandatory = $false)]
         [switch]$IsForeignPrincipal
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$PrivilegedUserAdminTierLevelAttribute = $(if (-not [string]::IsNullOrEmpty($EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelAttribute)) { $EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelAttribute } else { 'adminTierLevel' })
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$PrivilegedUserAdminTierLevelNameAttribute = $(if (-not [string]::IsNullOrEmpty($EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelNameAttribute)) { $EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelNameAttribute } else { 'adminTierLevelName' })
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$PrivilegedServicePrincipalAdminTierLevelAttribute = $(if (-not [string]::IsNullOrEmpty($EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelAttribute)) { $EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelAttribute } else { 'adminTierLevel' })
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$PrivilegedServicePrincipalAdminTierLevelNameAttribute = $(if (-not [string]::IsNullOrEmpty($EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelNameAttribute)) { $EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelNameAttribute } else { 'adminTierLevelName' })
     )
 
     $StopwatchTotal = [System.Diagnostics.Stopwatch]::StartNew()
@@ -264,8 +288,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             } catch {
                 Write-Warning "No custom security attribute for $($AadObjectId)"
             }
-            $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique adminTierLevel).AdminTierLevel
-            $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique adminTierLevelName).AdminTierLevelName
+            $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique $PrivilegedUserAdminTierLevelAttribute).$PrivilegedUserAdminTierLevelAttribute
+            $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique $PrivilegedUserAdminTierLevelNameAttribute).$PrivilegedUserAdminTierLevelNameAttribute
 
             # Administrative Unit Assignments
             $RestrictedManagementByRAG = $ObjectMemberships.isAssignableToRole -contains $true
@@ -294,8 +318,7 @@ function Get-EntraOpsPrivilegedEntraObject {
                                 | where IsPrimary == true
                                 | project IdentityId, AccountObjectId = SourceProviderAccountId, AccountUpn
                         ) on IdentityId
-                        | extend AssociatedPrimaryAccount = bag_pack_columns(AccountObjectId, AccountUpn, IdentityLinkType, IdentityId)
-                        | project AccountObjectId = SourceProviderAccountId                    
+                        | project AccountObjectId                   
                     "
                     $IdentityAccountResult = Invoke-EntraOpsGraphSecurityQuery -Query $IdentityAccountQuery -Timespan "P14D"
                     $IdentityAccountResult.AccountObjectId | ForEach-Object { $WorkAccount.Add($_) | out-null }   
@@ -375,8 +398,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             } catch {
                 Write-Warning "No custom security attribute for $($AadObjectId)"
             }
-            $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique adminTier).AdminTier
-            $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique adminTierLevelName).AdminTierLevelName
+            $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique $PrivilegedServicePrincipalAdminTierLevelAttribute).$PrivilegedServicePrincipalAdminTierLevelAttribute
+            $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique $PrivilegedServicePrincipalAdminTierLevelNameAttribute).$PrivilegedServicePrincipalAdminTierLevelNameAttribute
             $OutsideOfAadTenant = ($SPObject.AppOwnerOrganizationId -ne $TenantId)
 
             #region Agent identity object details$
@@ -432,8 +455,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             } catch {
                 Write-Warning "No custom security attribute for $($AadObjectId)"
             }
-            $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique adminTier).AdminTier
-            $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique adminTierLevelName).AdminTierLevelName
+            $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique $PrivilegedServicePrincipalAdminTierLevelAttribute).$PrivilegedServicePrincipalAdminTierLevelAttribute
+            $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique $PrivilegedServicePrincipalAdminTierLevelNameAttribute).$PrivilegedServicePrincipalAdminTierLevelNameAttribute
             $OutsideOfAadTenant = $False
             if ($null -ne $SPObject) {
                 Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/servicePrincipals/$($SPObject.id)/ownedObjects?`$select=id" -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }

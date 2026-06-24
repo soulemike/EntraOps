@@ -91,6 +91,24 @@ function Save-EntraOpsEAMRbacSystemJson {
         Write-Warning "Filtered out $($OriginalCount - $FilteredCount) objects with null ObjectType or ObjectId before saving."
     }
 
+    # Validate ObjectType and ObjectId don't contain path traversal characters
+    $PathTraversalPattern = '[/\\:*?"<>|]|\.\.'
+    $SafeData = @($EamData | Where-Object {
+        if ($_.ObjectType -match $PathTraversalPattern) {
+            Write-Warning "Skipping object with unsafe ObjectType: $($_.ObjectType)"
+            return $false
+        }
+        if ($_.ObjectId -match $PathTraversalPattern) {
+            Write-Warning "Skipping object with unsafe ObjectId: $($_.ObjectId)"
+            return $false
+        }
+        return $true
+    })
+    if ($SafeData.Count -ne $EamData.Count) {
+        Write-Warning "Filtered out $($EamData.Count - $SafeData.Count) objects with path traversal characters in ObjectType or ObjectId."
+    }
+    $EamData = $SafeData
+
     $EamData = $EamData | Sort-Object ObjectDisplayName, ObjectType, ObjectId
 
     # Ensure stable RoleAssignments schema so null-only fields are still included in JSON output.
@@ -160,6 +178,12 @@ function Save-EntraOpsEAMRbacSystemJson {
     $Results = $EamData | ForEach-Object -Parallel {
         $Obj = $_
         $Path = "$using:ExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+        # Final resolved-path check to guard against path traversal
+        $ResolvedPath = [System.IO.Path]::GetFullPath($Path)
+        if (-not $ResolvedPath.StartsWith([System.IO.Path]::GetFullPath($using:ExportFolder), [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-Warning "Path traversal detected for ObjectId '$($Obj.ObjectId)', skipping."
+            return $false
+        }
         try {
             $Obj | ConvertTo-Json -Depth 10 | Out-File -Path $Path -Force -ErrorAction Stop
             $true

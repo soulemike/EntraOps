@@ -45,6 +45,12 @@ function Get-EntraOpsPrivilegedEAMIntune {
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $IntuneClassificationFilePath = Resolve-EntraOpsClassificationPath -ClassificationFileName "Classification_DeviceManagement.json" -FolderClassification $FolderClassification
 
+    # Load group → device member mapping for BloodHound edge enrichment (created by Update-EntraOpsClassificationControlPlaneScope)
+    $DeviceMembersFile = Join-Path (Split-Path $IntuneClassificationFilePath -Parent) "DeviceManagement_ScopeGroupDeviceMembers.json"
+    $DeviceMembersData = if (Test-Path $DeviceMembersFile) {
+        Get-Content $DeviceMembersFile -Raw | ConvertFrom-Json
+    } else { $null }
+
     #region Get all role assignments and global exclusions
     #region Stage 1: Fetch Device Management Roles
     $Stage1Start = Get-Date
@@ -190,10 +196,13 @@ function Get-EntraOpsPrivilegedEAMIntune {
         # RoleAssignmentScopeName (which contains group GUIDs from classification parameters).
         # "/*" matches any scoped (non-root) assignment.
         # "/" matches tenant-wide assignments.
+        # Specific GUIDs match against the assignment's directoryScopeIds.
         $MatchedClassificationByScope += foreach ($ClassEntry in $IntuneResourcesByClassificationJSON) {
             $ScopeName = $ClassEntry.RoleAssignmentScopeName
 
             # Determine scope match
+            # Note: Intune uses numeric scope tag IDs (e.g. "2") not path-like scopes,
+            # so -like with "/*" pattern does not work here (unlike Defender/EntraID).
             $ScopeMatch = $false
             if ($AppScopeId -eq "/" -and $ScopeName -eq "/") {
                 $ScopeMatch = $true
@@ -281,6 +290,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                                 MatchedScopeName     = $ScopeName
                                 MatchType            = $MatchType
                                 MatchedGroupIds      = $EntryMatchedGroups
+                                MatchedAction        = $IntuneRoleAction
                             }
                         }
                     }
@@ -290,13 +300,17 @@ function Get-EntraOpsPrivilegedEAMIntune {
             # Group by unique classification and compute per-classification TaggedBy
             $UniqueClassifications = $ClassifiedWithMatchedScope | Select-Object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification = foreach ($UniqueClass in $UniqueClassifications) {
+                # Aggregate matched entries for this classification
+                $MatchedEntries = @($ClassifiedWithMatchedScope | Where-Object {
+                    $_.EAMTierLevelName -eq $UniqueClass.EAMTierLevelName -and
+                    $_.EAMTierLevelTagValue -eq $UniqueClass.EAMTierLevelTagValue -and
+                    $_.Service -eq $UniqueClass.Service
+                })
+
+                # Aggregate matched actions across all entries
+                [array]$MatchedActions = @($MatchedEntries.MatchedAction | Where-Object { -not [string]::IsNullOrEmpty($_) } | Select-Object -Unique)
+
                 if ($IsScoped) {
-                    # Aggregate matched group IDs across all entries for this classification
-                    $MatchedEntries = @($ClassifiedWithMatchedScope | Where-Object {
-                        $_.EAMTierLevelName -eq $UniqueClass.EAMTierLevelName -and
-                        $_.EAMTierLevelTagValue -eq $UniqueClass.EAMTierLevelTagValue -and
-                        $_.Service -eq $UniqueClass.Service
-                    })
                     [array]$TaggedByIds = @($MatchedEntries | ForEach-Object { $_.MatchedGroupIds } | Where-Object { -not [string]::IsNullOrEmpty($_) } | Select-Object -Unique)
 
                     if ($TaggedByIds.Count -gt 0) {
@@ -313,9 +327,26 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     $TaggedBySystem = $null
                 }
 
+                # Resolve scoped devices from group → device member mapping
+                $ScopedObjects = @()
+                if ($null -ne $DeviceMembersData) {
+                    if ($TaggedByIds.Count -gt 0) {
+                        # Scoped assignment: devices from matched groups
+                        $ScopedObjects = @($TaggedByIds | ForEach-Object {
+                            $grpData = $DeviceMembersData.groupDeviceMembers.$_
+                            if ($grpData) { $grpData.deviceMembers }
+                        } | Where-Object { $null -ne $_ })
+                    } elseif (-not $IsScoped) {
+                        # Tenant-wide assignment: all classified devices
+                        $ScopedObjects = @($DeviceMembersData.allClassifiedDevices | Where-Object { $null -ne $_ })
+                    }
+                }
+
                 [PSCustomObject]@{
                     'AdminTierLevel'             = $UniqueClass.EAMTierLevelTagValue
                     'AdminTierLevelName'         = $UniqueClass.EAMTierLevelName
+                    'MatchedActions'             = if ($MatchedActions.Count -gt 0) { $MatchedActions } else { $null }
+                    'ScopedObjects'              = if ($ScopedObjects.Count -gt 0) { $ScopedObjects } else { $null }
                     'Service'                    = $UniqueClass.Service
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $TaggedByIds
@@ -340,7 +371,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
         $DeviceMgmtRbacAssignment = $DeviceMgmtRbacAssignment | Select-Object -ExcludeProperty Classification, DirectoryScopeIds
         $Classification = @()
         $Classification += ($DeviceMgmtRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DeviceMgmtRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, MatchedActions, ScopedObjects | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DeviceMgmtRbacAssignment
     }

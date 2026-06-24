@@ -9,7 +9,7 @@
     Folder where the classification files should be stored. Default is "$DefaultFolderClassification/Templates".
 
 .PARAMETER Classifications
-    Array of classification names which should be updated. Default is ("AadResources", "AppRoles") which are available from the public repository.
+    Array of classification names which should be updated. Default is ("AadResources", "ApiPermissions") which are available from the public repository.
 
 .PARAMETER IncludeParamFiles
     If set, automatically includes any matching .Param variant files found in the repository for each classification in $Classifications.
@@ -27,17 +27,30 @@ function Update-EntraOpsClassificationFiles {
 
     [CmdletBinding()]
     param (
+        [Parameter(Mandatory = $False)]
+        [System.String]$Branch = "main"
+        ,  
         [Parameter(Mandatory = $false)]
         [System.String]$FolderClassification = "$DefaultFolderClassification/Templates",
 
         [Parameter(Mandatory = $false)]
-        [Object]$Classifications = ("AadResources", "AadResources.Param", "AppRoles"),
+        [Object]$Classifications = ("AadResources", "AadResources.Param", "AppRoles", "ApiPermissions"),
 
         [Parameter(Mandatory = $false)]
         [Switch]$IncludeParamFiles = $true
     )
 
-    $ClassificationTemplates = Invoke-RestMethod -Method GET -Uri "https://api.github.com/repos/Cloud-Architekt/AzurePrivilegedIAM/contents/EntraOps_Classification"
+    # Normalize Classifications: replace AppRoles with ApiPermissions, or remove it if ApiPermissions already present
+    if ("AppRoles" -in $Classifications) {
+        if ("ApiPermissions" -in $Classifications) {
+            $Classifications = $Classifications | Where-Object { $_ -ne "AppRoles" }
+        } else {
+            $Classifications = $Classifications | ForEach-Object { if ($_ -eq "AppRoles") { "ApiPermissions" } else { $_ } }
+            Write-Warning "AppRoles has been replaced with ApiPermissions. The new classification file also supports delegated permissions."
+        }
+    }
+
+    $ClassificationTemplates = Invoke-RestMethod -Method GET -Uri "https://api.github.com/repos/Cloud-Architekt/AzurePrivilegedIAM/contents/EntraOps_Classification?ref=$($Branch)"
 
     # When -IncludeParamFiles is set, expand $Classifications with any .Param variants found in the repository
     if ($IncludeParamFiles) {
@@ -54,6 +67,8 @@ function Update-EntraOpsClassificationFiles {
         # Parsing classification name by removing the prefix and suffix from file name
         $ClassificationName = $ClassificationTemplate.Name.Replace("Classification_", "").Replace(".json", "")
         if ($ClassificationName -in $Classifications) {
+
+
             $LocalFilePath = "$($FolderClassification)/$($ClassificationTemplate.name)"
             $FileExisted = Test-Path $LocalFilePath
             $OldHash = if ($FileExisted) { (Get-FileHash $LocalFilePath -Algorithm SHA256).Hash } else { $null }
