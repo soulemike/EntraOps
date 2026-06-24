@@ -1,0 +1,300 @@
+{
+  "schema": {
+    "name": "EntraOps",
+    "display_name": "EntraOps",
+    "version": "v1.0.0",
+    "namespace": "EO"
+  },
+  "node_kinds": [
+    {
+      "name": "EO_Tenant",
+      "display_name": "EO_Tenant",
+      "description": "An Azure EntraOps tenant environment. This node_kind solely exists for OpenGraph schema validation, and will not be emitted to the OpenGraph payload.",
+      "is_display_kind": true,
+      "icon": "cloud",
+      "color": "#54F2F2"
+    },
+    {
+      "name": "EO_Base",
+      "display_name": "EntraOps Base",
+      "description": "A generic EntraOps reference object",
+      "is_display_kind": false,
+      "icon": "cube",
+      "color": "#54F2F2"
+    },
+    {
+      "name": "EO_EntraRoleAssignment",
+      "display_name": "Entra Role Assignment",
+      "description": "A Microsoft Entra RBAC role assignment",
+      "is_display_kind": true,
+      "icon": "clipboard-user",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_DefenderRole",
+      "display_name": "Defender Role",
+      "description": "A Microsoft Defender RBAC role",
+      "is_display_kind": true,
+      "icon": "clipboard-list",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_DefenderRoleAssignment",
+      "display_name": "Defender Role Assignment",
+      "description": "A Microsoft Defender RBAC role assignment",
+      "is_display_kind": true,
+      "icon": "clipboard-user",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_IntuneRole",
+      "display_name": "Intune Role",
+      "description": "A Microsoft Intune / Device Management role",
+      "is_display_kind": true,
+      "icon": "clipboard-list",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_IntuneRoleAssignment",
+      "display_name": "Intune Role Assignment",
+      "description": "A Microsoft Intune / Device Management role assignment",
+      "is_display_kind": true,
+      "icon": "clipboard-user",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_IdGovRole",
+      "display_name": "Identity Governance Role",
+      "description": "A Microsoft Entra Identity Governance role",
+      "is_display_kind": true,
+      "icon": "clipboard-list",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_IdGovRoleAssignment",
+      "display_name": "Identity Governance Role Assignment",
+      "description": "A Microsoft Entra Identity Governance role assignment",
+      "is_display_kind": true,
+      "icon": "clipboard-user",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_AppRole",
+      "display_name": "App Role",
+      "description": "A resource application API permission role",
+      "is_display_kind": true,
+      "icon": "clipboard-list",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_AppRoleAssignment",
+      "display_name": "App Role Assignment",
+      "description": "A resource application API permission role assignment",
+      "is_display_kind": true,
+      "icon": "clipboard-user",
+      "color": "#ED8537"
+    },
+    {
+      "name": "EO_AdministrativeUnit",
+      "display_name": "Administrative Unit",
+      "description": "An Entra ID administrative unit",
+      "is_display_kind": true,
+      "icon": "folder",
+      "color": "#BD93D8"
+    }
+  ],
+  "relationship_kinds": [
+    {
+      "name": "EO_HasEntraRole",
+      "description": "Principal holds an active Entra RBAC role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasDefenderRole",
+      "description": "Principal holds an active Defender RBAC role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasIntuneRole",
+      "description": "Principal holds an active Intune / Device Management role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasIdGovRole",
+      "description": "Principal holds an active Identity Governance role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasAppRole",
+      "description": "Principal holds an active resource application API permission role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_EligibleForEntraRole",
+      "description": "Principal is PIM-eligible for a Entra RBAC role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_EligibleForDefenderRole",
+      "description": "Principal is PIM-eligible for a Defender RBAC role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_EligibleForIntuneRole",
+      "description": "Principal is PIM-eligible for an Intune role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_EligibleForIdGovRole",
+      "description": "Principal is PIM-eligible for an Identity Governance role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_EligibleForAppRole",
+      "description": "Principal is PIM-eligible for a resource application API permission role",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasEntraRoleAssignment",
+      "description": "Principal has a concrete Entra ID RBAC role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasDefenderRoleAssignment",
+      "description": "Principal has a concrete Defender RBAC role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasIntuneRoleAssignment",
+      "description": "Principal has a concrete Intune / Device Management role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasIdGovRoleAssignment",
+      "description": "Principal has a concrete Identity Governance role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasAppRoleAssignment",
+      "description": "Principal has a concrete resource application API permission role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_EntraRoleAssigned",
+      "description": "BloodHound-native Entra ID RBAC role is linked to a concrete EntraOps role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_DefenderRoleAssigned",
+      "description": "Defender RBAC role is linked to a concrete role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_IntuneRoleAssigned",
+      "description": "Intune / Device Management role is linked to a concrete role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_IdGovRoleAssigned",
+      "description": "Identity Governance role is linked to a concrete role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_AppRoleAssigned",
+      "description": "Resource application API permission role is linked to a concrete role assignment",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_ClassifiedViaObject",
+      "description": "Principal's 'admintierlevel' property was classified because of a tagged object",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_ScopedTo",
+      "description": "Role assignment is scoped to an administrative unit or tenant",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_AssignedToAdministrativeUnit",
+      "description": "Principal is a member of an administrative unit",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasWorkAccount",
+      "description": "Privileged account is linked to a standard work account",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_UsesPAW",
+      "description": "Privileged account is assigned a device. Based on the EntraOps-specific CustomSecurityAttribute 'PrivilegedUserPawAttribute'",
+      "is_traversable": true
+    },
+    {
+      "name": "EO_PAWFor",
+      "description": "Device is assigned to a privileged account. Based on the EntraOps-specific CustomSecurityAttribute 'PrivilegedUserPawAttribute'",
+      "is_traversable": true
+    },
+    {
+      "name": "EO_DeviceOwner",
+      "description": "Registered device is owned by a principal",
+      "is_traversable": true
+    },
+    {
+      "name": "EO_OwnsDevice",
+      "description": "Principal owns or has registered a device",
+      "is_traversable": true
+    },
+    {
+      "name": "EO_IsSponsoredBy",
+      "description": "Guest or external identity is sponsored by another principal",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_HasIdentityParent",
+      "description": "Identity was derived from or linked to a parent identity",
+      "is_traversable": false
+    },
+    {
+      "name": "EO_EntraRolePermission",
+      "description": "",
+      "is_traversable": true
+    },
+    {
+      "name": "EO_IntuneRolePermission",
+      "description": "Can compromise the Intune device with actions scoped to the device or tenant",
+      "is_traversable": true
+    },
+    {
+      "name": "EO_IdGovRolePermission",
+      "description": "",
+      "is_traversable": true
+    },
+    {
+      "name": "EO_AppRolePermission",
+      "description": "",
+      "is_traversable": true
+    }
+  ],
+  "environments": [
+    {
+      "environment_kind": "EO_Tenant",
+      "source_kind": "EntraOps",
+      "principal_kinds": [
+      ]
+    }
+  ],
+  "relationship_findings": [
+    {
+    "name": "EO_IntuneRolePermission_Finding",
+    "display_name": "Principal has Intune Role Permission on the device",
+    "environment_kind": "EO_Tenant",
+    "relationship_kind": "EO_IntuneRolePermission",
+    "remediation": {
+      "short_description": "Lorem short_description ipsum dolor sit amet, consectetur adipiscing elit.",
+      "long_description": "Lorem long_description ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+      "short_remediation": "Lorem short_remediation ipsum dolor sit amet, consectetur adipiscing elit.",
+      "long_remediation": "Lorem long_remediation ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur."
+    }
+  }
+  ]
+}
