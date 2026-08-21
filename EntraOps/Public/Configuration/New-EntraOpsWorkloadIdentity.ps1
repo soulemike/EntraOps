@@ -31,6 +31,18 @@
     Name of the entity (e.g., branch name "main" or environment name "prod") which will be used for creating the federated credential.
     By default, the value is "main".
 
+.PARAMETER AdoOrgName
+    Azure DevOps organization name for creating the federated credential (e.g., "my-org").
+
+.PARAMETER AdoProjectName
+    Azure DevOps project name for creating the federated credential (e.g., "my-project").
+
+.PARAMETER AdoServiceConnectionName
+    Azure DevOps Service Connection name for creating the federated credential (e.g., "EntraOps-ServiceConnection").
+
+.PARAMETER AdoFederatedCredentialIssuer
+    Optional issuer URL for the Azure DevOps federated credential. Defaults to the Microsoft Entra issuer for the tenant.
+
 .EXAMPLE
     Create App Registration based on the configuration in the config file (default location: ./EntraOpsConfig.json).
     If the Ingestion to Log Analytics is defined in Config file, the required permissions will be added to the Resource Group of the Data Collection Rule.
@@ -40,6 +52,10 @@
 .EXAMPLE
     Create App Registration based on the configuration in the config file (default location: ./EntraOpsConfig.json) and create a federated credential for GitHub repository branch defined in parameter.
     New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps Reporting" -CreateFederatedCredential -GitHubOrg "Cloud-Architekt" -GitHubRepo "EntraOps-TenantName" -FederatedEntityType "Branch" -FederatedEntityName "main"
+
+.EXAMPLE
+    Create App Registration and federated credential for Azure DevOps Workload Identity Federation.
+    New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps Reporting" -CreateFederatedCredential -AdoOrgName "my-org" -AdoProjectName "my-project" -AdoServiceConnectionName "EntraOps-ServiceConnection"
  #>
 
 function New-EntraOpsWorkloadIdentity {
@@ -56,6 +72,7 @@ function New-EntraOpsWorkloadIdentity {
         [string]$ConfigFile = "$EntraOpsBasefolder/EntraOpsConfig.json",
 
         [Parameter(ParameterSetName = "CreateFederatedCredential")]
+        [Parameter(ParameterSetName = "CreateAdoFederatedCredential")]
         [switch]$CreateFederatedCredential,
 
         [Parameter(Mandatory, ParameterSetName = "CreateFederatedCredential")]
@@ -69,7 +86,19 @@ function New-EntraOpsWorkloadIdentity {
         [string]$FederatedEntityType = "Branch",
 
         [Parameter(Mandatory, ParameterSetName = "CreateFederatedCredential")]
-        [string]$FederatedEntityName = "main"
+        [string]$FederatedEntityName = "main",
+
+        [Parameter(Mandatory, ParameterSetName = "CreateAdoFederatedCredential")]
+        [string]$AdoOrgName,
+
+        [Parameter(Mandatory, ParameterSetName = "CreateAdoFederatedCredential")]
+        [string]$AdoProjectName,
+
+        [Parameter(Mandatory, ParameterSetName = "CreateAdoFederatedCredential")]
+        [string]$AdoServiceConnectionName,
+
+        [Parameter(Mandatory = $False, ParameterSetName = "CreateAdoFederatedCredential")]
+        [string]$AdoFederatedCredentialIssuer
     )
 
     $ErrorActionPreference = "Stop"
@@ -306,7 +335,7 @@ function New-EntraOpsWorkloadIdentity {
     #region Add Federated Credential to Application object
     if ($Config.AuthenticationType -eq "FederatedCredentials" -and $CreateFederatedCredential) {
         if ($Config.DevOpsPlatform -eq "GitHub") {
-            Write-Output "Add Federated Credential to $AppDisplayName..."
+            Write-Output "Add Federated Credential to $AppDisplayName for GitHub..."
 
             switch ($FederatedEntityType) {
                 Branch {
@@ -321,6 +350,27 @@ function New-EntraOpsWorkloadIdentity {
                 name      = "$($GitHubRepo)-$($FederatedEntityType)-$($FederatedEntityName)"
                 issuer    = "https://token.actions.githubusercontent.com"
                 subject   = "repo:$($GitHubOrg)/$($GitHubRepo):$($Entity)"
+                audiences = @(
+                    "api://AzureADTokenExchange"
+                )
+            }
+
+            try {
+                New-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -BodyParameter $FederatedCredentialParam
+            } catch {
+                Write-Warning "Failed to add Federated Credential to $AppDisplayName. Error: $_"
+            }
+        } elseif ($Config.DevOpsPlatform -eq "AzureDevOps") {
+            Write-Output "Add Federated Credential to $AppDisplayName for Azure DevOps..."
+
+            if ([string]::IsNullOrWhiteSpace($AdoFederatedCredentialIssuer)) {
+                $AdoFederatedCredentialIssuer = "https://login.microsoftonline.com/$($Config.TenantId)/v2.0"
+            }
+
+            $FederatedCredentialParam = @{
+                name      = "$($AdoOrgName)-$($AdoProjectName)-$($AdoServiceConnectionName)"
+                issuer    = $AdoFederatedCredentialIssuer
+                subject   = "sc://$($AdoOrgName)/$($AdoProjectName)/$($AdoServiceConnectionName)"
                 audiences = @(
                     "api://AzureADTokenExchange"
                 )

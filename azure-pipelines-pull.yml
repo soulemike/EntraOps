@@ -1,0 +1,95 @@
+# Azure DevOps Pipeline for EntraOps Core Monitoring & Classification
+# Equivalent to GitHub Actions: Pull-EntraOpsPrivilegedEAM.yaml
+#
+# Prerequisites:
+#   1. Create an Azure DevOps Service Connection with Workload Identity Federation
+#      (Project Settings -> Service Connections -> New -> Azure Resource Manager -> Workload Identity Federation)
+#   2. Configure pipeline variables (see below) or link a Variable Group
+#   3. Ensure the service principal / managed identity has required Microsoft Graph permissions
+#
+# Scheduling: Edit this file's schedules section or configure via ADO UI (pipeline -> Edit -> Triggers)
+
+trigger: none
+pr: none
+
+schedules:
+- cron: "30 9 * * *"
+  displayName: Daily EntraOps Pull
+  branches:
+    include:
+    - main
+  always: true
+
+variables:
+  # Required: tenant FQDN (e.g. contoso.onmicrosoft.com)
+  TenantName: $(EntraOpsTenantName)
+  # Optional: override config file path
+  ConfigFile: ./EntraOpsConfig.json
+  # Optional: enable automated classification template updates from upstream
+  ApplyAutomatedClassificationUpdate: $(EntraOpsApplyAutomatedClassificationUpdate)
+  # Optional: enable automated Control Plane scope updates
+  ApplyAutomatedControlPlaneScopeUpdate: $(EntraOpsApplyAutomatedControlPlaneScopeUpdate)
+  # ADO Service Connection name (configured in Project Settings -> Service Connections)
+  AzureServiceConnection: $(EntraOpsAzureServiceConnection)
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- checkout: self
+  persistCredentials: true
+  displayName: 'Checkout repository'
+
+# Optional: Update classification templates from upstream (GitHub/AzurePrivilegedIAM)
+- task: AzurePowerShell@5
+  displayName: 'Update Classification Templates'
+  condition: eq(variables.ApplyAutomatedClassificationUpdate, 'true')
+  inputs:
+    azureSubscription: '$(AzureServiceConnection)'
+    ScriptType: InlineScript
+    Inline: |
+      Import-Module ./EntraOps
+      Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $(TenantName) -ConfigFile $(ConfigFile)
+      $ClassificationUpdateParams = $EntraOpsConfig.AutomatedClassificationUpdate
+      Update-EntraOpsClassificationFiles @ClassificationUpdateParams
+      Disconnect-EntraOps
+    pwsh: true
+
+# Optional: Update Control Plane scope definitions
+- task: AzurePowerShell@5
+  displayName: 'Update Control Plane Scope'
+  condition: eq(variables.ApplyAutomatedControlPlaneScopeUpdate, 'true')
+  inputs:
+    azureSubscription: '$(AzureServiceConnection)'
+    ScriptType: InlineScript
+    Inline: |
+      Import-Module ./EntraOps
+      Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $(TenantName) -ConfigFile $(ConfigFile)
+      $CpUpdateParams = $EntraOpsConfig.AutomatedControlPlaneScopeUpdate
+      Update-EntraOpsClassificationControlPlaneScope @CpUpdateParams
+      Disconnect-EntraOps
+    pwsh: true
+
+# Core step: Collect and classify privileged access, save to JSON
+- task: AzurePowerShell@5
+  displayName: 'Collect Privileged EAM Data'
+  inputs:
+    azureSubscription: '$(AzureServiceConnection)'
+    ScriptType: InlineScript
+    Inline: |
+      Import-Module ./EntraOps
+      Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $(TenantName) -ConfigFile $(ConfigFile)
+      Save-EntraOpsPrivilegedEAMJson -RbacSystems $($EntraOpsConfig.RbacSystems)
+      Disconnect-EntraOps
+    pwsh: true
+
+# Commit generated JSON back to the repo (track history "as code")
+- task: PowerShell@2
+  displayName: 'Git Commit & Push'
+  inputs:
+    targetType: filePath
+    filePath: './scripts/ado/Ado-GitPush.ps1'
+    arguments: '-CommitMessage "EntraOps Pull"'
+    pwsh: true
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)

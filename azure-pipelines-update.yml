@@ -1,0 +1,69 @@
+# Azure DevOps Pipeline for EntraOps Module Self-Update
+# Equivalent to GitHub Actions: Update-EntraOps.yaml
+#
+# Prerequisites:
+#   1. Create an Azure DevOps Service Connection with Workload Identity Federation
+#   2. Configure pipeline variables (see below) or link a Variable Group
+#   3. If updating from a private upstream, set ENTRAOPS_PAT as a secret pipeline variable
+#
+# Scheduling: Edit this file's schedules section or configure via ADO UI
+
+trigger: none
+pr: none
+
+schedules:
+- cron: "0 9 * * 3"
+  displayName: Weekly EntraOps Update
+  branches:
+    include:
+    - main
+  always: true
+
+variables:
+  TenantName: $(EntraOpsTenantName)
+  ConfigFile: ./EntraOpsConfig.json
+  ApplyAutomatedEntraOpsUpdate: $(EntraOpsApplyAutomatedEntraOpsUpdate)
+  AzureServiceConnection: $(EntraOpsAzureServiceConnection)
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- checkout: self
+  persistCredentials: true
+  displayName: 'Checkout repository'
+
+- task: AzurePowerShell@5
+  displayName: 'Update EntraOps Module & Resources'
+  condition: eq(variables.ApplyAutomatedEntraOpsUpdate, 'true')
+  inputs:
+    azureSubscription: '$(AzureServiceConnection)'
+    ScriptType: InlineScript
+    Inline: |
+      Import-Module ./EntraOps
+      # Update from upstream GitHub repo (default). To use an ADO mirror, pass -UpstreamUrl.
+      Update-EntraOps -ConfigFile $(ConfigFile) -TargetUpdateFolders @(
+        "./.github/agents",
+        "./EntraOps",
+        "./Parsers",
+        "./Queries",
+        "./Samples",
+        "./Workbooks"
+      )
+      Disconnect-EntraOps
+    pwsh: true
+  env:
+    # Optional: Personal Access Token for private upstream repos
+    ENTRAOPS_PAT: $(EntraOpsUpdatePat)
+
+# Commit updated module/resources back to the repo
+- task: PowerShell@2
+  displayName: 'Git Commit & Push'
+  condition: eq(variables.ApplyAutomatedEntraOpsUpdate, 'true')
+  inputs:
+    targetType: filePath
+    filePath: './scripts/ado/Ado-GitPush.ps1'
+    arguments: '-CommitMessage "EntraOps Update"'
+    pwsh: true
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)

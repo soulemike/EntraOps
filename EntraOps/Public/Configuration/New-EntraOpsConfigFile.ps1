@@ -10,7 +10,8 @@
     Defines the authentication method which will be used to request token from Microsoft Entra for gain access to Microsoft Graph, Azure Resource Manager and other APIs. Default is FederatedCredentials.
 
 .PARAMETER DevOpsPlatform
-    Defines the platform where the EntraOps repository is hosted. Default and support is currently limited to GitHub.
+    Defines the platform where the EntraOps repository is hosted. Supported values are GitHub, AzureDevOps and None.
+    Default is GitHub.
 
 .PARAMETER ConfigFilePath
     Location of the config file which will be created. Default is ./EntraOpsConfig.json.
@@ -35,6 +36,10 @@
 .EXAMPLE
     Create environment file in default location with parameters to update classification files before analyse privileges and ingest data to Log Analytics but also Sentinel WatchLists..
     New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -ApplyAutomatedControlPlaneScopeUpdate $true -IngestToLogAnalytics $true -IngestToWatchLists $true -ApplyAutomatedClassificationUpdate $true
+
+.EXAMPLE
+    Create environment file for Azure DevOps deployment with core monitoring only.
+    New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -DevOpsPlatform "AzureDevOps" -ApplyAutomatedClassificationUpdate $true
  #>
 
 function New-EntraOpsConfigFile {
