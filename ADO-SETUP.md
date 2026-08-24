@@ -2,6 +2,13 @@
 
 This guide covers running EntraOps in Azure DevOps (ADO) using Microsoft-hosted agents and Workload Identity Federation (WIF).
 
+> **Repository Remotes**
+> - `origin` → `https://github.com/Cloud-Architekt/EntraOps.git` (upstream source)
+> - `fork` → `https://github.com/soulemike/EntraOps.git` (staging for upstream PR)
+> - `ado` → `https://dev.azure.com/.../_git/entraOps-Bsc` (live ADO environment)
+>
+> The `feat/ado-port` branch on `fork` contains the generalized ADO capabilities intended for the upstream PR. The `ado` remote is for live testing and operational use within your Azure DevOps environment.
+
 ## Prerequisites
 
 1. **Azure DevOps Project** with Pipelines enabled

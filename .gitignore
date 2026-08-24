@@ -1,0 +1,5 @@
+# EntraOps environment-specific configuration (contains tenant IDs, client IDs)
+EntraOpsConfig.json
+
+# PowerShell module build artifacts
+*.nupkg
