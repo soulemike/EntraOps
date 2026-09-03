@@ -54,6 +54,7 @@ steps:
       Update-EntraOpsClassificationFiles @ClassificationUpdateParams
       Disconnect-EntraOps
     pwsh: true
+    preferredAzurePowerShellVersion: '12.3.0'
 
 # Optional: Update Control Plane scope definitions
 - task: AzurePowerShell@5
@@ -69,6 +70,7 @@ steps:
       Update-EntraOpsClassificationControlPlaneScope @CpUpdateParams
       Disconnect-EntraOps
     pwsh: true
+    preferredAzurePowerShellVersion: '12.3.0'
 
 # Core step: Collect and classify privileged access, save to JSON
 - task: AzurePowerShell@5
@@ -82,6 +84,7 @@ steps:
       Save-EntraOpsPrivilegedEAMJson -RbacSystems $($EntraOpsConfig.RbacSystems)
       Disconnect-EntraOps
     pwsh: true
+    preferredAzurePowerShellVersion: '12.3.0'
 
 # Commit generated JSON back to the repo (track history "as code")
 - task: PowerShell@2
