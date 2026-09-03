@@ -1,5 +1,8 @@
 # EntraOps environment-specific configuration (contains tenant IDs, client IDs)
 EntraOpsConfig.json
 
+# Generated classification output (produced by pipelines; should not be committed to source)
+PrivilegedEAM/
+
 # PowerShell module build artifacts
 *.nupkg

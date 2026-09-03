@@ -2,13 +2,6 @@
 
 This guide covers running EntraOps in Azure DevOps (ADO) using Microsoft-hosted agents and Workload Identity Federation (WIF).
 
-> **Repository Remotes**
-> - `origin` → `https://github.com/Cloud-Architekt/EntraOps.git` (upstream source)
-> - `fork` → `https://github.com/soulemike/EntraOps.git` (staging for upstream PR)
-> - `ado` → `https://dev.azure.com/.../_git/entraOps-Bsc` (live ADO environment)
->
-> The `feat/ado-port` branch on `fork` contains the generalized ADO capabilities intended for the upstream PR. The `ado` remote is for live testing and operational use within your Azure DevOps environment.
-
 ## Prerequisites
 
 1. **Azure DevOps Project** with Pipelines enabled
@@ -31,7 +24,7 @@ New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -DevOpsPlatform "Az
 
 This generates `EntraOpsConfig.json` with `DevOpsPlatform` set to `AzureDevOps`.
 
-### 3. Create the workload identity with an ADO federated credential
+### 3. Create the workload identity
 
 ```powershell
 New-EntraOpsWorkloadIdentity `
@@ -42,11 +35,7 @@ New-EntraOpsWorkloadIdentity `
   -AdoServiceConnectionName "EntraOps-ServiceConnection"
 ```
 
-This creates an App Registration and adds a federated credential with:
-- **Issuer**: `https://login.microsoftonline.com/<tenant-id>/v2.0` (Microsoft Entra issuer)
-- **Subject**: `sc://my-org/my-project/EntraOps-ServiceConnection`
-
-> If your ADO org still uses the legacy Azure DevOps issuer, override it with `-AdoFederatedCredentialIssuer`.
+This creates an App Registration with the required Microsoft Graph permissions. Do not create the federated credential yet; the correct issuer and subject are provided by Azure DevOps in the next step.
 
 ### 4. Create the ADO Service Connection
 
@@ -54,28 +43,74 @@ This creates an App Registration and adds a federated credential with:
 2. Select **Azure Resource Manager -> Workload Identity Federation (manual)**
 3. Choose **App registration (single tenant)**
 4. Enter the **Application (client) ID** and **Tenant ID** from the App Registration created in step 3
-5. For **Issuer**, use the same issuer URL shown above
-6. For **Subject identifier**, use `sc://<org>/<project>/<service-connection-name>`
-7. Save the connection as `EntraOps-ServiceConnection` (or match the name used in step 3)
+5. Save the connection as `EntraOps-ServiceConnection` (or match the name used in step 3)
+6. Copy the **Issuer** and **Subject identifier** values displayed on the service connection page
 
-### 5. Configure pipeline variables
+#### Cross-tenant scenario (ADO org in a different tenant than the app registration)
 
-Create the following pipeline variables (or use a Variable Group):
+If your Azure DevOps organization is backed by a different Microsoft Entra tenant than the one containing the EntraOps app registration, the automatic subscription discovery will not work. Use **Workload Identity Federation (manual)** and enter all values by hand:
 
-| Variable | Example Value | Description |
-|---|---|---|
-| `EntraOpsTenantName` | `contoso.onmicrosoft.com` | Entra ID tenant FQDN |
-| `EntraOpsAzureServiceConnection` | `EntraOps-ServiceConnection` | ADO Service Connection name |
-| `EntraOpsApplyAutomatedClassificationUpdate` | `false` | Auto-update classification templates |
-| `EntraOpsApplyAutomatedControlPlaneScopeUpdate` | `false` | Auto-update Control Plane scope |
-| `EntraOpsApplyAutomatedEntraOpsUpdate` | `true` | Auto-update EntraOps module |
+| Field | Value |
+|-------|-------|
+| **Environment** | AzureCloud |
+| **Scope level** | Subscription |
+| **Subscription Id** | `<Azure-Subscription-ID>` |
+| **Subscription name** | `<Azure-Subscription-Name>` |
+| **Tenant ID** | `<Tenant-ID-of-app-registration>` |
+| **Service Principal Id** | `<Application-(client)-ID>` |
 
-### 6. Import and run the pipelines
+Copy the **Issuer** and **Subject identifier** values displayed by ADO, then add a matching federated credential in the app registration:
 
-1. In Azure DevOps Pipelines, select **New pipeline -> Existing Azure Pipelines YAML file**
-2. Choose `azure-pipelines-pull.yml` for the core monitoring/classification pipeline
-3. Choose `azure-pipelines-update.yml` for the module self-update pipeline
-4. Save and run
+1. Open the Azure Portal in the tenant that owns the app registration.
+2. Go to **Microsoft Entra ID -> App registrations -> Certificates & secrets -> Federated credentials -> Add credential**.
+3. Select **Other issuer**.
+4. Paste the exact **Issuer** and **Subject identifier** from the ADO service connection page.
+5. Set **Audience** to `api://AzureADTokenExchange`.
+6. Save, return to ADO, and click **Verify and Save**.
+
+### 5. Import the pipelines
+
+1. In Azure DevOps, go to **Pipelines -> New pipeline**.
+2. Select **Azure Repos Git** (or your connected repository).
+3. Choose **Existing Azure Pipelines YAML file**.
+4. Select `azure-pipelines-pull.yml` and save the pipeline (do not run yet).
+5. Repeat steps 1-4 for `azure-pipelines-update.yml`.
+
+### 6. Configure pipeline variables
+
+Create the following pipeline variables for **each** imported pipeline (or create a single Variable Group and link it to both pipelines):
+
+| Variable | Required | Example Value | Description |
+|---|---|---|---|
+| `EntraOpsTenantName` | **Yes** | `contoso.onmicrosoft.com` | Entra ID tenant FQDN |
+| `EntraOpsAzureServiceConnection` | **Yes** | `EntraOps-ServiceConnection` | Exact ADO Service Connection name |
+| `EntraOpsApplyAutomatedClassificationUpdate` | No | `false` | Auto-update classification templates |
+| `EntraOpsApplyAutomatedControlPlaneScopeUpdate` | No | `false` | Auto-update Control Plane scope |
+| `EntraOpsApplyAutomatedEntraOpsUpdate` | No | `true` | Auto-update EntraOps module (used by `azure-pipelines-update.yml`) |
+| `EntraOpsUpdatePat` | No | `***` | Personal Access Token for private upstream repos (used by `azure-pipelines-update.yml`) |
+
+> **Note:** Optional variables that are left undefined default to empty. The pipelines use `eq(variables.<Name>, 'true')` conditions, so undefined variables are safely treated as `false`.
+
+### 7. Authorize the service connection on first run
+
+The first time a pipeline runs, ADO will display a banner during the run:
+
+- **"This pipeline needs permission to access a resource before this run can continue"**.
+- Click **View** and then **Permit** to authorize the service connection for this pipeline.
+
+Alternatively, pre-authorize the pipeline:
+1. Go to **Project Settings -> Service Connections**.
+2. Select your `EntraOps-ServiceConnection`.
+3. Under **Pipeline permissions**, click **+** and add both `azure-pipelines-pull.yml` and `azure-pipelines-update.yml`.
+
+### 8. Grant the Build Service contributor permissions
+
+Both pipelines commit generated JSON back to the repository. The Build Service identity needs write access:
+
+1. Go to **Project Settings -> Repositories -> Security**.
+2. Under **Users**, find **`<Project> Build Service (<Organization>)`** (e.g., `EntraOps-Bsc Build Service (sentinel-itsolutions-enterpriseapplications)`).
+3. Set **Contribute** to **Allow**.
+4. If your `main` branch has branch policies, also set **Bypass policies when pushing** to **Allow** (or add the Build Service to the policy bypass list).
 
 ## Pipeline Files
 
@@ -93,14 +128,6 @@ No secrets (client secrets or PATs) are required for the runtime authentication.
 ## Git Push from Pipelines
 
 Both pipelines commit generated data back to the repository using `scripts/ado/Ado-GitPush.ps1`. This script uses the built-in `$(System.AccessToken)` with `persistCredentials: true` on the checkout step.
-
-## Upstream Updates
-
-By default, `Update-EntraOps` clones from `https://github.com/Cloud-Architekt/EntraOps.git`. To use an ADO Git mirror instead:
-
-```powershell
-Update-EntraOps -UpstreamUrl "https://dev.azure.com/my-org/my-project/_git/entraOps"
-```
 
 ## Differences from GitHub Actions
 
