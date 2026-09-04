@@ -77,11 +77,13 @@ function Push-EntraOpsLogsIngestionAPI {
 
     # Add Timestamp to JSON data
     try {
-        $json = $JsonContent | ConvertFrom-Json -Depth 10
-        $json | ForEach-Object {
+        $records = $JsonContent | ConvertFrom-Json -Depth 10
+        if ($records -isnot [array]) {
+            $records = @($records)
+        }
+        $records | ForEach-Object {
             $_ | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue (Get-Date).ToUniversalTime().ToString("o") -Force
         }
-        $json = $json | ConvertTo-Json -Depth 10
     }
     catch {
         Write-Error "Cannot convert JSON content to JSON object"
@@ -122,11 +124,40 @@ function Push-EntraOpsLogsIngestionAPI {
         # Get Ingest API Uri
         $PostUri = "$DceIngestEndpointUrl/dataCollectionRules/$($Dcr.properties.immutableId)/streams/$($ExpectedStream)?api-version=2023-01-01"
 
-        # Ingest data to Log Analytics
-        Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $json -Headers $headers -Verbose
+        # Ingest data to Log Analytics in chunks to stay under the 1 MB request limit
+        $maxBytes = 950KB
+        $chunk = [System.Collections.Generic.List[object]]::new()
+
+        for ($i = 0; $i -lt $records.Count; $i++) {
+            $chunk.Add($records[$i])
+            $chunkJson = $chunk | ConvertTo-Json -Depth 10
+            $chunkSize = [System.Text.Encoding]::UTF8.GetByteCount($chunkJson)
+
+            if ($chunkSize -gt $maxBytes) {
+                if ($chunk.Count -eq 1) {
+                    Write-Warning "Record $($i) exceeds maximum chunk size ($chunkSize bytes). Sending individually; API may reject."
+                } else {
+                    # Remove the last record and send the rest
+                    $chunk.RemoveAt($chunk.Count - 1)
+                    $chunkJson = $chunk | ConvertTo-Json -Depth 10
+                    Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $chunkJson -Headers $headers -Verbose
+                    Write-Verbose "Sent chunk of $($chunk.Count) records ($([System.Text.Encoding]::UTF8.GetByteCount($chunkJson)) bytes)"
+                    $chunk.Clear()
+                    $i--  # Re-process the current record in the next chunk
+                    continue
+                }
+            }
+
+            # Last record — send the final chunk
+            if ($i -eq $records.Count - 1 -and $chunk.Count -gt 0) {
+                Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $chunkJson -Headers $headers -Verbose
+                Write-Verbose "Sent final chunk of $($chunk.Count) records ($([System.Text.Encoding]::UTF8.GetByteCount($chunkJson)) bytes)"
+            }
+        }
 
     }
     else {
+        $json = $records | ConvertTo-Json -Depth 10
         return $json
     }
 }
