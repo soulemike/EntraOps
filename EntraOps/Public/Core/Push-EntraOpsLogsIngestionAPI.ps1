@@ -97,9 +97,12 @@ function Push-EntraOpsLogsIngestionAPI {
         $Dcr = ((Invoke-AzRestMethod -Method "Get" -Uri $DcrArmUri).Content | ConvertFrom-Json)
 
         # Resolve the actual stream name from the DCR data flows.
-        # Azure custom tables auto-append '_CL', so the DCR outputStream may be
-        # 'Custom-PrivilegedEAM_CL_CL' even when the table name is 'PrivilegedEAM_CL'.
-        $AvailableStreams = $Dcr.properties.dataflows.outputStream
+        # The Logs Ingestion API URL requires the INPUT stream name from
+        # dataFlows.streams, NOT outputStream (which is the destination table).
+        # dataFlows is an array; each element has a 'streams' array of input names.
+        $AvailableStreams = $Dcr.properties.dataflows.streams | ForEach-Object { $_ } | Select-Object -Unique
+        Write-Verbose "Available DCR input streams: $($AvailableStreams -join ', ')"
+
         $ExpectedStream = "Custom-$($TableName)"
         if ($AvailableStreams -notcontains $ExpectedStream) {
             $ExpectedStreamWithSuffix = "Custom-$($TableName)_CL"
@@ -107,7 +110,7 @@ function Push-EntraOpsLogsIngestionAPI {
                 $ExpectedStream = $ExpectedStreamWithSuffix
                 Write-Verbose "Resolved DCR stream to $($ExpectedStream) (Azure auto-appended _CL suffix)."
             } else {
-                Write-Error "Custom table $($TableName) does not match with data flow in data collection rule $($DataCollectionRuleName)! Available outputStreams: $($AvailableStreams -join ', ')"
+                Write-Error "Custom table $($TableName) does not match with any input stream in data collection rule $($DataCollectionRuleName)! Available streams: $($AvailableStreams -join ', ')"
             }
         }
 
