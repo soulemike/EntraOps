@@ -1,4 +1,4 @@
-# Azure DevOps Pipeline for EntraOps Log Analytics Ingestion (BSC Tenant)
+# Azure DevOps Pipeline for EntraOps Log Analytics Ingestion
 # Pushes collected PrivilegedEAM JSON from ado/main to Log Analytics via Logs Ingestion API.
 #
 # Prerequisites:
@@ -33,8 +33,8 @@ resources:
 variables:
   # Path to the environment-specific config file (committed in ado/main)
   ConfigFile: ./EntraOpsConfig.json
-  # ADO Service Connection name targeting the BSC tenant (Workload Identity Federation)
-  AzureServiceConnection: $(EntraOpsBscServiceConnection)
+  # ADO Service Connection name targeting the target tenant (Workload Identity Federation)
+  AzureServiceConnection: $(EntraOpsAzureServiceConnection)
 
 pool:
   vmImage: ubuntu-latest
@@ -44,7 +44,7 @@ steps:
   persistCredentials: true
   displayName: 'Checkout repository'
 
-# Ingest collected PrivilegedEAM JSON to BSC tenant Log Analytics custom table.
+# Ingest collected PrivilegedEAM JSON to target tenant Log Analytics custom table.
 # Connect-EntraOps is intentionally omitted because this step does not require
 # Microsoft Graph access; it only reads local JSON and pushes to the DCR/DCE
 # using the Azure PowerShell context provided by AzurePowerShell@5.
