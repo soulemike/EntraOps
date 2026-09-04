@@ -93,8 +93,20 @@ function Push-EntraOpsLogsIngestionAPI {
         # Get Data Collection Rule details and Uri
         $DcrArmUri = "https://management.azure.com/subscriptions/$($DataCollectionRuleSubscriptionId)/resourceGroups/$($DataCollectionResourceGroupName)/providers/Microsoft.Insights/dataCollectionRules/$($DataCollectionRuleName)?api-version=$($ApiVersion)"
         $Dcr = ((Invoke-AzRestMethod -Method "Get" -Uri $DcrArmUri).Content | ConvertFrom-Json)
-        if ($Dcr.properties.dataflows.outputStream -notcontains "Custom-$($TableName)") {
-            Write-Error "Custom table $($TableName) does not match with data flow in data collection rule $($DataCollectionRuleName)!"
+
+        # Resolve the actual stream name from the DCR data flows.
+        # Azure custom tables auto-append '_CL', so the DCR outputStream may be
+        # 'Custom-PrivilegedEAM_CL_CL' even when the table name is 'PrivilegedEAM_CL'.
+        $AvailableStreams = $Dcr.properties.dataflows.outputStream
+        $ExpectedStream = "Custom-$($TableName)"
+        if ($AvailableStreams -notcontains $ExpectedStream) {
+            $ExpectedStreamWithSuffix = "Custom-$($TableName)_CL"
+            if ($AvailableStreams -contains $ExpectedStreamWithSuffix) {
+                $ExpectedStream = $ExpectedStreamWithSuffix
+                Write-Verbose "Resolved DCR stream to $($ExpectedStream) (Azure auto-appended _CL suffix)."
+            } else {
+                Write-Error "Custom table $($TableName) does not match with data flow in data collection rule $($DataCollectionRuleName)! Available outputStreams: $($AvailableStreams -join ', ')"
+            }
         }
 
         # Get Data Collection Endpoint details and Uri
@@ -108,7 +120,7 @@ function Push-EntraOpsLogsIngestionAPI {
         }
 
         # Get Ingest API Uri
-        $PostUri = "$DceIngestEndpointUrl/dataCollectionRules/$($Dcr.properties.immutableId)/streams/Custom-$($TableName)?api-version=2023-01-01"
+        $PostUri = "$DceIngestEndpointUrl/dataCollectionRules/$($Dcr.properties.immutableId)/streams/$($ExpectedStream)?api-version=2023-01-01"
 
         # Ingest data to Log Analytics
         Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $json -Headers $headers -Verbose
