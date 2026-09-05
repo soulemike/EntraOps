@@ -169,7 +169,7 @@ The **PerService** governance model is the default and requires **no pre-existin
 
 #### Required for Centralized Model (Optional)
 
-The **Centralized** governance model requires pre-existing delegation groups:
+The **Centralized** governance model requires pre-existing **Security Groups** (role-assignable):
 
 1. **Create persona groups** (one-time setup):
    ```powershell
@@ -180,7 +180,7 @@ The **Centralized** governance model requires pre-existing delegation groups:
        -SecurityEnabled `
        -IsAssignableToRole `
        -MailEnabled:$false
-   
+
    # Example: Create ManagementPlane delegation group
    $managementPlaneGroup = New-MgGroup `
        -DisplayName "PRG-Tenant-ManagementPlane-PlatformOps" `
@@ -190,7 +190,7 @@ The **Centralized** governance model requires pre-existing delegation groups:
        -MailEnabled:$false
    ```
 
-2. **Add group IDs to EntraOpsConfig.json**:
+2. **Add group IDs to the `ServiceEM` section in EntraOpsConfig.json**:
    ```json
    {
      "ServiceEM": {
@@ -210,7 +210,7 @@ The **Centralized** governance model requires pre-existing delegation groups:
 
 | Feature | PerService (Default) | Centralized |
 |---------|---------------------|-------------|
-| **Pre-existing groups** | ❌ Not required | ✅ Required |
+| **Pre-existing groups** | ❌ Not required | ✅ Required (Security Groups, role-assignable) |
 | **Permissions needed** | Group.ReadWrite.All | + RoleManagement.ReadWrite.Directory |
 | **Group count** | More (per service) | Fewer (shared) |
 | **Use case** | 5-10 services, dev/test | 50+ services, production |
@@ -500,6 +500,8 @@ This will create `EntraOpsConfig.json` with:
 
 ### Basic Settings
 
+Add the following **`ServiceEM`** section to `EntraOpsConfig.json`:
+
 ```json
 {
   "ServiceEM": {
@@ -509,6 +511,8 @@ This will create `EntraOpsConfig.json` with:
   }
 }
 ```
+
+> **Note:** The `ControlPlaneDelegationGroupId` and `ManagementPlaneDelegationGroupId` values must be **Security Groups** (role-assignable). These are tenant-wide delegation groups used in the Centralized governance model.
 
 ## Governance Models and Persona-Based Groups
 
@@ -524,7 +528,7 @@ In the **Centralized** model, ControlPlane and ManagementPlane administrative gr
 - **Reduced complexity**: Fewer groups to manage across multiple services
 - **Automatic detection**: When `GovernanceModel = "Centralized"` or delegation group IDs are provided, ServiceEM automatically skips creating per-service ControlPlane/ManagementPlane groups
 
-**Configuration in EntraOpsConfig.json:**
+**Configuration in EntraOpsConfig.json (under the `ServiceEM` section):**
 
 ```json
 {
@@ -535,6 +539,8 @@ In the **Centralized** model, ControlPlane and ManagementPlane administrative gr
   }
 }
 ```
+
+> **Group Type Requirement:** The delegation groups referenced by `ControlPlaneDelegationGroupId` and `ManagementPlaneDelegationGroupId` must be **Security Groups** (role-assignable). These are existing tenant-wide groups that ServiceEM will reference rather than create.
 
 **Real-World Example:**
 
@@ -646,6 +652,8 @@ ServiceEM integrates deeply with the `EntraOpsConfig.json` configuration file. H
    ```
 
 **Complete EntraOpsConfig.json Example for Centralized Governance:**
+
+The following example shows the full `ServiceEM` section inside `EntraOpsConfig.json`. The `ControlPlaneDelegationGroupId` and `ManagementPlaneDelegationGroupId` must reference existing **Security Groups** (role-assignable) in your tenant.
 
 ```json
 {
