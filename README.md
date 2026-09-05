@@ -11,10 +11,23 @@
     - [Filter on classification in EntraOps](#filter-on-classification-in-entraops)
     - [Filter on classified objects and object details](#filter-on-classified-objects-and-object-details)
   - [Using EntraOps with GitHub](#using-entraops-with-github)
+  - [Log Analytics Ingestion Setup](#log-analytics-ingestion-setup)
+    - [Overview of Components](#overview-of-components)
+    - [Step 1: Create the Log Analytics Workspace](#step-1-create-the-log-analytics-workspace)
+    - [Step 2: Create the Custom Table](#step-2-create-the-custom-table)
+    - [Step 3: Create the Data Collection Endpoint (DCE)](#step-3-create-the-data-collection-endpoint-dce)
+    - [Step 4: Create the Data Collection Rule (DCR)](#step-4-create-the-data-collection-rule-dcr)
+    - [Step 5: Assign Required RBAC Roles](#step-5-assign-required-rbac-roles)
+    - [Step 6: Configure EntraOpsConfig.json](#step-6-configure-entraopsconfigjson)
+    - [Ingestion Behavior and Limits](#ingestion-behavior-and-limits)
   - [EntraOps Integration in Microsoft Sentinel](#entraops-integration-in-microsoft-sentinel)
     - [Parser for Custom Tables and WatchLists](#parser-for-custom-tables-and-watchlists)
     - [Examples to use EntraOps data in Unified SecOps Platform (Sentinel and XDR)](#examples-to-use-entraops-data-in-unified-secops-platform-sentinel-and-xdr)
     - [Workbook for visualization of EntraOps classification data](#workbook-for-visualization-of-entraops-classification-data)
+      - [Prerequisites](#prerequisites)
+      - [Deployment Steps](#deployment-steps)
+      - [Available Workbooks](#available-workbooks)
+      - [Post-Deployment Configuration](#post-deployment-configuration)
   - [EntraOps Integration to Attack Path Management](#entraops-integration-to-attack-path-management)
     - [BloodHound](#bloodhound)
   - [Tenant Governance Relationship Support](#tenant-governance-relationship-support)
@@ -256,8 +269,8 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
     New-EntraOpsConfigFile -TenantName <TenantName>
     ```
 
-5. Optional: Create a data collection rule and endpoint if you want to ingest data to custom table in Log Analytics or Microsoft Sentinel workspace.
-Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table, and transformation rule. Use as table name "PrivilegedEAM_CL" to make sure the parser will works on your created custom table. Execute EntraOps interactively and execute "Save-EntraOpsPrivilegedEAMJson" to create a JSON file which can be used as sample data.
+5. Optional: Set up Log Analytics ingestion if you want to push classification data to a custom table.
+   See the [Log Analytics Ingestion Setup](#log-analytics-ingestion-setup) section for step-by-step instructions on creating the workspace, custom table, DCE, DCR, and assigning the required RBAC roles. Use `PrivilegedEAM_CL` as the table name so the parser and workbooks function correctly.
 
     _Recommendation: There is a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in the case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommend choosing "Custom tables" in a large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
 
@@ -288,6 +301,167 @@ Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us
     ```powershell
     Update-EntraOpsRequiredWorkflowParameters
     ```
+
+## Log Analytics Ingestion Setup
+
+If you want to ingest EntraOps classification data into a Microsoft Sentinel or Log Analytics Workspace custom table, you must provision several Azure resources and assign the correct RBAC roles before running the pipeline.
+
+### Overview of Components
+
+| Component | Purpose |
+|---|---|
+| **Log Analytics Workspace (LAW)** | Destination workspace where the custom table resides. |
+| **Custom Table (`PrivilegedEAM_CL`)** | Stores the ingested EntraOps JSON records. |
+| **Data Collection Endpoint (DCE)** | Public endpoint that receives the logs over HTTPS. |
+| **Data Collection Rule (DCR)** | Defines the data flow, schema mapping, and transformation from DCE to the custom table. |
+| **Service Principal / Managed Identity** | Authenticates to the DCE and is authorized via Azure RBAC. |
+
+### Step 1: Create the Log Analytics Workspace
+
+If you do not already have a workspace:
+
+```powershell
+$RGName      = "<Your-ResourceGroup-Name>"
+$Location    = "<Your-Azure-Region>"
+$WorkspaceName = "<Your-Workspace-Name>"
+
+New-AzResourceGroup -Name $RGName -Location $Location -ErrorAction SilentlyContinue
+New-AzOperationalInsightsWorkspace `
+  -ResourceGroupName $RGName `
+  -Name $WorkspaceName `
+  -Location $Location
+```
+
+> **Note:** The workspace and the DCR do not need to be in the same resource group, but keeping them together simplifies RBAC management.
+
+### Step 2: Create the Custom Table
+
+EntraOps expects a custom log table named `PrivilegedEAM_CL` (the `_CL` suffix is added automatically by Azure Monitor).
+
+**Option A: Use sample data (recommended for first-time setup)**
+1. Run EntraOps interactively to generate sample JSON:
+   ```powershell
+   Save-EntraOpsPrivilegedEAMJson -RbacSystems @("EntraID")
+   ```
+2. Use the generated `./PrivilegedEAM/EntraID/User/*.json` files as sample input when creating the DCR. This ensures the schema is inferred correctly from real data.
+
+**Option B: Deploy via ARM/Bicep**
+Create a custom table via ARM template or Bicep with columns matching the EntraOps JSON schema. The minimum expected columns include:
+- `TimeGenerated` (datetime) — added automatically by the ingestion API
+- `ObjectId`, `ObjectType`, `ObjectDisplayName`, `RoleSystem`, `Classification`, `RoleAssignments`, `Owners`, etc. (inferred from JSON)
+
+### Step 3: Create the Data Collection Endpoint (DCE)
+
+```powershell
+$DceName = "<Your-DCE-Name>"
+
+New-AzResourceGroupDeployment `
+  -Name "EntraOps-DCE" `
+  -ResourceGroupName $RGName `
+  -TemplateFile "<path-to-dce-arm-template>.json" `
+  -dceName $DceName `
+  -location $Location
+```
+
+Or via Azure CLI:
+```bash
+az monitor data-collection endpoint create \
+  --name "<Your-DCE-Name>" \
+  --resource-group "<Your-RG>" \
+  --location "<Your-Region>"
+```
+
+The DCE exposes a logs ingestion endpoint (e.g., `https://<dce-name>-<region>.ingest.monitor.azure.com`).
+
+### Step 4: Create the Data Collection Rule (DCR)
+
+The DCR must:
+1. Reference the DCE created in Step 3.
+2. Define a data flow with **Output Stream** = `Custom-PrivilegedEAM_CL`.
+3. Map the incoming JSON schema to the custom table columns.
+
+Example ARM template snippet for the DCR data flow:
+```json
+"dataFlows": [
+  {
+    "streams": ["Custom-PrivilegedEAM_CL"],
+    "destinations": ["<Your-LAW-Name>"]
+  }
+]
+```
+
+> **Important:** The `outputStream` in the DCR must exactly match `Custom-PrivilegedEAM_CL`. EntraOps validates this match at runtime. If the stream name differs, ingestion will fail with the error:  
+> `Custom table <TableName> does not match with data flow in data collection rule <DCRName>!`
+
+### Step 5: Assign Required RBAC Roles
+
+The service principal or managed identity used by EntraOps needs the following Azure RBAC assignments:
+
+| Role | Scope | Why it is needed |
+|---|---|---|
+| **Monitoring Metrics Publisher** | Resource Group containing the DCR | Required by the [Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) to write data to the DCR. |
+| **Reader** | Resource Group containing the DCR | Required to read DCR and DCE metadata (endpoint URI, immutableId) via Azure Resource Manager. |
+| *(Optional)* **Microsoft Sentinel Contributor** | Resource Group containing the Sentinel workspace | Only required if ingesting to Sentinel WatchLists (`IngestToWatchLists`). |
+| *(Optional)* **Reader** | Tenant Root Management Group (`/providers/Microsoft.Management/managementGroups/<TenantId>`) | Only required if using Azure Resource Graph for Control Plane scope updates or certain WatchLists (e.g., High Value Assets, Workload Identity Attack Paths, Managed Identity Assigned Resource Id). |
+
+> **Note:** `Log Analytics Contributor` on the resource group is **not sufficient** for the Logs Ingestion API. You must assign `Monitoring Metrics Publisher` directly on the DCR scope (or its resource group).
+
+#### PowerShell example
+
+```powershell
+$SpObjectId = "<Service-Principal-ObjectId>"
+$DcrRG      = "<DCR-ResourceGroup-Name>"
+$DcrSub     = "<DCR-Subscription-Id>"
+
+Set-AzContext -SubscriptionId $DcrSub
+
+New-AzRoleAssignment `
+  -ObjectId $SpObjectId `
+  -RoleDefinitionName "Monitoring Metrics Publisher" `
+  -ResourceGroupName $DcrRG
+
+New-AzRoleAssignment `
+  -ObjectId $SpObjectId `
+  -RoleDefinitionName "Reader" `
+  -ResourceGroupName $DcrRG
+```
+
+#### Automated assignment via EntraOps cmdlet
+
+Alternatively, populate the `LogAnalytics` section in `EntraOpsConfig.json` first, then run:
+
+```powershell
+New-EntraOpsWorkloadIdentity `
+  -AppDisplayName "EntraOps" `
+  -ConfigFile ./EntraOpsConfig.json
+```
+
+The cmdlet will automatically assign `Monitoring Metrics Publisher` and `Reader` on the DCR resource group, plus any additional roles required by other enabled features (Sentinel WatchLists, Resource Graph, etc.).
+
+### Step 6: Configure EntraOpsConfig.json
+
+Update the `LogAnalytics` section in your config file:
+
+```json
+{
+  "LogAnalytics": {
+    "IngestToLogAnalytics": true,
+    "DataCollectionRuleName": "<Your-DCR-Name>",
+    "DataCollectionRuleSubscriptionId": "<Your-Subscription-Id>",
+    "DataCollectionResourceGroupName": "<Your-RG-Name>",
+    "TableName": "PrivilegedEAM_CL"
+  }
+}
+```
+
+After updating the config, run `New-EntraOpsWorkloadIdentity` (if not already done) to apply RBAC roles, then commit `EntraOpsConfig.json` to your repository.
+
+### Ingestion Behavior and Limits
+
+- **Chunking:** Data is automatically split into chunks of approximately 950 KB to stay under the 1 MB per-request limit enforced by the Logs Ingestion API.
+- **Batching:** JSON files are processed in batches of 50 to avoid exceeding DCR file size limits.
+- **Transformation:** If you need to transform or filter data before ingestion, configure a [transformation rule](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/data-collection-transformations) on the DCR.
+- **No Microsoft Graph access required for push:** The `azure-pipelines-push.yml` pipeline (and the equivalent GitHub `Push-EntraOpsPrivilegedEAM` workflow) only requires Azure PowerShell context to read local JSON and send it to the DCE. It does not call Microsoft Graph.
 
 ## EntraOps Integration in Microsoft Sentinel
 
@@ -368,21 +542,63 @@ ClassifiedTier0Assets
 
 ### Workbook for visualization of EntraOps classification data
 
-The following Workbook can be used to check users, workload identities, groups, and their classified role assignments by EntraOps. It allows you also to filter for hybrid/cloud users and/or specific tiered administration level from by the classification of object or role assignments.
+The following workbooks can be used to visualize users, workload identities, groups, and their classified role assignments. They allow filtering for hybrid/cloud users and specific tiered administration levels.
 
-Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and the associated Parser has been deployed.
+#### Prerequisites
 
-**EntraOps Privileged EAM - Overview**
-  
-  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json)
+Before deploying the workbooks, ensure the following are in place:
 
-**EntraOps Privileged EAM - Agent Identities**
-  
-  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Agent%20Identities.json)
-  
-**EntraOps Privileged EAM - Workload Identities**
-  
-  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Workload%20Identities.json)
+1. **EntraOps data has been ingested** to either:
+   - A **Custom Table** in your Microsoft Sentinel/Log Analytics Workspace, **or**
+   - **Microsoft Sentinel WatchLists**
+2. The **associated Parser** has been deployed to your workspace (see [Parser for Custom Tables and WatchLists](#parser-for-custom-tables-and-watchlists)).
+3. You have **Contributor** or equivalent permissions on the target resource group where the workbooks will be deployed.
+
+#### Deployment Steps
+
+**Option A: Deploy via Azure Portal (One-Click)**
+
+1. Click the **Deploy to Azure** button for the desired workbook below.
+2. In the Azure Portal, select your **Subscription** and the **Resource Group** where your Sentinel/Log Analytics workspace resides.
+3. Review the parameters. The default values are environment-agnostic; update the `workbookDisplayName` if desired.
+4. Click **Review + create**, then **Create**.
+5. After deployment, open the workbook in Azure Monitor / Microsoft Sentinel. On first open, select your Log Analytics workspace from the **Select Workspace** dropdown.
+
+**Option B: Deploy via Azure CLI / PowerShell**
+
+Use the ARM template files directly for automated or scripted deployment:
+
+```powershell
+# Define environment-specific variables
+$SubscriptionId     = "<Your-Subscription-Id>"
+$ResourceGroupName  = "<Your-Resource-Group-Name>"
+$WorkbookName       = "EntraOps Privileged EAM - Overview"
+$TemplateFile       = "./Workbooks/EntraOps Privileged EAM - Overview.json"
+
+# Set context
+Set-AzContext -SubscriptionId $SubscriptionId
+
+# Deploy workbook
+New-AzResourceGroupDeployment `
+  -Name "EntraOpsWorkbook-Overview" `
+  -ResourceGroupName $ResourceGroupName `
+  -TemplateFile $TemplateFile `
+  -workbookDisplayName $WorkbookName
+```
+
+#### Available Workbooks
+
+| Workbook | Description | Deploy |
+|---|---|---|
+| **EntraOps Privileged EAM - Overview** | Primary dashboard for classified role assignments across all RBAC systems. | [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json) |
+| **EntraOps Privileged EAM - Agent Identities** | Insights into Agent Identities and inherited permissions through blueprint principals. | [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Agent%20Identities.json) |
+| **EntraOps Privileged EAM - Workload Identities** | Deep-dive into workload identities, managed identities, attack paths, and recommendations. | [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Workload%20Identities.json) |
+
+#### Post-Deployment Configuration
+
+- **Workspace Selection**: Each workbook requires selecting the target Log Analytics workspace on first use. The dropdown queries available workspaces via Azure Resource Graph.
+- **Parameter Defaults**: If you are deploying multiple workbooks to the same workspace, consider saving a copy of the workbook with the workspace pre-selected to streamline access for your team.
+- **Permissions**: Ensure the users accessing the workbooks have `Microsoft.OperationalInsights/workspaces/read` and `Microsoft.Insights/workbooks/read` on the target scope.
 
 ## EntraOps Integration to Attack Path Management
 

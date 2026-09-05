@@ -108,7 +108,7 @@ Alternatively, pre-authorize the pipeline:
 Both pipelines commit generated JSON back to the repository. The Build Service identity needs write access:
 
 1. Go to **Project Settings -> Repositories -> Security**.
-2. Under **Users**, find **`<Project> Build Service (<Organization>)`** (e.g., `EntraOps-Bsc Build Service (sentinel-itsolutions-enterpriseapplications)`).
+2. Under **Users**, find **`<Project> Build Service (<Organization>)`** (e.g., `MyProject Build Service (my-organization)`).
 3. Set **Contribute** to **Allow**.
 4. If your `main` branch has branch policies, also set **Bypass policies when pushing** to **Allow** (or add the Build Service to the policy bypass list).
 
@@ -117,7 +117,24 @@ Both pipelines commit generated JSON back to the repository. The Build Service i
 | File | Purpose | Trigger |
 |---|---|---|
 | `azure-pipelines-pull.yml` | Collects privileged access data, classifies it, and commits JSON back to the repo | Scheduled (default: daily 09:30 UTC) + manual |
+| `azure-pipelines-push.yml` | Ingests collected JSON to Log Analytics via DCR/DCE | Build completion after `azure-pipelines-pull` on `ado/main`, or manual |
 | `azure-pipelines-update.yml` | Updates EntraOps module and resources from upstream | Scheduled (default: Wed 09:00 UTC) + manual |
+
+## Log Analytics Ingestion Prerequisites
+
+If you use `azure-pipelines-push.yml` to ingest data into a Log Analytics custom table, the following Azure resources must exist **before** the pipeline runs:
+
+1. **Log Analytics Workspace**
+2. **Custom Table** named `PrivilegedEAM_CL`
+3. **Data Collection Endpoint (DCE)**
+4. **Data Collection Rule (DCR)** with a data flow for `Custom-PrivilegedEAM_CL`
+5. **RBAC roles** on the DCR resource group:
+   - `Monitoring Metrics Publisher` (required for the Logs Ingestion API)
+   - `Reader` (to read DCR/DCE metadata)
+
+See the [Log Analytics Ingestion Setup section in README.md](./README.md#log-analytics-ingestion-setup) for detailed, step-by-step instructions on provisioning these resources and assigning roles.
+
+> **Note:** The service principal used by the ADO Service Connection must have the roles above on the DCR resource group. `Log Analytics Contributor` is **not sufficient** for the Logs Ingestion API.
 
 ## Authentication Flow
 
@@ -148,3 +165,7 @@ The ADO pipelines in this port cover **core monitoring and classification** only
 - Optional `Update-EntraOpsClassificationControlPlaneScope`
 
 Push features (Sentinel ingestion, Conditional Access group automation, Administrative Unit management) are not included in the ADO YAML but can be added by extending the pipelines using the existing EntraOps cmdlets.
+
+## Workbook Deployment
+
+After data collection and ingestion are operational, deploy the EntraOps workbooks to your Microsoft Sentinel workspace. See the [Workbook Deployment section in README.md](./README.md#workbook-for-visualization-of-entraops-classification-data) for prerequisites and step-by-step instructions.
