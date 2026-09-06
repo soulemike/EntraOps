@@ -138,21 +138,26 @@ function New-EntraOpsServicePIMPolicy {
                 Write-Verbose "$logPrefix Authentication context not enabled for $($group.DisplayName) - enforcing MFA + Justification only"
             }
 
-            try{
+            try {
                 Write-Verbose "$logPrefix Looking up PIM Policies with Assignments"
                 $groupPolicyAssignment = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeId eq '$($group.Id)' and scopeType eq 'Group'" -OutputType PSObject
                 $groupPolicyAssignments += $groupPolicyAssignment
-            }catch{
-                Write-Verbose "$logPrefix Failed to find PIM Policies with Assignments"
-                Write-Error $_
+            } catch {
+                Write-Warning "$logPrefix Failed to find PIM Policies with Assignments for group $($group.Id). Ensure the caller has RoleManagementPolicy.ReadWrite.Directory or RoleManagement.Read.Directory permission. Error: $_"
+                continue
             }
-            $memberPolicy = $groupPolicyAssignment|Where-Object{$_.id -like "*member"}
-            try{
+
+            $memberPolicy = $groupPolicyAssignment | Where-Object { $_.id -like "*member" }
+            if (-not $memberPolicy) {
+                Write-Warning "$logPrefix No member policy assignment found for group $($group.Id). Skipping policy update."
+                continue
+            }
+
+            try {
                 Write-Verbose "$logPrefix Updating PIM Policy ID: $($memberPolicy.policyId)"
                 Invoke-EntraOpsMsGraphQuery -Method PATCH -Uri "/v1.0/policies/roleManagementPolicies/$($memberPolicy.policyId)" -Body ($currentGroupPolicyParams | ConvertTo-Json -Depth 10) | Out-Null
-            }catch{
-                Write-Verbose "$logPrefix Failed to update PIM Policy"
-                Write-Error $_
+            } catch {
+                Write-Warning "$logPrefix Failed to update PIM Policy for group $($group.Id). Error: $_"
             }
         }
     }
@@ -176,8 +181,7 @@ function New-EntraOpsServicePIMPolicy {
                     $result += @($recovery | Where-Object { $_.id -like "*member" })
                 }
             } catch {
-                Write-Verbose "$logPrefix Recovery lookup failed — returning empty result"
-                Write-Error $_
+                Write-Warning "$logPrefix Recovery lookup failed — returning empty result. Error: $_"
             }
         }
         return [psobject[]]$result

@@ -85,8 +85,8 @@ function New-EntraOpsServiceAZContainer {
 
     begin {
         # Suppress Az module breaking-change warnings (output-type changes in Az.Resources 9+/10+)
-        $prevBreakingChangeWarning = $Env:SuppressAzurePowerShellBreakingChangeWarnings
-        $Env:SuppressAzurePowerShellBreakingChangeWarnings = 'true'
+        $prevWarningPreference = $WarningPreference
+        $WarningPreference = 'SilentlyContinue'
 
         # Normalize resource group name: strip Sub-/Rg- scope prefix to avoid RG-Sub-/RG-Rg- duplication
         $rgBaseName = $serviceName
@@ -473,8 +473,8 @@ function New-EntraOpsServiceAZContainer {
     }
 
     end {
-        # Restore previous breaking-change warning setting
-        $Env:SuppressAzurePowerShellBreakingChangeWarnings = $prevBreakingChangeWarning
+        # Restore previous warning preference
+        $WarningPreference = $prevWarningPreference
         return [psobject]$resourceGroup
     }
 }
