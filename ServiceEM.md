@@ -31,8 +31,8 @@ Get your first landing zone deployed in 3 steps:
 
 ```powershell
 # Install required modules
-Install-Module Microsoft.Graph -Scope CurrentUser
-Install-Module Az -Scope CurrentUser
+Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Groups, Microsoft.Graph.Users -Scope CurrentUser
+Install-Module Az.Accounts, Az.Resources, Az.ResourceGraph -Scope CurrentUser
 
 # Import EntraOps
 Import-Module ./EntraOps
@@ -48,7 +48,7 @@ Connect-AzAccount
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyFirstApp" `
     -AzureRegion "westeurope" `
-    -ServiceOwner "alice@contoso.com" `
+    -WorkloadPlaneAdmin "alice@contoso.com" `
     -ServiceMembers @("bob@contoso.com") `
     -Verbose
 ```
@@ -101,11 +101,11 @@ ServiceEM automates the creation of **tiered, service-scoped landing zones** fol
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix <string>          # Required: Service name prefix
     -AzureRegion <string>               # Required: Azure region (e.g., "westeurope")
-    -ServiceOwner <string>              # Required: Owner's email
+    -WorkloadPlaneAdmin <string>              # Required: Owner's email
     -ServiceMembers <array>             # Optional: Member emails
     -GovernanceModel <string>           # Optional: "PerService" (default) or "Centralized"
     -SkipAzureResourceGroup             # Optional: Skip Azure RG creation (Entra only)
-    -ProhibitDirectElevation            # Optional: No emergency bypass groups
+    -NoPimEscalation            # Optional: No emergency bypass groups
     -Verbose                            # Recommended: See what's being created
 ```
 
@@ -114,23 +114,23 @@ Before suggesting ServiceEM commands, verify:
 1. **User has required permissions**: Group.ReadWrite.All, EntitlementManagement.ReadWrite.All
 2. **For Centralized model**: Pre-existing delegation groups exist in EntraOpsConfig.json
 3. **For Azure resources**: User has Azure subscription permissions (UAA or Owner)
-4. **ServiceOwner and ServiceMembers**: Valid email addresses in the tenant
+4. **WorkloadPlaneAdmin and ServiceMembers**: Valid email addresses in the tenant
 
 #### Common AI Patterns
 ```powershell
 # Dev/Test (simplest)
-New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "DevApp" -AzureRegion "westeurope" -ServiceOwner "dev@contoso.com"
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "DevApp" -AzureRegion "westeurope" -WorkloadPlaneAdmin "dev@contoso.com"
 
 # Production with Centralized governance
-New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "ProdAPI" -AzureRegion "westeurope" -ServiceOwner "api-owner@contoso.com" -ServiceMembers @("dev1@contoso.com") -GovernanceModel "Centralized"
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "ProdAPI" -AzureRegion "westeurope" -WorkloadPlaneAdmin "api-owner@contoso.com" -ServiceMembers @("dev1@contoso.com") -GovernanceModel "Centralized"
 
 # Entra-only (no Azure resources)
-New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -AzureRegion "westeurope" -ServiceOwner "admin@contoso.com" -SkipAzureResourceGroup
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -AzureRegion "westeurope" -WorkloadPlaneAdmin "admin@contoso.com" -SkipAzureResourceGroup
 ```
 
 #### Troubleshooting for AI
 - **Missing groups**: Check if `-SkipAzureResourceGroup` was used (skips some Rg-scope groups)
-- **Assignment policy errors**: Usually caused by invalid ServiceOwner/ServiceMembers emails
+- **Assignment policy errors**: Usually caused by invalid WorkloadPlaneAdmin/ServiceMembers emails
 - **Azure RBAC failures**: User lacks Azure subscription permissions
 
 > **💡 Visual Learner?** See the **[ServiceEM Landing Zone Visualization](./EntraOps/Public/ServiceEM/ServiceEM-LandingZone-Visualization.md)** for interactive Mermaid diagrams showing group structures, access packages, policies, and RBAC assignments for both Centralized and PerService governance models.
@@ -145,8 +145,8 @@ New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -AzureRegio
 
 1. **PowerShell 7+** with the following modules installed:
    ```powershell
-   Install-Module Microsoft.Graph -Scope CurrentUser
-   Install-Module Az -Scope CurrentUser
+   Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Groups, Microsoft.Graph.Users -Scope CurrentUser
+   Install-Module Az.Accounts, Az.Resources, Az.ResourceGraph -Scope CurrentUser
    ```
 
 2. **EntraOps PowerShell Module** imported:
@@ -223,7 +223,7 @@ The **Centralized** governance model requires pre-existing **Security Groups** (
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyFirstApp" `
     -AzureRegion "westeurope" `
-    -ServiceOwner "alice@contoso.com" `
+    -WorkloadPlaneAdmin "alice@contoso.com" `
     -ServiceMembers @("bob@contoso.com") `
     -Verbose
 ```
@@ -238,7 +238,7 @@ New-EntraOpsSubscriptionLandingZone `
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyFirstApp" `
     -AzureRegion "westeurope" `
-    -ServiceOwner "alice@contoso.com" `
+    -WorkloadPlaneAdmin "alice@contoso.com" `
     -ServiceMembers @("bob@contoso.com") `
     -GovernanceModel "Centralized" `
     -Verbose
@@ -301,7 +301,7 @@ Here's a complete example showing how persona-based groups (IdentityOps, Platfor
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyEntraOpsApp" `
     -AzureRegion "westeurope" `
-    -ServiceOwner "admin@contoso.com" `
+    -WorkloadPlaneAdmin "admin@contoso.com" `
     -ServiceMembers @("alice@contoso.com", "bob@contoso.com") `
     -GovernanceModel "Centralized" `
     -Verbose
@@ -343,7 +343,7 @@ VERBOSE: [New-EntraOpsSubscriptionLandingZone] Removing ControlPlane components 
 
 # 6. Processing Sub scope (subscription-level)
 VERBOSE: [New-EntraOpsSubscriptionLandingZone] Processing LZ Role: Sub
-VERBOSE: [New-EntraOpsServiceBootstrap] ServiceOwner set, looking up admin@contoso.com
+VERBOSE: [New-EntraOpsServiceBootstrap] WorkloadPlaneAdmin set, looking up admin@contoso.com
 
 # 7. ControlPlane/ManagementPlane creation skipped (centralized model)
 VERBOSE: [New-EntraOpsServiceBootstrap] ControlPlaneDelegationGroupId provided — enforcing SkipControlPlaneDelegation
@@ -372,8 +372,8 @@ VERBOSE: [New-EntraOpsServiceBootstrap] No access packages to configure — skip
 # 11. Processing Rg scope (resource group level)
 VERBOSE: [New-EntraOpsSubscriptionLandingZone] Processing LZ Role: Rg
 
-# 12. ServiceOwner and ServiceMembers forwarded from parent cmdlet
-VERBOSE: [New-EntraOpsServiceBootstrap] ServiceOwner set, looking up admin@contoso.com
+# 12. WorkloadPlaneAdmin and ServiceMembers forwarded from parent cmdlet
+VERBOSE: [New-EntraOpsServiceBootstrap] WorkloadPlaneAdmin set, looking up admin@contoso.com
 
 # 13. WorkloadPlane groups created for Rg scope
 VERBOSE: [New-EntraOpsServiceEntraGroup] Processing 3 Groups
@@ -439,7 +439,7 @@ $config | ConvertTo-Json -Depth 10 | Set-Content EntraOpsConfig.json
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "ProdAPI" `
     -AzureRegion "westeurope" `
-    -ServiceOwner "api-owner@contoso.com" `
+    -WorkloadPlaneAdmin "api-owner@contoso.com" `
     -ServiceMembers @("dev1@contoso.com", "dev2@contoso.com") `
     -GovernanceModel "Centralized" `
     -Verbose
@@ -450,7 +450,7 @@ New-EntraOpsSubscriptionLandingZone `
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "DevApp" `
     -AzureRegion "northeurope" `
-    -ServiceOwner "dev-lead@contoso.com" `
+    -WorkloadPlaneAdmin "dev-lead@contoso.com" `
     -ServiceMembers @("dev-team@contoso.com") `
     -GovernanceModel "PerService" `
     -SkipAzureResourceGroup `  # Only create Entra groups, no Azure RG
@@ -461,7 +461,7 @@ New-EntraOpsSubscriptionLandingZone `
 ```powershell
 New-EntraOpsServiceBootstrap `
     -ServiceName "Rg-MyMicroservice" `
-    -ServiceOwner "owner@contoso.com" `
+    -WorkloadPlaneAdmin "owner@contoso.com" `
     -ServiceMembers @("dev@contoso.com") `
     -AzureRegion "westeurope" `
     -ServiceRoles @(
@@ -571,7 +571,7 @@ When you run `New-EntraOpsSubscriptionLandingZone` with Centralized governance:
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyApp" `
-    -ServiceOwner "alice@contoso.com" `
+    -WorkloadPlaneAdmin "alice@contoso.com" `
     -ServiceMembers @("bob@contoso.com", "carol@contoso.com") `
     -GovernanceModel "Centralized"
 ```
@@ -609,7 +609,7 @@ In the **PerService** model, every service landing zone gets its own dedicated C
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyApp" `
-    -ServiceOwner "alice@contoso.com" `
+    -WorkloadPlaneAdmin "alice@contoso.com" `
     -GovernanceModel "PerService"
 ```
 
@@ -993,25 +993,25 @@ When disabled, PIM policies will still require MFA and Justification (as defined
 
 ## Security Considerations
 
-### ProhibitDirectElevation Parameter
+### NoPimEscalation Parameter
 
-By default, ServiceEM creates **PIM staging groups** (`*-PIM-Staging`) that allow emergency direct member additions for break-glass scenarios. When you want to enforce **strict PIM-only access** with no bypass mechanism, use the `-ProhibitDirectElevation` parameter:
+By default, ServiceEM creates **PIM staging groups** (`*-PIM-Staging`) that allow emergency direct member additions for break-glass scenarios. When you want to enforce **strict PIM-only access** with no bypass mechanism, use the `-NoPimEscalation` parameter:
 
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "ProdCritical" `
-    -ServiceOwner "owner@contoso.com" `
-    -ProhibitDirectElevation `  # No PIM staging groups = no emergency bypass
+    -WorkloadPlaneAdmin "owner@contoso.com" `
+    -NoPimEscalation `  # No PIM staging groups = no emergency bypass
     -Verbose
 ```
 
 **What changes:**
-- **Without** `-ProhibitDirectElevation`:
+- **Without** `-NoPimEscalation`:
   - Creates groups like `SG-Rg-MyApp-ManagementPlane-Admins-PIM-Staging`
   - Admins can be added directly to staging groups for emergency access
   - PIM policies still enforce MFA + Justification for eligible activations
   
-- **With** `-ProhibitDirectElevation`:
+- **With** `-NoPimEscalation`:
   - No staging groups created
   - **Only** PIM-eligible assignments allowed
   - No mechanism for emergency bypass (stricter, but requires functioning PIM service)
@@ -1026,7 +1026,7 @@ New-EntraOpsSubscriptionLandingZone `
 ### Service Owner and Member Assignment
 
 **Owner vs. Members:**
-- **ServiceOwner**: Assigned to ManagementPlane-Admins access package (or WorkloadPlane-Admins in Centralized Rg scope)
+- **WorkloadPlaneAdmin**: Assigned to ManagementPlane-Admins access package (or WorkloadPlane-Admins in Centralized Rg scope)
 - **ServiceMembers**: Assigned to WorkloadPlane-Members access package (or WorkloadPlane-Users in Centralized Rg scope)
 
 By default, the owner is also added to the members list. Use `-OwnerIsNotMember` to exclude:
@@ -1034,7 +1034,7 @@ By default, the owner is also added to the members list. Use `-OwnerIsNotMember`
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyApp" `
-    -ServiceOwner "manager@contoso.com" `
+    -WorkloadPlaneAdmin "manager@contoso.com" `
     -ServiceMembers @("dev1@contoso.com", "dev2@contoso.com") `
     -OwnerIsNotMember  # Manager only gets admin access, not member access
 ```
@@ -1132,7 +1132,7 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 | `SG-Sub-{Prefix}-ManagementPlane-Members` | Security | Management tier membership |
 | `SG-Sub-{Prefix}-ManagementPlane-Admins` | Security | Management tier elevation; PIM eligible for Contributor + constrained RBAC Administrator |
 | `SG-Sub-{Prefix}-ControlPlane-Admins` | Security | Catalog owner; PIM eligible for User Access Administrator |
-| `SG-Sub-{Prefix}-PIM-ManagementPlane-Admins` | Security (optional) | PIM proxy group (created unless `-ProhibitDirectElevation` used) |
+| `SG-Sub-{Prefix}-PIM-ManagementPlane-Admins` | Security (optional) | PIM proxy group (created unless `-NoPimEscalation` used) |
 
 > **Note on PIM Staging Groups:** The `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` group is created as a staging group for PIM elevation workflows. This group is not documented in the original table above but is consistently created during deployment. It enables the PIM elevation path from Members to ManagementPlane-Admins.
 
@@ -1365,7 +1365,7 @@ Error: Response status code does not indicate success: BadRequest
 
 **Resolution Steps:**
 1. Wait 5-10 minutes for group replication, then retry
-2. Verify ServiceOwner and ServiceMembers are valid users
+2. Verify WorkloadPlaneAdmin and ServiceMembers are valid users
 3. Check that all referenced groups exist
 4. Manually create the assignment policy in Azure Portal
 
@@ -1373,18 +1373,21 @@ Error: Response status code does not indicate success: BadRequest
 
 ServiceEM requires the following PowerShell modules:
 
-| Module | Minimum Version | Used By Cmdlets |
+| Module | Minimum Version | Purpose |
 |---|---|---|
-| **Microsoft.Graph.Groups** | 2.0+ | `New-EntraOpsServiceEntraGroup`, `New-EntraOpsServicePIMAssignment` |
-| **Microsoft.Graph.Identity.Governance** | 2.0+ | All EM cmdlets (Catalog, AccessPackage, AssignmentPolicy, Assignment), PIM cmdlets (Policy, Assignment) |
-| **Microsoft.Graph.Users** | 2.0+ | `New-EntraOpsServiceBootstrap` (ServiceOwner/ServiceMembers lookup) |
-| **Microsoft.Graph.Authentication** | 2.0+ | `New-EntraOpsServiceBootstrap` (context validation) |
-| **Az.Resources** | 6.0+ | `New-EntraOpsServiceAZContainer` (Resource Group creation, RBAC assignments, PIM policies) |
+| **Microsoft.Graph.Authentication** | 2.0+ | Core Graph connectivity (`Connect-MgGraph`, `Invoke-MgGraphRequest`, `Get-MgContext`) used by all EntraOps functions |
+| **Microsoft.Graph.Groups** | 2.0+ | Group creation and lookup (`Get-MgGroup`, `New-MgGroup`) |
+| **Microsoft.Graph.Users** | 2.0+ | User lookup (`Get-MgUser`) for WorkloadPlaneAdmin/ServiceMembers resolution |
+| **Az.Accounts** | 2.8+ | Azure connectivity (`Connect-AzAccount`, `Get-AzContext`, `Get-AzAccessToken`) |
+| **Az.Resources** | 6.0+ | Azure Resource Group, RBAC, and PIM operations |
+| **Az.ResourceGraph** | 0.13+ | Azure Resource Graph queries (Control Plane scope updates) |
+
+> **Note:** `Microsoft.Graph.Identity.Governance` is not required as a separate module; EntraOps uses `Invoke-MgGraphRequest` (from `Microsoft.Graph.Authentication`) for all Identity Governance and PIM operations.
 
 **Installation:**
 ```powershell
-Install-Module Microsoft.Graph -Scope CurrentUser -Force
-Install-Module Az -Scope CurrentUser -Force
+Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Groups, Microsoft.Graph.Users -Scope CurrentUser -Force
+Install-Module Az.Accounts, Az.Resources, Az.ResourceGraph -Scope CurrentUser -Force
 ```
 
 **Required Scopes:**
@@ -1425,9 +1428,9 @@ This matrix shows how each parameter affects the objects created during deployme
 |-----------|-----------------|-----------------|-----------------|-----------------|---------------------|
 | **None (defaults)** | ✅ 6 created | ✅ 7 created | ✅ RG + RBAC | ✅ 9 created | ✅ Created |
 | `-SkipAzureResourceGroup` | ✅ 6 created | ⚠️ 5 created* | ❌ Skipped | ⚠️ 7 created* | ⚠️ Partial* |
-| `-ProhibitDirectElevation` | ✅ 6 created (no PIM staging) | ✅ 7 created (no PIM staging) | ✅ RG + RBAC | ✅ 9 created | ✅ Created |
+| `-NoPimEscalation` | ✅ 6 created (no PIM staging) | ✅ 7 created (no PIM staging) | ✅ RG + RBAC | ✅ 9 created | ✅ Created |
 | `-GovernanceModel Centralized` | ⚠️ 1 created | ⚠️ 3 created | ✅ RG + RBAC | ⚠️ 2 created | ⚠️ Partial |
-| `-ServiceOwner` | ✅ Owned | ✅ Owned | N/A | ✅ Approver | ✅ Configured |
+| `-WorkloadPlaneAdmin` | ✅ Owned | ✅ Owned | N/A | ✅ Approver | ✅ Configured |
 | `-ServiceMembers` | ✅ Assigned | ✅ Assigned | N/A | ✅ Requestors | ✅ Configured |
 
 **Legend:**
@@ -1481,7 +1484,7 @@ When using Centralized governance:
 - ManagementPlaneDelegationGroupId in EntraOpsConfig.json
 - AdministratorGroupId in EntraOpsConfig.json
 
-**`-ProhibitDirectElevation`**
+**`-NoPimEscalation`**
 
 When this parameter is used:
 
@@ -1492,9 +1495,9 @@ When this parameter is used:
 
 **Use Case:** Organizations with strict separation of duties requirements
 
-**`-ServiceOwner` and `-ServiceMembers`**
+**`-WorkloadPlaneAdmin` and `-ServiceMembers`**
 
-**ServiceOwner:**
+**WorkloadPlaneAdmin:**
 - Set as owner of all created groups
 - Configured as approver in assignment policies
 - Must be a valid user object (not service principal)
@@ -1504,7 +1507,7 @@ When this parameter is used:
 - Configured as requestors in assignment policies
 - Must be valid user objects
 
-> **Note:** If ServiceOwner or ServiceMembers are invalid, assignment policy creation may fail with BadRequest errors.
+> **Note:** If WorkloadPlaneAdmin or ServiceMembers are invalid, assignment policy creation may fail with BadRequest errors.
 
 ### Troubleshooting
 
@@ -1520,7 +1523,7 @@ Error: Response status code does not indicate success: BadRequest
 
 **Causes:**
 1. **Invalid approver references** - Approver group doesn't exist or hasn't replicated
-2. **Missing ServiceOwner** - ServiceOwner parameter not provided or invalid
+2. **Missing WorkloadPlaneAdmin** - WorkloadPlaneAdmin parameter not provided or invalid
 3. **Invalid ServiceMembers** - User not found in directory
 4. **Graph replication delay** - Groups created but not yet indexed
 
@@ -1537,8 +1540,8 @@ Error: Response status code does not indicate success: BadRequest
 
 2. **Verify Users:**
    ```powershell
-   # Check ServiceOwner exists
-   Get-MgUser -UserId $ServiceOwner
+   # Check WorkloadPlaneAdmin exists
+   Get-MgUser -UserId $WorkloadPlaneAdmin
    
    # Check ServiceMembers exist
    $ServiceMembers | ForEach-Object {
@@ -1577,7 +1580,7 @@ Using `-SkipAzureResourceGroup` parameter
    New-EntraOpsSubscriptionLandingZone `
        -DeploymentPrefix "MyApp" `
        -AzureRegion "westeurope" `
-       -ServiceOwner "admin@contoso.com" `
+       -WorkloadPlaneAdmin "admin@contoso.com" `
        -ServiceMembers @("user@contoso.com")
    ```
 
@@ -1724,7 +1727,7 @@ After deployment, verify the following:
 - [ ] PIM eligible assignments configured
 
 #### Access and Permissions
-- [ ] ServiceOwner can manage all groups
+- [ ] WorkloadPlaneAdmin can manage all groups
 - [ ] ServiceMembers can request access packages
 - [ ] Approvers receive approval requests
 - [ ] Elevation through PIM works correctly
