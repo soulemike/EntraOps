@@ -66,7 +66,7 @@ New-EntraOpsSubscriptionLandingZone `
 Get-MgGroup -Filter "startswith(DisplayName,'MyFirstApp')"
 
 # Check access packages
-Get-MgEntitlementManagementAccessPackage -Filter "startswith(DisplayName,'AP-')"
+(Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/v1.0/identityGovernance/entitlementManagement/accessPackages?`$filter=startswith(displayName,'AP-')").value
 ```
 
 **Next Steps:**
