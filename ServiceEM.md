@@ -38,7 +38,15 @@ Install-Module Az.Accounts, Az.Resources, Az.ResourceGraph -Scope CurrentUser
 Import-Module ./EntraOps
 
 # Connect to services
-Connect-MgGraph -Scopes "Group.ReadWrite.All","EntitlementManagement.ReadWrite.All"
+Connect-MgGraph -Scopes @(
+    "Group.ReadWrite.All",
+    "EntitlementManagement.ReadWrite.All",
+    "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+    "PrivilegedAccess.ReadWrite.AzureADGroup",
+    "RoleManagementPolicy.ReadWrite.AzureADGroup",
+    "RoleManagementPolicy.ReadWrite.Directory",
+    "RoleManagement.ReadWrite.Directory"
+)
 Connect-AzAccount
 ```
 
@@ -111,7 +119,14 @@ New-EntraOpsSubscriptionLandingZone `
 
 #### AI Context Checklist
 Before suggesting ServiceEM commands, verify:
-1. **User has required permissions**: Group.ReadWrite.All, EntitlementManagement.ReadWrite.All
+1. **User has required permissions**:
+   - `Group.ReadWrite.All`
+   - `EntitlementManagement.ReadWrite.All`
+   - `PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup`
+   - `PrivilegedAccess.ReadWrite.AzureADGroup`
+   - `RoleManagementPolicy.ReadWrite.AzureADGroup`
+   - `RoleManagementPolicy.ReadWrite.Directory`
+   - `RoleManagement.ReadWrite.Directory`
 2. **For Centralized model**: Pre-existing delegation groups exist in EntraOpsConfig.json
 3. **For Azure resources**: User has Azure subscription permissions (UAA or Owner)
 4. **WorkloadPlaneAdmin and ServiceMembers**: Valid email addresses in the tenant
@@ -156,7 +171,15 @@ New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -AzureRegio
 
 3. **Connected sessions** to both Microsoft Graph and Azure:
    ```powershell
-   Connect-MgGraph -Scopes "Group.ReadWrite.All","EntitlementManagement.ReadWrite.All"
+   Connect-MgGraph -Scopes @(
+       "Group.ReadWrite.All",
+       "EntitlementManagement.ReadWrite.All",
+       "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+       "PrivilegedAccess.ReadWrite.AzureADGroup",
+       "RoleManagementPolicy.ReadWrite.AzureADGroup",
+       "RoleManagementPolicy.ReadWrite.Directory",
+       "RoleManagement.ReadWrite.Directory"
+   )
    Connect-AzAccount
    ```
 
@@ -1395,6 +1418,10 @@ Install-Module Az.Accounts, Az.Resources, Az.ResourceGraph -Scope CurrentUser -F
 Connect-MgGraph -Scopes @(
     "Group.ReadWrite.All",
     "EntitlementManagement.ReadWrite.All",
+    "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+    "PrivilegedAccess.ReadWrite.AzureADGroup",
+    "RoleManagementPolicy.ReadWrite.AzureADGroup",
+    "RoleManagementPolicy.ReadWrite.Directory",
     "RoleManagement.ReadWrite.Directory",
     "User.Read.All"
 )
@@ -1691,21 +1718,34 @@ No Azure RBAC role assignments created after deployment
 #### Issue: PIM Policy Not Applied
 
 **Symptom:**
-Groups don't have PIM policies configured
+Groups don't have PIM policies configured; 403 Forbidden on `roleManagementPolicyAssignments` or `eligibilityScheduleRequests`
 
 **Cause:**
-PIM for Groups not enabled in tenant or missing permissions
+PIM for Groups not enabled in tenant, groups are not role-assignable, or the caller lacks the required Microsoft Graph permissions.
 
 **Resolution:**
-1. Verify PIM for Groups is enabled:
+1. Verify PIM for Groups is enabled in the tenant:
    ```powershell
-   Get-MgPolicyPrivilegedAccessGroupPolicy `
-       -PrivilegedAccessId "aadGroups"
+   (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeType eq 'Group'").value
    ```
 
-2. Check service principal has `RoleManagement.ReadWrite.Directory` permission
+2. **For interactive users**: Ensure you connect with the Automation scope (includes all PIM write permissions):
+   ```powershell
+   Connect-EntraOps -Scope "Automation" -TenantName "contoso.onmicrosoft.com"
+   ```
 
-3. Manually configure PIM policies in Azure Portal
+3. **For service principals**: The app registration needs the following **Application** permissions (not Delegated) and **admin consent**:
+   - `PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup`
+   - `PrivilegedAccess.ReadWrite.AzureADGroup`
+   - `RoleManagementPolicy.ReadWrite.AzureADGroup`
+   - `RoleManagementPolicy.ReadWrite.Directory`
+   - `RoleManagement.ReadWrite.Directory`
+   - `EntitlementManagement.ReadWrite.All`
+   - `Group.ReadWrite.All`
+
+   Add these permissions manually in the Azure Portal under **App registrations > API permissions**, then grant **admin consent**.
+
+4. Manually configure PIM policies in Azure Portal as a fallback
 
 ### Verification Checklist
 
