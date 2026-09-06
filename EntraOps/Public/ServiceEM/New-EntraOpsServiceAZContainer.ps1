@@ -84,10 +84,6 @@ function New-EntraOpsServiceAZContainer {
     )
 
     begin {
-        # Suppress Az module breaking-change warnings (output-type changes in Az.Resources 9+/10+)
-        $prevWarningPreference = $WarningPreference
-        $WarningPreference = 'SilentlyContinue'
-
         # Normalize resource group name: strip Sub-/Rg- scope prefix to avoid RG-Sub-/RG-Rg- duplication
         $rgBaseName = $serviceName
         if ($rgBaseName -match '^(Sub|Rg)-') {
@@ -123,13 +119,15 @@ function New-EntraOpsServiceAZContainer {
                 Write-Error $_
             }
         }
-        try{
-            $owner           = Get-AzRoleDefinition -Name Owner
-            $reader          = Get-AzRoleDefinition -Name Reader
-            $userAccessAdmin = Get-AzRoleDefinition -Name "User Access Administrator"
-            $contributor     = Get-AzRoleDefinition -Name Contributor
-            $rbacAdmin       = Get-AzRoleDefinition -Name "Role Based Access Control Administrator"
-        }catch{
+        try {
+            # Use -WarningAction SilentlyContinue to suppress Az.Resources breaking-change warnings
+            # about flattened properties (Actions, NotActions, etc.) that this code does not use.
+            $owner           = Get-AzRoleDefinition -Name Owner -WarningAction SilentlyContinue
+            $reader          = Get-AzRoleDefinition -Name Reader -WarningAction SilentlyContinue
+            $userAccessAdmin = Get-AzRoleDefinition -Name "User Access Administrator" -WarningAction SilentlyContinue
+            $contributor     = Get-AzRoleDefinition -Name Contributor -WarningAction SilentlyContinue
+            $rbacAdmin       = Get-AzRoleDefinition -Name "Role Based Access Control Administrator" -WarningAction SilentlyContinue
+        } catch {
             Write-Verbose "$logPrefix Failed to find role definitions"
             Write-Error $_
         }
@@ -431,16 +429,16 @@ function New-EntraOpsServiceAZContainer {
                     $scheduleRequestParams.Remove('ConditionVersion') | Out-Null
                 }
 
-                try{
+                try {
                     Write-Verbose "$logPrefix Getting role management policy for: $($add.RoleId)"
-                    $policy = Get-AzRoleManagementPolicy -Scope $scheduleRequestParams.Scope -Name $add.RoleId
-                }catch{
+                    $policy = Get-AzRoleManagementPolicy -Scope $scheduleRequestParams.Scope -Name $add.RoleId -WarningAction SilentlyContinue
+                } catch {
                     Write-Verbose "$logPrefix Failed to get role management policy"
                     Write-Error $_
                 }
                 # Use @() to handle both Array (legacy) and List (Az.Resources 9+) rule collections
                 $policyRules = @($policy.Rule)
-                if(($policyRules | Where-Object {$_.Id -eq "Expiration_Admin_Eligibility"}).IsExpirationRequired){
+                if (($policyRules | Where-Object { $_.Id -eq "Expiration_Admin_Eligibility" }).IsExpirationRequired) {
                     Write-Verbose "$logPrefix Policy requires eligible expiration, updating"
                     $roleManagementPolicySplat = @{
                         Scope = $resourceGroup.ResourceId
@@ -453,18 +451,18 @@ function New-EntraOpsServiceAZContainer {
                             }
                         )
                     }
-                    try{
-                        Update-AzRoleManagementPolicy @roleManagementPolicySplat
-                    }catch{
+                    try {
+                        Update-AzRoleManagementPolicy @roleManagementPolicySplat -WarningAction SilentlyContinue
+                    } catch {
                         Write-Verbose "$logPrefix Failed to update role management policy rules"
                         Write-Error $_
                     }
                 }
 
-                try{
+                try {
                     Write-Verbose "$logPrefix Creating PIM Eligible Assignment for PrincipalId: $($add.PrincipalId)"
                     $rbacSet += New-AzRoleEligibilityScheduleRequest @scheduleRequestParams
-                }catch{
+                } catch {
                     Write-Verbose "$logPrefix Failed to create PIM Eligible Assignment"
                     Write-Error $_
                 }
@@ -473,8 +471,6 @@ function New-EntraOpsServiceAZContainer {
     }
 
     end {
-        # Restore previous warning preference
-        $WarningPreference = $prevWarningPreference
         return [psobject]$resourceGroup
     }
 }

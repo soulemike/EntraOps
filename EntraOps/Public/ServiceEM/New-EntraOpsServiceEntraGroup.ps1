@@ -9,6 +9,11 @@
     When ProhibitDirectElevation is not set, PIM staging groups (*-PIM-*) are
     also created for each non-Members admin group to support PIM for Groups.
 
+    Security groups are automatically created as role-assignable (isAssignableToRole = $true)
+    because PIM for Groups requires this property. Unified groups cannot be role-assignable
+    and are created with isAssignableToRole = $false. Creating role-assignable groups
+    requires the caller to have Privileged Role Administrator or Global Administrator.
+
     Group names follow the convention:
     <GroupPrefix><Delimiter><ServiceName><Delimiter><AccessLevel><Delimiter><RoleName>
 
@@ -37,11 +42,6 @@
 .PARAMETER ServiceRoles
     EntraOps service roles object. Each row produces one group. The accessLevel,
     name, and groupType columns control the group variant.
-
-.PARAMETER IsAssignableToRole
-    When set, creates groups with IsAssignableToRole = $true, enabling them for
-    Entra ID role assignment. Requires the calling identity to have the
-    Privileged Role Administrator role.
 
 .PARAMETER NoPimEscalation
     When set, skips creation of PIM staging groups (*-PIM-*). Use this when PIM
@@ -84,9 +84,6 @@ function New-EntraOpsServiceEntraGroup {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceRoles,
 
-        [Parameter()]
-        [switch]$IsAssignableToRole,
-
         [switch]$NoPimEscalation,
 
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
@@ -125,25 +122,31 @@ function New-EntraOpsServiceEntraGroup {
             Write-Verbose "$logPrefix Failed processing Groups"
             Write-Error $_
         }
+        # Base parameters shared by all group types
         $groupParams = @{
             description = ""
             securityEnabled = $true
-            isAssignableToRole = [bool]$IsAssignableToRole
         }
         if (-not [string]::IsNullOrWhiteSpace($ownerUri)) {
             $groupParams["owners@odata.bind"] = @($ownerUri)
         }
+
+        # Unified (Microsoft 365) groups cannot be role-assignable
         $unifiedParams = $groupParams + @{
             displayName = ""
             mailNickname = ""
             groupTypes = @("Unified")
             mailEnabled = $true
+            isAssignableToRole = $false
             #"members@odata.bind" = $members
         }
+
+        # Security groups used for PIM must be role-assignable
         $secParams = $groupParams + @{
             displayName = ""
             mailNickname = ""
             mailEnabled = $false
+            isAssignableToRole = $true
         }
     }
 
