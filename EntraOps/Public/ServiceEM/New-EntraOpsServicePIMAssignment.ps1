@@ -87,8 +87,15 @@ function New-EntraOpsServicePIMAssignment {
         foreach($group in $ServiceGroups|Where-Object{$_.DisplayName -notlike "*Members*"}){
             $pimEligibilityParams.groupId = $group.Id
             Write-Verbose "$logPrefix Looking up eligibility for group ID: $($group.Id)"
-            $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
-        
+
+            try {
+                $currentEligibilities = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                $pimEligibilities += $currentEligibilities
+            } catch {
+                Write-Warning "$logPrefix Failed to query eligibility schedule requests for group $($group.Id). Ensure the group is role-assignable and the caller has PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup permission. Error: $_"
+                continue
+            }
+
             if($group.DisplayName -like "*-PIM-*"){
                 $pimGroupPrefixLen = "$GroupPrefix$($GroupNamingDelimiter)PIM$GroupNamingDelimiter".Length
                 $pimEligibilityParams.principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "$GroupPrefix$GroupNamingDelimiter"+$group.DisplayName.Substring($pimGroupPrefixLen)}).Id
@@ -100,8 +107,12 @@ function New-EntraOpsServicePIMAssignment {
             $ee = $pimEligibilities | Where-Object { $_.groupId -eq $group.Id } | ForEach-Object { $_.principalId+"_"+$_.targetSchedule.scheduleInfo.expiration.type }
             if($ne -notin $ee){
                 Write-Verbose "$logPrefix $($pimEligibilityParams|ConvertTo-Json -Compress)"
-                Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($pimEligibilityParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
-                $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                try {
+                    Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($pimEligibilityParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
+                    $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                } catch {
+                    Write-Warning "$logPrefix Failed to create PIM eligible assignment for group $($group.Id). Error: $_"
+                }
             }
 
             # Eligible-owner assignment for the workload plane admin (opt-in only).
@@ -120,8 +131,12 @@ function New-EntraOpsServicePIMAssignment {
                 $eeOwner = $pimEligibilities | Where-Object { $_.groupId -eq $group.Id -and $_.accessId -eq "owner" } | ForEach-Object { $_.principalId+"_"+$_.targetSchedule.scheduleInfo.expiration.type }
                 if($neOwner -notin $eeOwner){
                     Write-Verbose "$logPrefix Creating owner eligible assignment for $WorkloadPlaneAdminPrincipalId on group $($group.Id)"
-                    Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($ownerParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
-                    $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                    try {
+                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($ownerParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
+                        $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                    } catch {
+                        Write-Warning "$logPrefix Failed to create PIM eligible owner assignment for group $($group.Id). Error: $_"
+                    }
                 }
             }
         }
@@ -130,20 +145,31 @@ function New-EntraOpsServicePIMAssignment {
     end {
         $confirmed = $false
         $i = 0
+        $nonMemberGroups = @($ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" })
         # When no non-Members groups exist (e.g., all admin groups delegated), skip consistency check.
-        if (($ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" } | Measure-Object).Count -eq 0) {
+        if ($nonMemberGroups.Count -eq 0) {
             return [psobject[]]@()
         }
+
+        # Guard: if no eligibilities were successfully recorded, fail fast instead of falsely confirming
+        $expectedIds = @($pimEligibilities | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+        if ($expectedIds.Count -eq 0) {
+            throw "$logPrefix No PIM eligibilities were successfully created or retrieved. Check previous warnings for permission errors (e.g., group not role-assignable, missing PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup)."
+        }
+
         while(-not $confirmed){
             Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
             $checkPimEligibility = @()
-            foreach($group in $ServiceGroups|Where-Object{$_.DisplayName -notlike "*Members*"}){
-                $checkPimEligibility += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+            foreach($group in $nonMemberGroups){
+                try {
+                    $checkPimEligibility += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                } catch {
+                    Write-Verbose "$logPrefix Failed to query eligibility during consistency check for group $($group.Id): $_"
+                }
             }
             # Handle null values in comparison
-            $expectedIds = @($pimEligibilities | Where-Object { $_.id } | Select-Object -ExpandProperty id)
             $actualIds = @($checkPimEligibility | Where-Object { $_.id } | Select-Object -ExpandProperty id)
-            
+
             if((Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0){
                 Write-Verbose "$logPrefix Graph consistency found confirming"
                 $confirmed = $true
@@ -151,7 +177,7 @@ function New-EntraOpsServicePIMAssignment {
             }
             $i++
             if($i -gt 10){
-                throw "Access Package object consistency with Entra not achieved"
+                throw "$logPrefix PIM eligibility consistency with Entra not achieved after 10 retries. Expected $($expectedIds.Count) entries, found $($actualIds.Count)."
             }
             Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
         }

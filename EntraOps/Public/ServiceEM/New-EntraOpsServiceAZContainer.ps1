@@ -84,18 +84,29 @@ function New-EntraOpsServiceAZContainer {
     )
 
     begin {
+        # Suppress Az module breaking-change warnings (output-type changes in Az.Resources 9+/10+)
+        $prevBreakingChangeWarning = $Env:SuppressAzurePowerShellBreakingChangeWarnings
+        $Env:SuppressAzurePowerShellBreakingChangeWarnings = 'true'
+
+        # Normalize resource group name: strip Sub-/Rg- scope prefix to avoid RG-Sub-/RG-Rg- duplication
+        $rgBaseName = $serviceName
+        if ($rgBaseName -match '^(Sub|Rg)-') {
+            $rgBaseName = $rgBaseName.Substring(3)
+        }
+        $rgName = "RG-$rgBaseName"
+
         try{
             Write-Verbose "$logPrefix Looking up Azure Resource Group"
-            $resourceGroup = Get-AzResourceGroup -Name "RG-$serviceName" -ErrorAction Stop
+            $resourceGroup = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
         }catch{
             if($_.Exception.Message -like "*not exist."){
                 Write-Verbose "$logPrefix Azure Resource Group not found, creating"
-                $resourceGroup = New-AzResourceGroup -Name "RG-$serviceName" -Location $Location
+                $resourceGroup = New-AzResourceGroup -Name $rgName -Location $Location
                 $confirmed = $false
                 $i = 0
                 while(-not $confirmed){
                     Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
-                    $checkResourceGroup = Get-AzResourceGroup -Name "RG-$serviceName"
+                    $checkResourceGroup = Get-AzResourceGroup -Name $rgName
                     if(($checkResourceGroup|Measure-Object).Count -eq 1){
                         Write-Verbose "$logPrefix Azure consistency found confirming"
                         $confirmed = $true
@@ -292,14 +303,14 @@ function New-EntraOpsServiceAZContainer {
                 }
             }
 
-            if(-not $skipContributorForMgmt -and "$($contributor.Name)_$($management.Id)" -notin $eligibleRbacSet){
+            if($management -and -not $skipContributorForMgmt -and "$($contributor.Name)_$($management.Id)" -notin $eligibleRbacSet){
                 $toAdd += @{
                     RoleDefinitionId = "$roleDefinitionPrefix/$($contributor.Id)"
                     RoleId = $contributor.Id
                     PrincipalId = $management.Id
                 }
             }
-            if(-not $skipUaaForControl -and "$($userAccessAdmin.Name)_$($control.Id)" -notin $eligibleRbacSet -and -not $SkipControlPlaneDelegation){
+            if($control -and -not $skipUaaForControl -and "$($userAccessAdmin.Name)_$($control.Id)" -notin $eligibleRbacSet -and -not $SkipControlPlaneDelegation){
                 $toAdd += @{
                     RoleDefinitionId = "$roleDefinitionPrefix/$($userAccessAdmin.Id)"
                     RoleId = $userAccessAdmin.Id
@@ -427,16 +438,20 @@ function New-EntraOpsServiceAZContainer {
                     Write-Verbose "$logPrefix Failed to get role management policy"
                     Write-Error $_
                 }
-                if(($policy.Rule|Where-Object{$_.Id -eq "Expiration_Admin_Eligibility"}).IsExpirationRequired){
+                # Use @() to handle both Array (legacy) and List (Az.Resources 9+) rule collections
+                $policyRules = @($policy.Rule)
+                if(($policyRules | Where-Object {$_.Id -eq "Expiration_Admin_Eligibility"}).IsExpirationRequired){
                     Write-Verbose "$logPrefix Policy requires eligible expiration, updating"
                     $roleManagementPolicySplat = @{
                         Scope = $resourceGroup.ResourceId
                         Name = $add.RoleId
-                        Rule = @{
-                            id = "Expiration_Admin_Eligibility"
-                            IsExpirationRequired = $false
-                            ruleType = "RoleManagementPolicyExpirationRule"
-                        }
+                        Rule = @(
+                            @{
+                                id = "Expiration_Admin_Eligibility"
+                                IsExpirationRequired = $false
+                                ruleType = "RoleManagementPolicyExpirationRule"
+                            }
+                        )
                     }
                     try{
                         Update-AzRoleManagementPolicy @roleManagementPolicySplat
@@ -458,6 +473,8 @@ function New-EntraOpsServiceAZContainer {
     }
 
     end {
+        # Restore previous breaking-change warning setting
+        $Env:SuppressAzurePowerShellBreakingChangeWarnings = $prevBreakingChangeWarning
         return [psobject]$resourceGroup
     }
 }
