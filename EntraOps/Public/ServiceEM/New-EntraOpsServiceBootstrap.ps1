@@ -173,7 +173,9 @@ function New-EntraOpsServiceBootstrap {
         }
 
         #todo update all variables to just use this hashtable
-        $report = @{}
+        $report = @{
+            ServiceName = $ServiceName
+        }
 
         #todo move regions to cmdlets
         #region WorkloadPlaneAdmin

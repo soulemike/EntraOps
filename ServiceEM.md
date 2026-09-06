@@ -70,11 +70,11 @@ New-EntraOpsSubscriptionLandingZone `
 #### Step 3: Verify Deployment
 
 ```powershell
-# Check created groups
-Get-MgGroup -Filter "startswith(DisplayName,'MyFirstApp')"
+# Check created groups (matches both base and PIM staging groups)
+Get-MgGroup -Filter "startswith(mailNickname,'MyFirstApp.') or startswith(mailNickname,'PIM.MyFirstApp.')"
 
-# Check access packages
-(Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/v1.0/identityGovernance/entitlementManagement/accessPackages?`$filter=startswith(displayName,'AP-')").value
+# Check access packages scoped to this service only
+(Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/v1.0/identityGovernance/entitlementManagement/accessPackages?`$filter=startswith(displayName,'AP-MyFirstApp')").value
 ```
 
 **Next Steps:**

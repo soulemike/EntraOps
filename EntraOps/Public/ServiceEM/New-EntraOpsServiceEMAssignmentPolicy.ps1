@@ -297,8 +297,10 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         # Create Initial Management Admin Policy for admin-driven service owner assignment
                         $params = $initialPolicyParams.Clone()
                         $params.displayName = "Initial Management Admin Policy"
-                        $params.allowedTargetScope = "specificDirectoryUsers"
-                        $params.specificAllowedTargets = @()  # Empty - admin-driven only via adminAdd
+                        # Use notSpecified for admin-driven policies (no self-service targets).
+                        # specificDirectoryUsers requires at least one target; empty array causes BadRequest.
+                        $params.allowedTargetScope = "notSpecified"
+                        $params.Remove('specificAllowedTargets')
                         $params.requestApprovalSettings = @{
                             isApprovalRequiredForAdd = $false  # No approval needed for adminAdd
                             isApprovalRequiredForUpdate = $false
@@ -308,8 +310,10 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         }
                         $params = $policyParams + $params
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
-                        
+
                         # Create Management Plane Policy for self-service elevation with strong controls
+                        $controlPlaneAdminsId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ControlPlane-Admins" }).Id
+                        $catalogPlaneMembersId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*CatalogPlane-Members" }).Id
                         $mgmtPlanePolicyParams = @{
                             displayName = "Management Plane Policy"
                             description = "The Management Plane Policy for $ServiceName ManagementPlane-Admins access package."
@@ -317,7 +321,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                             specificAllowedTargets = @(
                                 @{
                                     "@odata.type" = "#microsoft.graph.groupMembers"
-                                    groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*ManagementPlane-Members"}).Id)
+                                    groupId = $(($ServiceGroups | Where-Object { $_.DisplayName -like "*ManagementPlane-Members" }).Id)
                                 }
                             )
                             expiration = @{
@@ -336,21 +340,26 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                                         primaryApprovers = @(
                                             @{
                                                 "@odata.type" = "#microsoft.graph.groupMembers"
-                                                groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*ControlPlane-Admins"}).Id)
+                                                groupId = $controlPlaneAdminsId
                                             }
                                         )
                                         fallbackPrimaryApprovers = @(
                                             @{
                                                 "@odata.type" = "#microsoft.graph.groupMembers"
-                                                groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id)
+                                                groupId = $catalogPlaneMembersId
                                             }
                                         )
                                     }
                                 )
                             }
                         }
-                        $params = $policyParams + $mgmtPlanePolicyParams
-                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                        # Guard: skip self-service policy if ControlPlane-Admins does not exist in this scope
+                        if ($controlPlaneAdminsId) {
+                            $params = $policyParams + $mgmtPlanePolicyParams
+                            $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                        } else {
+                            Write-Verbose "$logPrefix Skipping Management Plane Policy — ControlPlane-Admins not found in this scope (delegated or not created)"
+                        }
                     }elseif($package.displayName -like "*WorkloadPlane-Admins"){
                         $params = $policyParams + $workloadPlanePolicyParams
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
@@ -393,9 +402,8 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         $params = $policyParams + $baselinePolicyParams
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
                     }
-                }catch{
-                    Write-Verbose "$logPrefix Failed to Assign Policy"
-                    Write-Error $_
+                } catch {
+                    Write-Warning "$logPrefix Failed to create assignment policy for package '$($package.DisplayName)' (ID: $($package.Id)). Error: $_"
                 }
             }
         }
