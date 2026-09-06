@@ -151,10 +151,11 @@ function New-EntraOpsServicePIMAssignment {
             return [psobject[]]@()
         }
 
-        # Guard: if no eligibilities were successfully recorded, fail fast instead of falsely confirming
+        # Guard: if no eligibilities were successfully recorded, warn and return gracefully
         $expectedIds = @($pimEligibilities | Where-Object { $_.id } | Select-Object -ExpandProperty id)
         if ($expectedIds.Count -eq 0) {
-            throw "$logPrefix No PIM eligibilities were successfully created or retrieved. Check previous warnings for permission errors (e.g., group not role-assignable, missing PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup)."
+            Write-Warning "$logPrefix No PIM eligibilities were successfully created or retrieved. Check previous warnings for permission errors (e.g., group not role-assignable, missing PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup)."
+            return [psobject[]]@()
         }
 
         while(-not $confirmed){
@@ -177,7 +178,8 @@ function New-EntraOpsServicePIMAssignment {
             }
             $i++
             if($i -gt 10){
-                throw "$logPrefix PIM eligibility consistency with Entra not achieved after 10 retries. Expected $($expectedIds.Count) entries, found $($actualIds.Count)."
+                Write-Warning "$logPrefix PIM eligibility consistency with Entra not achieved after 10 retries. Expected $($expectedIds.Count) entries, found $($actualIds.Count). Returning best-effort results."
+                return [psobject[]]$pimEligibilities
             }
             Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
         }
