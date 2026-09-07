@@ -1,17 +1,20 @@
 <#
 .SYNOPSIS
-    Removes an Entitlement Management catalog, all its contents, and the associated Entra groups.
+    Removes an Entitlement Management catalog, all its contents, the associated
+    Entra groups, and the Azure resource group created by the landing zone.
 
 .DESCRIPTION
-    Performs a complete teardown of an Entitlement Management catalog:
+    Performs a complete teardown of a ServiceEM landing zone:
     1. Revokes all active (non-expired) access package assignments via
-       adminRemove requests and waits for them to reach Fulfilled state.
+       adminRemove requests and waits for them to reach a terminal state.
     2. Deletes all access packages in the catalog.
     3. Deletes the catalog itself.
     4. Deletes all Entra groups that were registered as catalog resources,
        except any group whose Object ID appears in ExcludeGroupIds (used to
        protect shared delegation/persona groups such as ControlPlane-Admins,
        ManagementPlane-Admins, or CatalogPlane-Members).
+    5. Deletes the Azure resource group named RG-<ServiceName> if it exists
+       and -SkipAzureResourceGroup is not specified.
 
     Requires the -Force switch to prevent accidental deletion.
     Intended for decommissioning services provisioned by New-EntraOpsServiceBootstrap.
@@ -29,6 +32,10 @@
     groups (ControlPlane-Admins, ManagementPlane-Admins, CatalogPlane-Members)
     that are reused across multiple services.
 
+.PARAMETER SkipAzureResourceGroup
+    When set, skips deletion of the Azure resource group. Use this to preserve
+    the RG and its resources while removing only the Entra ID / EM artifacts.
+
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
@@ -36,7 +43,7 @@
     Remove-EntraOpsServiceCatalog -ServiceCatalogName "Catalog-MyService" -Force
 
     Revokes all active assignments, deletes all access packages, removes the
-    catalog, and deletes all associated Entra groups.
+    catalog, deletes all associated Entra groups, and deletes the Azure RG.
 
 .EXAMPLE
     Remove-EntraOpsServiceCatalog -ServiceCatalogName "Catalog-MyService" -Force `
@@ -46,6 +53,11 @@
         )
 
     Same as above but skips deletion of the two shared delegation groups.
+
+.EXAMPLE
+    Remove-EntraOpsServiceCatalog -ServiceCatalogName "Catalog-MyService" -Force -SkipAzureResourceGroup
+
+    Removes all Entra ID / EM artifacts but leaves the Azure resource group intact.
 
 .EXAMPLE
     Remove-EntraOpsServiceCatalog -ServiceCatalogName "Catalog-MyService"
@@ -63,6 +75,8 @@ function Remove-EntraOpsServiceCatalog {
         [switch]$Force,
 
         [string[]]$ExcludeGroupIds = @(),
+
+        [switch]$SkipAzureResourceGroup,
 
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
@@ -153,6 +167,30 @@ function Remove-EntraOpsServiceCatalog {
                 Write-Verbose "$logPrefix Failed to delete group $($resource.DisplayName) [$($resource.OriginId)]"
                 Write-Error $_
             }
+        }
+
+        # Step 6: Delete Azure resource group if it exists.
+        if (-not $SkipAzureResourceGroup) {
+            $serviceName = $ServiceCatalogName -replace '^Catalog-'
+            $rgName = "RG-$serviceName"
+            try {
+                Write-Verbose "$logPrefix Looking up Azure Resource Group: $rgName"
+                $rg = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
+                if ($rg) {
+                    Write-Verbose "$logPrefix Deleting Azure Resource Group: $rgName"
+                    Remove-AzResourceGroup -Name $rgName -Force | Out-Null
+                    Write-Verbose "$logPrefix Azure Resource Group deleted: $rgName"
+                }
+            } catch {
+                if ($_.Exception.Message -like "*not exist*" -or $_.Exception.Message -like "*ResourceGroupNotFound*") {
+                    Write-Verbose "$logPrefix Azure Resource Group not found: $rgName — skipping"
+                } else {
+                    Write-Verbose "$logPrefix Failed to delete Azure Resource Group: $rgName"
+                    Write-Error $_
+                }
+            }
+        } else {
+            Write-Verbose "$logPrefix Skipping Azure Resource Group deletion (-SkipAzureResourceGroup specified)"
         }
     }
 

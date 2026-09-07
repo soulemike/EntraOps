@@ -710,7 +710,7 @@ The following example shows the full `ServiceEM` section inside `EntraOpsConfig.
 1. Create tenant-wide IdentityOps and PlatformOps groups
 2. Add their ObjectIds to `EntraOpsConfig.json`
 3. Re-run landing zone provisioning
-4. Use `Remove-EntraOpsServiceCatalog` with `-ExcludeGroupIds` to clean up old per-service groups
+4. Use `Remove-EntraOpsServiceCatalog` with `-ExcludeGroupIds` to clean up old per-service groups and the Azure resource group
 
 ## Constrained Delegation Configuration
 
@@ -1073,7 +1073,7 @@ ServiceEM provides 17 cmdlets for automated landing zone provisioning and manage
 | 14 | `New-EntraOpsSubscriptionLandingZoneAlt` | **Landing Zone** — Alternative flat single-call variant (deprecated in favor of `New-EntraOpsSubscriptionLandingZone`) |
 | 15 | `New-EntraOpsTenantLandingZone` | **Landing Zone** — Multi-component tenant-wide deployment (Billing, Mgs, Subs, Rg scopes) |
 | 16 | `Get-EntraOpsServiceEMReport` | Read-only reporting cmdlet for auditing existing service configurations |
-| 17 | `Remove-EntraOpsServiceCatalog` | Cleanup cmdlet — removes catalog, access packages, assignments, and optionally groups (use `-ExcludeGroupIds` to preserve delegation groups) |
+| 17 | `Remove-EntraOpsServiceCatalog` | Cleanup cmdlet — removes catalog, access packages, assignments, Entra groups, and the Azure RG (use `-ExcludeGroupIds` to preserve delegation groups, `-SkipAzureResourceGroup` to preserve the RG) |
 
 ### Naming Conventions
 

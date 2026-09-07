@@ -141,9 +141,21 @@
         'Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
         'Update-EntraOpsRequiredWorkflowParameters'
         # ServiceEM Functions
-        'New-EntraOpsSubscriptionLandingZone'
-        'New-EntraOpsServiceEntraGroup'
+        'Get-EntraOpsServiceEMReport'
+        'New-EntraOpsServiceAZContainer'
         'New-EntraOpsServiceBootstrap'
+        'New-EntraOpsServiceEMAccessPackage'
+        'New-EntraOpsServiceEMAccessPackageResourceAssignment'
+        'New-EntraOpsServiceEMAssignment'
+        'New-EntraOpsServiceEMAssignmentPolicy'
+        'New-EntraOpsServiceEMCatalog'
+        'New-EntraOpsServiceEMCatalogResource'
+        'New-EntraOpsServiceEMCatalogResourceRole'
+        'New-EntraOpsServiceEntraGroup'
+        'New-EntraOpsServicePIMAssignment'
+        'New-EntraOpsServicePIMPolicy'
+        'New-EntraOpsSubscriptionLandingZone'
+        'Remove-EntraOpsServiceCatalog'
         'Resolve-EntraOpsServiceEMDelegationGroup'
     )
 
