@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Tier Breach Analyzer</title>
+    <meta name="description"
+        content="Visualize Enterprise Access Model tier boundary violations from EntraOps Privileged EAM data: which lower-tier objects reach higher-tier (Control Plane) services through role assignments." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Tier Breach Analyzer</span>
+            <span class="sub" id="tenantName">Enterprise Access Model</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link"
+            href="https://learn.microsoft.com/en-us/security/privileged-access-workstations/privileged-access-access-model"
+            target="_blank" rel="noopener noreferrer">Enterprise Access Model docs &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification
+                    Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <div class="nav-item active"><span class="ico">&#9888;</span><span>Tier Breach Analyzer</span></div>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration
+                    Analyzer</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+                <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span class="ico">&#9733;</span><span>EIDSCA
+                    Findings</span></a>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span class="ico">&#8523;</span><span>Access
+                    Package Flow</span></a>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span class="ico">&#128477;&#65038;</span><span>PIM Request
+                    Flow</span></a>
+
+            <div class="nav-group-label">Views</div>
+            <div class="nav-item view-item active" data-view="tier0" role="button" tabindex="0"><span
+                    class="ico">&#9679;</span><span>Tier 0
+                    breaches</span><span class="count" id="cnt-tier0"></span></div>
+            <div class="nav-item view-item" data-view="breach" role="button" tabindex="0"><span
+                    class="ico">&#9650;</span><span>All tier
+                    breaches</span><span class="count" id="cnt-breach"></span></div>
+            <div class="nav-item view-item" data-view="all" role="button" tabindex="0"><span
+                    class="ico">&#8862;</span><span>All assignment
+                    paths</span><span class="count" id="cnt-all"></span></div>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; Tier Breach
+                    Analyzer
+                </div>
+                <h1>Tier Breach Analyzer</h1>
+                <p>Sankey view of privileged assignment paths from EntraOps Privileged EAM data. A <strong>tier
+                        breach</strong> is a path where an object classified on a lower (less privileged) tier reaches
+                    a service on a higher tier through a role assignment &mdash; the headline case being a Tier&nbsp;1 /
+                    Tier&nbsp;2 object reaching a Tier&nbsp;0 (Control Plane) service. Click a node to trace its
+                    connections and filter the breach table.</p>
+            </div>
+
+            <!-- Filters -->
+            <section class="card card-pad" style="margin-bottom:16px;">
+                <div class="controls-row">
+                    <div class="control-group">
+                        <label>Columns</label>
+                        <div class="checks" id="columnChecks"></div>
+                    </div>
+                    <div class="control-group">
+                        <label>RBAC systems</label>
+                        <div class="checks" id="systemChecks"></div>
+                    </div>
+                    <div class="control-group">
+                        <label>Object types</label>
+                        <div class="checks" id="typeChecks"></div>
+                    </div>
+                    <div class="control-group grow">
+                        <label>Search</label>
+                        <div class="search">
+                            <span class="search-ico">&#128269;</span>
+                            <input type="text" id="search" placeholder="Filter by object, role or service&hellip;" />
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stats -->
+            <div class="grid cols-4" id="stats" style="margin-bottom:16px;"></div>
+
+            <!-- Sankey -->
+            <section class="card" style="margin-bottom:16px;">
+                <div class="card-head">Assignment path flow
+                    <span class="hint" id="legend"></span>
+                </div>
+                <div class="diagram-wrap">
+                    <svg id="sankey"></svg>
+                    <div id="empty" class="empty hidden"></div>
+                </div>
+            </section>
+
+            <!-- Breach table -->
+            <section class="card">
+                <div class="card-head">Tier breach paths
+                    <span class="chip priv" id="breachCount"></span>
+                    <span class="chip brand hidden" id="tableFilter"></span>
+                    <button class="btn small hidden" id="clearFilter">Clear node filter</button>
+                    <span class="hint">Click a row for assignment details</span>
+                    <button class="btn small" id="exportCsv">Export CSV</button>
+                </div>
+                <div class="table-wrap"
+                    style="max-height:480px;overflow:auto;border-radius:0 0 var(--radius-lg) var(--radius-lg);border:0;">
+                    <table class="grid-table" id="breachTable">
+                        <thead>
+                            <tr>
+                                <th class="no-sort caret-col"></th>
+                                <th class="no-sort">Object</th>
+                                <th class="no-sort">Type</th>
+                                <th class="no-sort">Object tier</th>
+                                <th class="no-sort">System</th>
+                                <th class="no-sort">Role</th>
+                                <th class="no-sort">Service reached</th>
+                                <th class="no-sort">Service tier</th>
+                                <th class="no-sort">Scope</th>
+                                <th class="no-sort">Assignment</th>
+                                <th class="no-sort" title="Add to review list">&#9733;</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div class="pager hidden" id="breachPager"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Scripts (classic, ordered) -->
+    <!-- Embedded dataset (generated by New-EntraOpsTierBreachAnalyzerData).
+         Optional at load time: when absent the app shows instructions instead of failing. -->
+    <script src="data/tier-breach-data.js"></script>
+    <!-- d3 + d3-sankey vendored locally so the app is fully self-contained and
+         works from file:// with no internet connection. -->
+    <script src="assets/vendor/d3.min.js"></script>
+    <script src="assets/vendor/d3-sankey.min.js"></script>
+    <script src="js/review.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

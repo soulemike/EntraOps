@@ -1,7 +1,7 @@
 Parser:
     Title: PrivilegedEAM (WatchLists)
-    Version: 0.3
-    LastUpdated: 2026-03-09
+    Version: 0.4
+    LastUpdated: 2026-07-02
 Product:
     Name: EntraOps
 References:
@@ -28,6 +28,9 @@ ParserQuery: |
                 RoleSystem == "EntraID"
                     and PIMAssignmentType == "Eligible",
                     "PIM for Entra ID Roles",
+                RoleSystem == "Azure"
+                    and PIMAssignmentType == "Eligible",
+                    "PIM for Azure Roles",
                 RoleAssignmentSubType in ("Nested Eligible group member", "Eligible member"),
                     "PIM for Groups",
                 "N/A"

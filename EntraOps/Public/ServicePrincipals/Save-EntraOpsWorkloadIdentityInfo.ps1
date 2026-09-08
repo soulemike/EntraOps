@@ -6,8 +6,8 @@
     Get information of service principals and application in Microsoft Entra ID for creating content for the WatchList "WorkloadIdentityInfo".
 
 .EXAMPLE
-    Using System-assigned Managed Identity to get Service Principal of Schaengel Tenant from Azure KeyVault (Multi-Tenant Use Case) in CloudLab Tenant
-    Connect-EntraOps -AuthenticationType "ServicePrincipal" -TenantName "schaengel.onmicrosoft.com" -KeyVaultTenantName "cloudlab.onmicrosoft.com" -KeyVaultName "identityops-kva" -PrefixSecretName "CA-CAAsCode-"
+    Using System-assigned Managed Identity to get the service principal of a managed tenant from an Azure Key Vault in the managing tenant (multi-tenant use case)
+    Connect-EntraOps -AuthenticationType "ServicePrincipal" -TenantName "fabrikam.onmicrosoft.com" -KeyVaultTenantName "contoso.onmicrosoft.com" -KeyVaultName "contoso-entraops-kv" -PrefixSecretName "EntraOps-"
 #>
 function Save-EntraOpsWorkloadIdentityInfo {
 

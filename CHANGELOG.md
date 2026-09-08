@@ -1,8 +1,52 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [1.0.0] - 2026-09-08
+
+### Added
+- **Azure RBAC support**: New `Azure` RBAC system — `Get-EntraOpsPrivilegedAzureRoles` collects ARM role assignments (PIM eligible/active, custom roles, ABAC constrained delegations, nested/PIM-for-Groups) tenant-wide via the new `Invoke-EntraOpsAzQuery` batching/throttling wrapper; `Get-EntraOpsPrivilegedEAMAzure` classifies them against new `Classification_Azure.json`/`.Param.json` templates, with constrained-delegation downgrade (`Resolve-EntraOpsAzureConstrainedDelegationTier`), `ActionType: "DataAction"` matching to separate management- vs data-plane actions, cross-tenant `ForeignGroup` resolution, and configurable deleted-principal/unresolved-role-definition handling.
+- **EntraOps Reporting (`Reports/`)**: New offline reporting portal — Classification Explorer, EAM Dashboard, Access Path Map, Tier Breach Analyzer, Privilege History, Configuration Analyzer, Access Package Flow, Conditional Access Analysis, and EIDSCA Coverage — plus `New-/Remove-EntraOpsReportingData`, `AutomatedReportingGeneration` config, the `Push-EntraOpsPrivilegedReporting` workflow, and a shared cross-tool Review list for bookmarking findings.
+- **Tenant Governance snapshots and Configuration Analyzer**: Capture Entra, Intune, and Security & Compliance configuration via Microsoft Graph UTCM, persisted as deterministic per-resource JSON under `TenantGovernance/Snapshots` with Git-history analysis and snapshot diagnostics.
+- **`Invoke-EntraOpsPrivilegedEAM`**: Zero-config entry point that resolves the tenant from an authenticated Az/Graph context and runs a full Privileged EAM export without requiring `EntraOpsConfig.json` beforehand.
+- **Classification maintenance tooling**: `Update-EntraOpsClassificationModels`, `Export-EntraOpsClassificationAzureRoles`, `Export-EntraOpsClassificationIdentityGovernanceRoles`, `Export-EntraOpsClassificationDirectoryRolesFromMsftDocs`, `Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs`.
+- **Contracted, review-gated self-update**: `EntraOpsUpdateContract.json` declares supported update targets and distribution repositories; `Update-EntraOps` validates a candidate before touching the deployment and splits its workflow into `Resolve`/`Validate`/`Apply` stages. `AutomatedEntraOpsUpdate.PublicationMode: PullRequest` (default when enabled) publishes candidates to a review branch/PR instead of pushing directly; `ValidationFrequency`/`RunBrowserTests` tune validation cost.
+- **Removal safety brake**: CA group, Administrative Unit, RMAU, and Entitlement Management catalog synchronization aborts oversized removal/revert plans (default 50% threshold); `-ForceRemovalBeyondSafetyThreshold` overrides explicitly.
+- **Generated artifact validation**: `Test-EntraOpsGeneratedArtifacts` gains `-FailOnPrivilegedAssignmentWithoutClassification` and `-FailOnContradictoryTierPair` (both default `false`, warn-only).
+- **Unclassified privileged role detection**: Entra ID/Identity Governance collectors report roles with no classification match (`UnclassifiedPrivilegedRole`) instead of silently dropping them.
+- **REST-only Graph mode** (`UseInvokeRestMethodOnly`) and an offline **Configuration Wizard/Docs site** for creating and editing `EntraOpsConfig.json` without the Graph PowerShell SDK.
+- Identity Governance `AadApplication`/`SharePointOnline` access-package resources are now tiered by inherited `ResourceApps` classification / site role; `Classification_ApiPermissionOverwrites.json` for ResourceApps.
+- Documented trust model in `SECURITY.md`.
+
+### Changed
+- **Azure RBAC classification hardened**: Authorization (role assignment/definition write/delete) is classified Management Plane at any non-Control-Plane scope, not just enumerated Tier 1 scopes; constrained-delegation downgrade now also honors role-definition-level ABAC conditions and per-action allow-lists; `Classification_RoleDefinitionOverwrites.json` `RbacSystem: "Azure"` entries are now applied; `ConditionEvaluation.Status` renamed `AuthorizationNotClassifiedAtScope`.
+- Service-scoped `Classification_RoleDefinitionOverwrites.json` entries now replace only the named service instead of the whole assignment; classification/provenance tags standardized (`JSONwithAction`, Identity Governance `Assigned*` tags).
+- Thread-safe session caches (`GraphCache`, token cache, retry stats) for parallel object resolution; reduced Sentinel WatchList payload size; improved reporting/Tenant Governance workflow reliability and CSV export safety (formula-injection protection).
+- Self-update source is explicit (`AutomatedEntraOpsUpdate.Branch` defaults to `main`, pinnable to a tag/SHA); disabled automation switches (`ApplyAutomatedReportingGeneration`, `ApplyPrivilegedElmCatalogProtection`, `PublishReportsAsRelease`) are now always written to workflows instead of only when enabled.
+
+### Security
+- **Immutable GitHub Action references**: workflow actions pinned to full commit SHAs, enforced by CI, updated via weekly Dependabot checks.
+- **Private-repository enforcement**: `Git-Push` and the reporting workflow refuse to publish generated tenant data (Privileged EAM, Tenant Governance snapshots, reports) to a public repository.
+- **`ValidatePattern` GUID validation** for tenant/object identifiers in `Connect-EntraOps` and `Get-EntraOpsPrivilegedEntraObject`.
+- **Strict validation of generated Privileged EAM artifacts** before commit (`-FailOnContradictoryTierPair`, default warn-only).
+
+### Fixed
+- Workflow `schedule` and `workflow_run` triggers can now be disabled and re-enabled reliably (previously one-way); `Update-EntraOpsRequiredWorkflowParameters` no longer fails on non-deployment workflows like `Test-EntraOps.yaml`.
+- `Disconnect-EntraOps` fully clears tenant context, PIM cache, and retry statistics.
+- `Update-EntraOpsClassificationFiles` fails on a partial/invalid template download instead of mixing versions; `Update-EntraOps` validates target folders before removal and cleans up temp clones.
+- Duplicate Privileged EAM assignment rows deduplicated by stable `RoleAssignmentInstanceId` plus nesting path; pull workflow rejects malformed/duplicate/unstable generated artifacts.
+- Cross-tenant object resolution no longer clobbers a resolved home-tenant placeholder with an `unknown` one; EAM Dashboard "Privileged Type" now correctly detects foreign objects via `ObjectTenantId`.
+- `Push-EntraOpsLogsIngestionAPI` chunk-size estimation fixed (`413` errors) and payloads gain a `TimeGenerated` timestamp.
+- Stable JSON shapes: `RolePermissions`/`AuthorizedApiCalls` are always arrays; "Catalog creator" role is classified again; duplicate Security Exposure Management warning removed.
+- `PrivilegedEAM_CustomTable`/`PrivilegedEAM_WatchLists` parsers: `EligibilityBy` now recognizes Azure PIM-eligible assignments (bumped to v3/v4).
+- Configuration Analyzer dark theme and snapshot change-table layout fixes; reporting landing page mobile navigation and CSP fixes.
+- Administrative protection synchronization surfaces partial-sync failures; Control Plane scope arrays preserve single-item array semantics; cross-platform cache path fixes.
+
 ## [0.8.0] - 2026-06-24
 ### Added
+- **Classification overwrites for role actions (`Classification_RoleActionOverwrites.json`)**: New mechanism to down- or upgrade the tier level of individual role definition actions (e.g., reclassify `microsoft.directory/bitlockerKeys/key/read` on scope `/*` from ControlPlane to ManagementPlane). The file is only read from the tenant-specific classification folder (`Classification/<TenantName>/`) alongside the other customized classification files — a copy in `Templates/` is intentionally ignored. Every entry requires a `Justification` to document the classification change and supports an optional `Service` as additional classification context. Role action overwrites are applied at classification file generation time by `Update-EntraOpsClassificationControlPlaneScope`: the overwritten action is removed from all classification entries with overlapping scope across all tiers and consolidated into a single entry in the target tier, which is baked into the generated tenant-specific `Classification_*.json` files — shipped templates are never modified. The `Get-EntraOpsPrivilegedEAM*` cmdlets consume the adjusted files without any runtime overwrite handling. An empty skeleton file is created automatically by `Update-EntraOpsClassificationControlPlaneScope`. Supported for EntraID, DeviceManagement, Defender, IdentityGovernance, and ResourceApps RBAC systems. A pre-filled template with examples for downgrading application-, device-, and user-related Control Plane role actions and API permissions to Management Plane is available in `Samples/Classification_RoleActionOverwrites.json`.
+- **Classification overwrites for role definitions (`Classification_RoleDefinitionOverwrites.json`)**: New mechanism to down- or upgrade the tier level of an entire role definition, identified by `RoleDefinitionId` and/or `RoleDefinitionName` with optional scope filter (`RoleAssignmentScopeName`). A tenant-specific file in `Classification/<TenantName>/` is preferred; otherwise the shipped file in `Classification/Templates/` is used as fallback. Overwritten role assignments replace the action-based classification and are tagged with `TaggedBy = "RoleDefinitionOverwrites"` including the `Justification` and optional `Service`. Applied overwrites are highlighted in the summary output.
+- **Role action overwrite support for all RBAC systems in `Update-EntraOpsClassificationControlPlaneScope`**: `-ClassificationParameterScope` now supports Defender, IdentityGovernance, and ResourceApps in addition to EntraID and DeviceManagement (default is all). EntraID and DeviceManagement keep their existing `*.Param.json` parameter file logic (placeholder substitution); role action overwrites are applied to the resulting tenant-specific classification files. For Defender, IdentityGovernance, and ResourceApps, a tenant-specific classification file is only generated (from the shipped template in `Classification/Templates/`) when role action overwrites for that RBAC system exist in the tenant-specific `Classification_RoleActionOverwrites.json` — otherwise the classification cmdlets keep using the shipped template.
+- **Privileged Entitlement Management catalog protection (`Update-EntraOpsPrivilegedUnprotectedElmCatalog`)**: New cmdlet that syncs the privilege level (Preview) of Entitlement Management (Access Package) catalogs based on the EntraOps classification (IdentityGovernance EAM data) via Microsoft Graph beta API: catalogs classified as Control Plane scope are protected as "privileged" catalog, already protected catalogs are kept unchanged, and catalogs which are no longer in Control Plane scope are reverted to "standard". Includes a sync summary (Protect/Keep/Revert with before/after privilege level) similar to `Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`. Privileged catalogs enforce stricter controls (app writes require directory role management permissions, modifications limited to Global Administrators or Privileged Role Administrators with Identity Governance Administrator role, no new auto-assignment policies). Caution: requires the elevated Graph permission `EntitlementManagement.ReadWrite.All`, and manually protected catalogs without Control Plane scope in EntraOps will also be reverted to "standard". Execution in the push pipeline (`Push-EntraOpsPrivilegedEAM.yaml`) and permission assignment by `New-EntraOpsWorkloadIdentity` are gated by the new `AutomatedElmCatalogProtection.ApplyPrivilegedElmCatalogProtection` setting in `EntraOpsConfig.json` (default `false`). Note: updating the privilege level protects the catalog itself, but existing role assignments to the catalog remain classified as Control Plane and should be removed as soon as possible.
 - **BloodHound OpenGraph exporter (`Export-EntraOpsPrivilegedEAMBloodHound`)**: New cmdlet that converts EntraOps Privileged EAM JSON into a BloodHound OpenGraph payload for enriching an AzureHound-ingested tenant graph. Acts as an AzureHound enrichment layer: reuses AzureHound-compatible kinds for principals, devices, groups, and Entra ID role definitions, and adds `EO_`-prefixed node/edge kinds for role assignments, assignment scope, classification evidence, PAW/device ownership, sponsor links, identity parent links, and Intune device permissions.
 - **BloodHound OpenGraph extension schema (`Integrations/BloodHound/OpenGraph_EntraOps_Extension_Schema.json`)**: Defines all EntraOps-owned node kinds (`EO_*RoleAssignment`, `EO_*Role`, `EO_AdministrativeUnit`) and relationship kinds used by the exporter, including active/eligible role relationships, assignment-context edges, scope edges, administrative unit membership, PAW/device ownership, sponsorship, identity parentage, and Intune role permission paths.
 - **BloodHound Cypher queries (`Integrations/BloodHound/EntraOps-queries.json`)**: Query library for BloodHound UI / queries.specterops.io covering Tier Zero administrative units, PAW usage by Tier Zero principals, Intune role assignments with device-wipe permissions, nested role assignments, PIM-for-Groups edges, sponsor relationships, and EntraOps tier classification edges.
@@ -18,11 +62,9 @@ All essential changes on EntraOps will be documented in this changelog.
 - **Enhanced `Get-EntraOpsClassificationControlPlaneObjects`**: Improved function descriptions, detailed parameter documentation, and support for additional classification sources
 
 ### Changed
+- **Hardcoded Control Plane roles migrated to `Classification_RoleDefinitionOverwrites.json`**: The previously hardcoded `ControlPlaneRolesWithoutRoleActions` handling in `Get-EntraOpsPrivilegedEAMEntraId` (AI Administrator, Directory Synchronization Accounts, On Premises Directory Sync Account, Microsoft Entra Joined Device Local Administrator, Privileged Authentication Administrator) has been moved to the new role definition overwrites template, including documented justifications and service classifications. These roles are now fully customizable per tenant and the `TaggedBy` value changed from `ControlPlaneWithoutRoleActions` to `RoleDefinitionOverwrites`.
 - **Classification templates**: Updated to latest classification templates
 - **EntraOps Privileged EAM Overview workbook**: Updated resource path references and query enhancements for improved dashboard accuracy
-
-### Breaking Changes
-- **`Classification_ApiPermissions.json` replaces `Classification_AppRoles.json`**: The API permissions classification template has been renamed from `Classification_AppRoles.json` to `Classification_ApiPermissions.json` to reflect support for all first-party Microsoft APIs (not only Microsoft Graph) and delegated/application permissions. The old template file is removed. Update any references to `AppRoles` in `EntraOps.config` or automation that reads or writes `Classification_AppRoles.json` to use `Classification_ApiPermissions.json`.
 
 ### Fixed
 - **`Update-EntraOpsClassificationControlPlaneScope` — missing AU scopes for unprotected devices and groups**: Administrative Units assigned to unprotected devices (no RMAU membership) and unprotected groups were previously ignored when building scope entries. Only RMAU AUs from *protected* objects were collected, so unprotected objects only triggered the directory-level `/` fallback without contributing their own AU scopes. Now, AUs from unprotected devices and unprotected groups are also included in the scope list alongside the `/` fallback.
@@ -144,13 +186,13 @@ All essential changes on EntraOps will be documented in this changelog.
 ## [0.4] - 2025-05-30
 ### Added
 - Support for Role Management Provider "Defender" (Unified RBAC for Microsoft Defender XDR)
-  - Currently, the API does not include details on Device Groups or Scope. Therefore, the RBAC system is not covered by using default settings (EntraOps.config) to avoid wrong classification by missing consideration of scope.
+  - Currently, the API does not include details on Device Groups or Scope. Therefore, the RBAC system is not covered by using default settings (`EntraOpsConfig.json`) to avoid wrong classification by missing consideration of scope.
 
 ## [0.3.4] - 2024-12-21
 ### Fixed
 - Type of Owners field is inconsistent [#31](https://github.com/Cloud-Architekt/EntraOps/issues/31)
   - Overall fix for multi-value fields as result of `Get-EntraOpsPrivilegedEntraObjects` to ensure valid and consistency of array type
-  
+
 ## [0.3.3] - 2024-11-27
 
 ### Added
@@ -159,7 +201,7 @@ All essential changes on EntraOps will be documented in this changelog.
 
 ### Changed
 - Added tenant root group as default for high privileged scopes
-- Support for multiple scopes for high privileged 
+- Support for multiple scopes for high privileged
 - Improvement in visualization of Privileged EAM Workbook
 - Support to identify Privileged Auth Admin as Control Plane
 
@@ -191,26 +233,26 @@ Added support for Intune RBAC (Device Management) and new workbook for (Privileg
 ### Changed
 - Sensitive Directory Roles without role actions will be particular classified within classification process in `Export-EntraOpsClassificationDirectoryRoles`
  [#12](https://github.com/Cloud-Architekt/EntraOps/issues/12) [#25](https://github.com/Cloud-Architekt/EntraOps/issues/25)
-- Introduction of `TaggedBy` for `ControlPlaneRolesWithoutRoleActions` to apply Control Plane classification of Microsoft Entra Connect directory roles 
+- Introduction of `TaggedBy` for `ControlPlaneRolesWithoutRoleActions` to apply Control Plane classification of Microsoft Entra Connect directory roles
 
 ## [0.2] - 2024-07-31
-  
+
 Introduction of capabilities to automate assignment of privileges to Conditional Access Groups and (Restricted Management) Administrative Units but also added WatchLists for Workload IDs.
 
 ### Added
 - Automated update of Microsoft Sentinel WatchList Templates [#8](https://github.com/Cloud-Architekt/EntraOps/issues/8)
-- Automated coverage of privileged assets in CA groups and RMAUs [#15](https://github.com/Cloud-Architekt/EntraOps/issues/15) 
-- Advanced WatchLists for Workload Identities [#22](https://github.com/Cloud-Architekt/EntraOps/issues/22) 
+- Automated coverage of privileged assets in CA groups and RMAUs [#15](https://github.com/Cloud-Architekt/EntraOps/issues/15)
+- Advanced WatchLists for Workload Identities [#22](https://github.com/Cloud-Architekt/EntraOps/issues/22)
 
 ### Changed
-- Separated cmdlet for get classification for Control Plane scope [#19](https://github.com/Cloud-Architekt/EntraOps/issues/19) 
+- Separated cmdlet for get classification for Control Plane scope [#19](https://github.com/Cloud-Architekt/EntraOps/issues/19)
 - Added support for -AsSecureString in Az PowerShell (upcoming breaking change) [#20](https://github.com/Cloud-Architekt/EntraOps/issues/20)
 - Added support for granting required permissions for automated assignment to CA and Administrative Unit
 
 ### Fixed
-- Remove Azure from ValidateSet until it's available [#18](https://github.com/Cloud-Architekt/EntraOps/issues/18) 
+- Remove Azure from ValidateSet until it's available [#18](https://github.com/Cloud-Architekt/EntraOps/issues/18)
 
 ## [0.1] - 2024-06-27
-  
+
 _Initial release of EntraOps Privileged EAM with features to automate setup for GitHub repository,
 classification and ingestion of privileges in Microsoft Entra ID, Identity Governance and Microsoft Graph App Roles._

@@ -28,7 +28,7 @@ function Import-EntraOpsGlobalExclusions {
     $GlobalJsonPath = "$FolderClassification/Global.json"
     try {
         if (Test-Path -Path $GlobalJsonPath) {
-            $ExclusionList = (Get-Content -Path $GlobalJsonPath | ConvertFrom-Json -Depth 10).ExcludedPrincipalId
+            $ExclusionList = (Get-Content -Path $GlobalJsonPath -Raw | ConvertFrom-Json -Depth 10).ExcludedPrincipalId
             Write-Verbose "Loaded $($ExclusionList.Count) global exclusions from $GlobalJsonPath"
             return $ExclusionList
         } else {

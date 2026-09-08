@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps PIM Request Flow</title>
+    <meta name="description"
+        content="PIM Request Flow: visualize Entra ID Privileged Identity Management (PIM) role settings as a filterable Sankey flow (role, assignment path, requirement, approval, notification), enriched with access-tier classification to flag privileged roles that can be activated or assigned without MFA or approval." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps PIM Request Flow</span>
+            <span class="sub" id="tenantName">Tenant Governance</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link" href="https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure"
+            target="_blank" rel="noopener noreferrer">PIM docs &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration Analyzer</span></a>
+                <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+                <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+                <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span class="ico">&#9733;</span><span>EIDSCA
+                    Findings</span></a>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span
+                    class="ico">&#8523;</span><span>Access Package Flow</span></a>
+            <div class="nav-item active nav-subitem"><span class="ico">&#128477;&#65038;</span><span>PIM Request Flow</span>
+            </div>
+
+            <div class="nav-group-label">Sections</div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secPimSankey"><span class="ico">&#128477;&#65038;</span><span>PIM
+                    Request Flow</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secPimFlags"><span class="ico">&#9888;</span><span>Risk
+                    Flags</span></div>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; PIM Request
+                    Flow</div>
+                <h1>PIM Request Flow</h1>
+                <p>Visualize Entra ID Privileged Identity Management (PIM) role settings from a captured <a
+                        href="../ConfigurationAnalyzer/index.html">Tenant Governance Snapshot</a> as a filterable
+                    Sankey flow - <b>Role &rarr; Assignment path &rarr; Requirement &rarr; Approval &rarr;
+                        Notification</b> - the same pattern as <a
+                        href="../ConditionalAccessAnalysis/index.html">Conditional Access Analysis</a>'s CA Policy
+                    Flow and <a href="../AccessPackageFlow/index.html">Access Package Flow</a>. Every role is
+                    expanded into up to three assignment paths - <i>activating</i> an eligible assignment
+                    (self-service PIM request), and an administrator directly <i>assigning</i> an eligible or active
+                    assignment - each clustered by the input requirements, approval workflow and notification
+                    settings governing it. Roles are enriched with their access tier (from the optional <a
+                        href="../EamDashboard/index.html">EAM Dashboard</a> classification) to help identify
+                    privileged roles that can be activated or assigned without MFA or approval.
+                </p>
+            </div>
+
+            <div class="card-pad" id="pimEmptyState">
+                <p><strong>No Configuration Analyzer dataset found.</strong> This app reuses the same dataset as <a
+                        href="../ConfigurationAnalyzer/index.html">Configuration Analyzer</a> - generate
+                    <code>../ConfigurationAnalyzer/data/configuration-analyzer-data.js</code> from your repository's
+                    git history first:
+                </p>
+                <p><code>Import-Module ./EntraOps -Force; New-EntraOpsTenantGovernanceConfigurationAnalyzerData</code>
+                </p>
+                <p>The Tenant Governance Snapshot feature must be enabled
+                    (<code>EntraOpsConfig.json</code> &rsaquo;
+                    <code>TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot</code>) and at least one snapshot
+                    must have captured the <code>microsoft.entra.roleSetting</code> (and, for role descriptions,
+                    <code>microsoft.entra.roleDefinition</code>) resource types with
+                    <code>Save-EntraOpsTenantGovernanceSnapshotJson</code>. Then reload this page.
+                </p>
+                <p>Optionally generate <code>../EamDashboard/data/eam-dashboard-data.js</code>
+                    (<code>New-EntraOpsPrivilegedEamDashboardData</code>) too, so every role can be enriched with its
+                    Enterprise Access Model tier - without it, every role shows as Unclassified and tier-dependent
+                    filters/flags are unavailable.
+                </p>
+            </div>
+
+            <div id="pimContent" class="hidden">
+
+                <div class="grid cols-4" style="margin-bottom:16px;">
+                    <button class="stat stat-action" type="button" data-pim-metric="all" aria-pressed="true">
+                        <div class="stat-accent"></div>
+                        <div class="stat-label">Roles with PIM settings</div>
+                        <div class="stat-value" id="pimStatRoles">0</div>
+                    </button>
+                    <button class="stat stat-action" type="button" data-pim-metric="noMfaActivation" aria-pressed="false">
+                        <div class="stat-accent"></div>
+                        <div class="stat-label">Privileged roles activatable without MFA</div>
+                        <div class="stat-value" id="pimStatNoMfa">0</div>
+                    </button>
+                    <button class="stat stat-action" type="button" data-pim-metric="noApprovalActivation" aria-pressed="false">
+                        <div class="stat-accent"></div>
+                        <div class="stat-label">Privileged roles activatable without approval</div>
+                        <div class="stat-value" id="pimStatNoApproval">0</div>
+                    </button>
+                    <button class="stat stat-action" type="button" data-pim-metric="anyRisk" aria-pressed="false">
+                        <div class="stat-accent"></div>
+                        <div class="stat-label">Roles with risk flags</div>
+                        <div class="stat-value" id="pimStatFlagged">0</div>
+                        <div class="stat-sub">Role tier data: <span id="pimStatTierData">not generated</span></div>
+                    </button>
+                </div>
+
+                <!-- ============================ PIM Request Flow ============================ -->
+                <section class="card" style="margin-bottom:16px;" id="secPimSankey">
+                    <div class="card-head">PIM Request Flow
+                        <span class="hint">Role &rarr; Assignment path &rarr; Requirement &rarr; Approval &rarr;
+                            Notification. Click a node to trace it, click the background to clear.</span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter">
+                                <label for="pimSnapshot">Snapshot</label>
+                                <select id="pimSnapshot"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="pimFltTier">Role access level</label>
+                                <select id="pimFltTier">
+                                    <option value="">All levels</option>
+                                    <option value="ControlPlane">Control Plane</option>
+                                    <option value="ManagementPlane">Management Plane</option>
+                                    <option value="UserAccess">User Access</option>
+                                    <option value="Unclassified">Unclassified / unresolved</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="pimFltApproval">Activation approval</label>
+                                <select id="pimFltApproval">
+                                    <option value="">All roles</option>
+                                    <option value="required">Approval required</option>
+                                    <option value="none">No approval required</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="pimFltRequirement">Requirement</label>
+                                <select id="pimFltRequirement"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="pimFltFlag">Risk flag</label>
+                                <select id="pimFltFlag"></select>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter grow">
+                                <label>Assignment path</label>
+                                <div class="ca-toggle-row" id="pimPathToggles"></div>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter grow">
+                                <label for="pimFltSearch">Search</label>
+                                <div class="search">
+                                    <span class="search-ico">&#128269;</span>
+                                    <input type="text" id="pimFltSearch"
+                                        placeholder="Role, requirement, approver, notification&hellip;" />
+                                </div>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:6px;">
+                            <div class="eam-filter grow">
+                                <label>Columns</label>
+                                <div class="ca-toggle-row" id="pimColToggles"></div>
+                            </div>
+                            <div class="eam-filter" style="align-self:flex-end;">
+                                <button class="btn small hidden" id="pimClearTrace">Clear node trace</button>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;align-items:flex-end;">
+                            <div class="eam-filter grow"><span class="muted" id="pimFreshness"></span><span class="muted" id="pimFilterSummary"></span></div>
+                            <div class="eam-filter"><button class="btn small" type="button" id="pimResetFilters">Reset filters</button></div>
+                            <div class="eam-filter"><button class="btn small" type="button" id="pimExportFiltered">Export CSV + JSON</button></div>
+                        </div>
+                        <div class="legend" style="margin-bottom:6px;">
+                            <span class="item"><span class="swatch" style="background:#a4262c;"></span>Control Plane
+                                role / path with a fail-level flag</span>
+                            <span class="item"><span class="swatch" style="background:#c07807;"></span>Management
+                                Plane role / path with a warn-level flag</span>
+                            <span class="item"><span class="swatch" style="background:#0e700e;"></span>User Access
+                                role / approval required</span>
+                            <span class="item"><span class="swatch" style="background:#0078d4;"></span>Activation
+                                path (no flag)</span>
+                            <span class="item"><span class="swatch" style="background:#a19f9d;"></span>Unclassified /
+                                unresolved</span>
+                        </div>
+                        <div class="diagram-wrap">
+                            <svg id="pimSankey"></svg>
+                            <div id="pimSankeyEmpty" class="muted hidden" style="padding:24px;"></div>
+                        </div>
+                        <div id="pimFlowDetail" class="hidden" style="margin-top:12px;"></div>
+                    </div>
+                </section>
+
+                <!-- ============================ Risk Flags ============================ -->
+                <section class="card" style="margin-bottom:16px;" id="secPimFlags">
+                    <div class="card-head">Risk Flags
+                        <span class="hint">Roles where an activation/assignment path looks inconsistent with the
+                            privilege of the role itself, or where PIM settings are internally inconsistent</span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter">
+                                <label for="pimFlagGroup">Group flags by</label>
+                                <select id="pimFlagGroup">
+                                    <option value="none">No grouping</option>
+                                    <option value="tier" selected>Access level</option>
+                                    <option value="service">Service / category</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="pimFlagSort">Sort flags by</label>
+                                <select id="pimFlagSort">
+                                    <option value="severity">Severity</option>
+                                    <option value="tier">Access level</option>
+                                    <option value="service">Service / category</option>
+                                    <option value="role">Role name</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter" style="align-self:flex-end;">
+                                <label>Groups</label>
+                                <div class="pim-risk-actions">
+                                    <button class="btn small" id="pimExpandAllRiskGroups" type="button">Expand all</button>
+                                    <button class="btn small" id="pimCollapseAllRiskGroups" type="button">Collapse all</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter grow">
+                                <label for="pimFlagSearch">Search risk flags</label>
+                                <div class="search">
+                                    <span class="search-ico">&#128269;</span>
+                                    <input type="text" id="pimFlagSearch" placeholder="Role, service, assignment path or flag&hellip;" />
+                                </div>
+                            </div>
+                            <div class="eam-filter" style="align-self:flex-end;"><button class="btn small" id="pimExportRiskFlags" type="button">Export CSV + JSON</button></div>
+                        </div>
+                        <div id="pimFlagsBody"></div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Reuses the Configuration Analyzer's dataset (generated by
+         New-EntraOpsTenantGovernanceConfigurationAnalyzerData) instead of duplicating it. It
+         already embeds every captured resource type, including microsoft.entra.roleSetting and
+         microsoft.entra.roleDefinition, so no dedicated generator is needed for this app. -->
+    <script src="../ConfigurationAnalyzer/data/configuration-analyzer-data.js"></script>
+    <!-- Complete directory-role classification catalog generated with Classification Explorer. -->
+    <script src="../ClassificationExplorer/data/tier-map.js"></script>
+    <!-- Optional: EAM Dashboard's per-object tier/classification dataset. Enriches the role
+         catalog with tenant/scope-specific assignment evidence and resolves activation approvers. -->
+    <script src="../EamDashboard/data/eam-dashboard-data.js"></script>
+    <!-- Shared snapshot/blob parsing model. -->
+    <script src="../ConfigurationAnalyzer/js/core.js"></script>
+    <script src="../shared/report-utils.js"></script>
+    <!-- d3 + d3-sankey vendored locally so the app is fully self-contained and
+         works offline / behind the strict CSP above. -->
+    <script src="assets/vendor/d3.min.js"></script>
+    <script src="assets/vendor/d3-sankey.min.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="../shared/object-inspector.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

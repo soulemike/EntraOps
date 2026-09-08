@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Docs</title>
+    <meta name="description"
+        content="Documentation for EntraOps: get started guides, configuration reference and feature deep-dives for Core, Privileged EAM and Reportings." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/theme.js"></script>
+    <link rel="stylesheet" href="css/theme.css" />
+</head>
+
+<body data-page="home">
+    <header class="appbar">
+        <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Docs</span>
+            <span class="sub">Enterprise Access Model</span>
+        </div>
+        <div class="docs-search">
+            <input type="search" id="docsSearchInput" class="docs-search-input" placeholder="Search docs… (press /)" aria-label="Search documentation" autocomplete="off" />
+            <div class="docs-search-results" id="docsSearchResults" hidden></div>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link hide-narrow" href="../Reports/index.html">Reporting apps &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <nav class="nav" id="nav">
+            <div class="nav-group-label">Documentation</div>
+            <a class="nav-item top active" data-page="home" href="index.html"><span class="ico">&#8962;</span><span>Overview</span></a>
+            <a class="nav-item top" data-page="get-started" href="get-started/index.html"><span class="ico">&#9873;</span><span>Get
+                    Started</span></a>
+            <a class="nav-item top" data-page="configuration" href="configuration/index.html"><span class="ico">&#9881;</span><span>Configuration Wizard</span></a>
+            <a class="nav-item top" data-page="changelog" href="changelog/index.html"><span class="ico">&#128203;</span><span>Changelog</span></a>
+
+            <div class="nav-group-label">Feature areas</div>
+            <a class="nav-item top" data-page="core" href="core/index.html"><span class="ico">&#9881;</span><span>Core</span></a>
+            <a class="nav-item top" data-page="tenant-governance" href="tenant-governance/index.html"><span class="ico">&#127970;</span><span>Tenant Governance</span></a>
+            <a class="nav-item top" data-page="privileged-eam" href="privileged-eam/index.html"><span
+                    class="ico">&#128737;</span><span>Privileged EAM</span></a>
+            <a class="nav-item top" data-page="reportings" href="reportings/index.html"><span
+                    class="ico">&#128202;</span><span>Reportings</span></a>
+        </nav>
+
+        <div class="main-wrap">
+            <main class="main">
+                <div class="page-head">
+                    <div class="eyebrow">EntraOps Docs</div>
+                    <h1>Documentation</h1>
+                </div>
+
+                <div class="prose" data-md="overview"></div>
+
+                <div class="tiles">
+                    <a class="tile" href="get-started/index.html">
+                        <div class="tile-head">
+                            <span class="tile-ico" style="background:var(--brand);">&#9873;</span>
+                            <h2>Get Started</h2>
+                        </div>
+                        <p>Choose how you want to run EntraOps (local/interactive vs. automated in GitHub), sign in,
+                            create your configuration file, and deploy the automation end to end.</p>
+                        <div class="tags">
+                            <span class="tag">Prerequisites</span>
+                            <span class="tag">Sign-in options</span>
+                            <span class="tag">Zero-config quick start</span>
+                            <span class="tag">GitHub deployment</span>
+                        </div>
+                        <span class="open">Start here &rarr;</span>
+                    </a>
+
+                    <a class="tile" href="core/index.html">
+                        <div class="tile-head">
+                            <span class="tile-ico" style="background:#5c2d91;">&#9881;</span>
+                            <h2>Core</h2>
+                        </div>
+                        <p>Authentication options, the EntraOpsConfig.json file reference, classification of
+                            objects by Custom Security Attributes or Alternate Tier Level
+                            Attributes, and updating the module.</p>
+                        <div class="tags">
+                            <span class="tag">Configuration</span>
+                            <span class="tag">Authentication</span>
+                            <span class="tag">GitHub Custom Agents</span>
+                            <span class="tag">Updates &amp; CI/CD</span>
+                        </div>
+                        <span class="open">Read Core docs &rarr;</span>
+                    </a>
+
+                    <a class="tile" href="tenant-governance/index.html">
+                        <div class="tile-head">
+                            <span class="tile-ico" style="background:#0f6cbd;">&#127970;</span>
+                            <h2>Tenant Governance</h2>
+                        </div>
+                        <p>Optional preview support for cross-tenant delegated administration, UTCM configuration
+                            snapshots, Git-backed change history, automation, and Configuration Analyzer reporting.</p>
+                        <div class="tags">
+                            <span class="tag">Optional preview</span>
+                            <span class="tag">Cross-tenant access</span>
+                            <span class="tag">UTCM snapshots</span>
+                            <span class="tag">Configuration Analyzer</span>
+                        </div>
+                        <span class="open">Explore Tenant Governance &rarr;</span>
+                    </a>
+
+                    <a class="tile" href="privileged-eam/index.html">
+                        <div class="tile-head">
+                            <span class="tile-ico" style="background:var(--tier-control);">&#128737;</span>
+                            <h2>Privileged EAM</h2>
+                        </div>
+                        <p>Collect and export classified role assignments, filter and query the results, customize
+                            classification with overwrite files, Identity Governance delegation, and automatic
+                            Control Plane scope updates.</p>
+                        <div class="tags">
+                            <span class="tag">Collection &amp; export</span>
+                            <span class="tag">Classification overwrites</span>
+                            <span class="tag">Automated protection</span>
+                            <span class="tag">Control Plane scope</span>
+                        </div>
+                        <span class="open">Read Privileged EAM docs &rarr;</span>
+                    </a>
+
+                    <a class="tile" href="reportings/index.html">
+                        <div class="tile-head">
+                            <span class="tile-ico" style="background:var(--tier-management);">&#128202;</span>
+                            <h2>Reportings</h2>
+                        </div>
+                        <p>Ten static Reporting apps for classification, privileged identities, access paths, tier
+                            breaches, history, tenant configuration, Conditional Access, EIDSCA, PIM, and access
+                            packages, plus Microsoft Sentinel and BloodHound integrations.</p>
+                        <div class="tags">
+                            <span class="tag">Reporting apps</span>
+                            <span class="tag">Sentinel &amp; XDR</span>
+                            <span class="tag">BloodHound</span>
+                        </div>
+                        <span class="open">Read Reportings docs &rarr;</span>
+                    </a>
+
+                    <a class="tile" href="changelog/index.html">
+                        <div class="tile-head">
+                            <span class="tile-ico" style="background:#5c2d91;">&#128203;</span>
+                            <h2>Changelog</h2>
+                        </div>
+                        <p>Browse every EntraOps release, jump straight to a specific version, and see what changed
+                            across versions - generated directly from the repository's CHANGELOG.md.</p>
+                        <div class="tags">
+                            <span class="tag">Version history</span>
+                            <span class="tag">Jump to version</span>
+                        </div>
+                        <span class="open">Browse Changelog &rarr;</span>
+                    </a>
+                </div>
+
+                <p class="foot-note">Looking for the project overview or key features? See the <a
+                        href="https://github.com/Cloud-Architekt/EntraOps#readme" target="_blank"
+                        rel="noopener noreferrer">README</a>.</p>
+            </main>
+        </div>
+    </div>
+
+    <div class="ai-disclaimer">&#9888; This documentation is generated with AI assistance and may contain inaccuracies. Verify anything critical against the <a href="https://github.com/Cloud-Architekt/EntraOps" target="_blank" rel="noopener noreferrer">EntraOps source code</a> or open an issue if you spot a mistake.</div>
+
+    <script src="data/content.js"></script>
+    <script src="js/markdown.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/search.js"></script>
+</body>
+
+</html>

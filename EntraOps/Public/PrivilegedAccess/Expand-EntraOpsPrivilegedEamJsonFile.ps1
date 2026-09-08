@@ -34,6 +34,7 @@ function Expand-EntraOpsPrivilegedEAMJsonFile {
                     'EAMTierLevelTagValue'            = $EAMTierLevel.EAMTierLevelTagValue
                     'Category'                        = $Definition.Category
                     'Service'                         = $Definition.Service
+                    'ActionType'                      = $Definition.ActionType
                     'ResourceAppId'                   = $Definition.ResourceAppId
                     'ResourceScope'                   = $Definition.ResourceScope
                     'RoleAssignmentScopeName'         = $Definition.RoleAssignmentScopeName
@@ -55,6 +56,7 @@ function Expand-EntraOpsPrivilegedEAMJsonFile {
                     'EAMTierLevelTagValue'            = $TierLevelDefinition.EAMTierLevelTagValue
                     'Category'                        = $TierLevelDefinition.Category
                     'Service'                         = $TierLevelDefinition.Service
+                    'ActionType'                      = $TierLevelDefinition.ActionType
                     'ResourceAppId'                   = $TierLevelDefinition.ResourceAppId
                     'ResourceScope'                   = $TierLevelDefinition.ResourceScope
                     'RoleAssignmentScopeName'         = $ScopeName
@@ -76,6 +78,7 @@ function Expand-EntraOpsPrivilegedEAMJsonFile {
                     'EAMTierLevelTagValue'            = $TierLevelRoleScope.EAMTierLevelTagValue
                     'Category'                        = $TierLevelRoleScope.Category
                     'Service'                         = $TierLevelRoleScope.Service
+                    'ActionType'                      = $TierLevelRoleScope.ActionType
                     'ResourceAppId'                   = $TierLevelRoleScope.ResourceAppId
                     'ResourceScope'                   = $TierLevelRoleScope.ResourceScope
                     'RoleAssignmentScopeName'         = $TierLevelRoleScope.RoleAssignmentScopeName

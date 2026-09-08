@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Access Path Map</title>
+    <meta name="description"
+        content="APM-style graph visualization of the EntraOps OpenGraph model: explore nodes, edges, classification enrichment and Enterprise Access Model tier-breach attack paths." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Access Path Map</span>
+            <span class="sub" id="tenantName">BloodHound OpenGraph model</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps/blob/main/Integrations/BloodHound/README.md"
+            target="_blank" rel="noopener noreferrer">Discover BloodHound integration &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <div class="nav-item active"><span class="ico">&#10565;</span><span>Access Path Map</span></div>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration
+                    Analyzer</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+                <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span class="ico">&#9733;</span><span>EIDSCA
+                    Findings</span></a>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span class="ico">&#8523;</span><span>Access
+                    Package Flow</span></a>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span class="ico">&#128477;&#65038;</span><span>PIM Request
+                    Flow</span></a>
+
+            <div class="nav-group-label">Views</div>
+            <div class="nav-item view-item active" data-view="tier0" role="button" tabindex="0"><span
+                    class="ico">&#9679;</span><span>Tier 0
+                    attack paths</span><span class="count" id="cnt-tier0"></span></div>
+            <div class="nav-item view-item" data-view="breach" role="button" tabindex="0"><span
+                    class="ico">&#9650;</span><span>All tier breach
+                    paths</span><span class="count" id="cnt-breach"></span></div>
+            <div class="nav-item view-item" data-view="all" role="button" tabindex="0"><span
+                    class="ico">&#8862;</span><span>Full
+                    graph</span><span class="count" id="cnt-all"></span></div>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; Access Path Map
+                </div>
+                <h1>Access Path Map</h1>
+                <p>APM-style graph exploration of the <strong>EntraOps OpenGraph model</strong>: the same nodes
+                    and edges the BloodHound integration ingests &mdash; principals, roles, role assignments, scopes,
+                    administrative units, devices and their classification enrichment. A <strong>tier breach attack
+                        path</strong> follows the Tier Breach Analyzer rules: a principal on a lower (less privileged)
+                    tier reaching a higher-tier service through a role assignment. A <strong>known attack path</strong>
+                    is a different, narrower signal: the role or role assignment matches a documented technique from
+                    the <a href="../ClassificationExplorer/index.html#attackpaths" target="_blank"
+                        rel="noopener noreferrer">Classification
+                        Explorer's curated Attack Paths catalog</a> &mdash; a path can be a tier breach without being
+                    documented, and vice versa. Click nodes and edges for full details.</p>
+            </div>
+
+            <!-- Filters (TierBreachAnalyzer-like) -->
+            <section class="card card-pad apm-controls" style="margin-bottom:16px;">
+                <div class="controls-row">
+                    <div class="control-group">
+                        <label>RBAC systems</label>
+                        <div class="checks" id="systemChecks"></div>
+                    </div>
+                    <div class="control-group">
+                        <label>Principal types</label>
+                        <div class="checks" id="typeChecks"></div>
+                    </div>
+                    <div class="control-group">
+                        <label>Relationships</label>
+                        <div class="checks" id="edgeChecks"></div>
+                    </div>
+                    <div class="control-group">
+                        <label>Attack paths</label>
+                        <div class="checks">
+                            <label
+                                title="Only show roles/role assignments matching a documented technique from the Classification Explorer's Attack Paths catalog"><input
+                                    type="checkbox" id="attackPathsOnly" /> Only documented attack paths</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="controls-row" style="margin-top:12px;">
+                    <div class="control-group grow">
+                        <label>Search</label>
+                        <div class="search">
+                            <span class="search-ico">&#128269;</span>
+                            <input type="text" id="search" placeholder="Filter by node name, role or scope&hellip;" />
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stats -->
+            <div class="grid cols-4" id="stats" style="margin-bottom:16px;"></div>
+
+            <!-- Graph -->
+            <section class="card" style="margin-bottom:16px;">
+                <div class="card-head">Attack path graph
+                    <span class="chip brand hidden" id="graphFocus"></span>
+                    <button class="btn small hidden" id="clearFocus">Clear focus</button>
+                    <span class="chip warn hidden" id="graphTruncated"
+                        title="The graph is capped for rendering performance; refine the filters or search to narrow the view. The attack path edges table below always contains all matching rows."></span>
+                    <span class="hint">Drag to pan &middot; scroll to zoom &middot; click a node or edge for
+                        details</span>
+                </div>
+                <div class="apm-canvas-wrap">
+                    <svg id="graph"></svg>
+                    <div class="apm-legend" id="legend"></div>
+                    <div class="apm-graph-actions">
+                        <button class="btn small" id="zoomFit">Fit</button>
+                        <button class="btn small" id="relayout">Re-layout</button>
+                    </div>
+                    <div id="graphEmpty" class="apm-empty hidden"></div>
+                </div>
+            </section>
+
+            <!-- Attack path edges table -->
+            <section class="card" id="secPaths">
+                <div class="card-head"><span id="pathTableTitle">Attack path edges</span>
+                    <span class="chip priv" id="pathCount"></span>
+                    <span class="hint">Click a row to focus the path in the graph &middot; &#9734; adds the role incl.
+                        scope to the review list</span>
+                    <button class="btn small" id="exportCsv">Export CSV</button>
+                </div>
+                <div class="table-wrap apm-scroll">
+                    <table class="grid-table" id="pathTable">
+                        <thead>
+                            <tr>
+                                <th>Principal</th>
+                                <th>Type</th>
+                                <th>Principal tier</th>
+                                <th>Relationship</th>
+                                <th>Target</th>
+                                <th>Service tier</th>
+                                <th>Service</th>
+                                <th>Scope</th>
+                                <th>System</th>
+                                <th>PIM</th>
+                                <th title="Add to review list">&#9733;</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="eo-pager hidden" id="pathPager"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Detail drawer (node / edge properties) -->
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" tabindex="-1">
+        <div class="drawer-head">
+            <span class="title" id="drawerTitle"></span>
+            <button class="close" id="drawerClose" aria-label="Close details">&#10005;</button>
+        </div>
+        <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Embedded dataset (generated by New-EntraOpsAccessPathMapData).
+         Optional at load time: when absent the app shows instructions instead of failing. -->
+    <script src="data/access-path-map-data.js"></script>
+    <script src="assets/vendor/d3.min.js"></script>
+    <script src="js/review.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

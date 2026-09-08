@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="270" viewBox="0 0 1200 270" role="img" aria-labelledby="title desc">
+  <title id="title">EntraOps adoption roadmap</title>
+  <desc id="desc">A roadmap from trying EntraOps to a full tiering rollout, with Tenant Governance as an optional branch after customized collection.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5 0 10z" fill="#0078d4"/></marker>
+  </defs>
+  <rect width="1200" height="270" fill="#f8f9fa"/>
+  <g fill="#fff" stroke="#0078d4" stroke-width="2">
+    <rect x="22" y="84" width="160" height="72" rx="4"/>
+    <rect x="212" y="84" width="160" height="72" rx="4"/>
+    <rect x="402" y="84" width="160" height="72" rx="4"/>
+    <rect x="592" y="84" width="160" height="72" rx="4"/>
+    <rect x="782" y="84" width="160" height="72" rx="4"/>
+    <rect x="972" y="84" width="206" height="72" rx="4"/>
+  </g>
+  <g stroke="#0078d4" stroke-width="2.5" fill="none" marker-end="url(#arrow)">
+    <path d="M182 120h27"/><path d="M372 120h27"/><path d="M562 120h27"/><path d="M752 120h27"/><path d="M942 120h27"/>
+  </g>
+  <g font-family="Segoe UI, sans-serif" fill="#242424" text-anchor="middle">
+    <g font-size="15" font-weight="700"><text x="102" y="111">1. Try it</text><text x="292" y="111">2. Verify output</text><text x="482" y="105">3. Customize and</text><text x="482" y="126">automate collection</text><text x="672" y="105">4. Ingest to</text><text x="672" y="126">Sentinel</text><text x="862" y="105">5. Automate</text><text x="862" y="126">protection</text><text x="1075" y="105">6. Full tiering</text><text x="1075" y="126">rollout</text></g>
+    <text x="482" y="210" font-size="14" font-weight="700">Optional: Tenant Governance</text><text x="482" y="230" font-size="13">Cross-tenant delegation and configuration snapshots</text>
+  </g>
+  <path d="M482 156v27" fill="none" stroke="#5c2d91" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+</svg>

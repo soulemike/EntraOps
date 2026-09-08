@@ -56,10 +56,47 @@ function Disconnect-EntraOps {
 
     # Reset session state set by Connect-EntraOps
     $__EntraOpsSession['AuthenticationType'] = $null
+    $__EntraOpsSession.Remove('UseInvokeRestMethodOnly')
+    if ($__EntraOpsSession.NonPimGroupIds) { $__EntraOpsSession.NonPimGroupIds.Clear() }
+    if ($__EntraOpsSession.RetryStatistics) {
+        $__EntraOpsSession.RetryStatistics.TotalRetries = 0
+        $__EntraOpsSession.RetryStatistics.ThrottledRequests = 0
+        $__EntraOpsSession.RetryStatistics.FailedRequests = 0
+        $__EntraOpsSession.RetryStatistics.NonRetryableRequests = 0
+        $__EntraOpsSession.RetryStatistics.FailedRequestDetails = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+        $__EntraOpsSession.RetryStatistics.NonRetryableRequestDetails = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+    }
+
+    # Remove the tenant-derived globals created by Connect-EntraOps so a later cmdlet cannot silently
+    # keep operating against the previous tenant's context, configuration or output folders.
+    $TenantContextVariables = @(
+        'EntraOpsConfig'
+        'TenantIdContext'
+        'TenantNameContext'
+        'ManagingTenantIdContext'
+        'ManagingTenantNameContext'
+        'EntraOpsIncludeObjectDetails'
+        'XdrAvdHuntingAccess'
+        'DefaultFolderClassification'
+        'DefaultFolderClassifiedEam'
+    )
+    Write-Verbose "Removing tenant context variables: $($TenantContextVariables -join ', ')"
+    foreach ($TenantContextVariable in $TenantContextVariables) {
+        Remove-Variable -Name $TenantContextVariable -Scope Global -Force -ErrorAction SilentlyContinue
+    }
+
+    # Remove cached access tokens (Microsoft Graph and ARM) from the module-private session store
+    # and any legacy global variables set by previous module versions
+    Write-Verbose "Removing cached access tokens..."
+    $__EntraOpsSession.MsGraphTokenCache.Clear()
+    $__EntraOpsSession.ArmTokenCache.Clear()
+    Remove-Variable -Name MsGraphAccessToken -Scope Global -Force -ErrorAction SilentlyContinue
+    Remove-Variable -Name UseInvokeRestMethodOnly -Scope Global -Force -ErrorAction SilentlyContinue
 
 
-    # Disconnect from Microsoft Graph SDK if connected
-    $MgContext = Get-MgContext -ErrorAction SilentlyContinue
+    # Disconnect from Microsoft Graph SDK if connected. REST-only installations do not have the
+    # Microsoft.Graph.Authentication module, so the commands are resolved before they are called.
+    $MgContext = if (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue) { Get-MgContext -ErrorAction SilentlyContinue } else { $null }
     if ($null -ne $MgContext) {
         Write-Verbose "Disconnecting from Microsoft Graph..."
         try {
@@ -93,7 +130,7 @@ function Disconnect-EntraOps {
     }
     
     # Validate Microsoft Graph disconnection
-    $MgContextCheck = Get-MgContext -ErrorAction SilentlyContinue
+    $MgContextCheck = if (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue) { Get-MgContext -ErrorAction SilentlyContinue } else { $null }
     if ($null -eq $MgContextCheck) {
         Write-Host "  ✓ Microsoft Graph      : Disconnected" -ForegroundColor Green
     } else {
@@ -136,8 +173,26 @@ function Disconnect-EntraOps {
         Write-Host "  ⚠ Session State        : AuthenticationType still set ($($__EntraOpsSession['AuthenticationType']))" -ForegroundColor Yellow
     }
 
+    # Validate tenant context removal
+    $RemainingTenantContext = @($TenantContextVariables | Where-Object { Get-Variable -Name $_ -Scope Global -ErrorAction SilentlyContinue })
+    $TenantContextCleaned = $RemainingTenantContext.Count -eq 0
+    if ($TenantContextCleaned) {
+        Write-Host "  ✓ Tenant Context       : Cleared ($($TenantContextVariables.Count) variables removed)" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Tenant Context       : Still set ($($RemainingTenantContext -join ', '))" -ForegroundColor Yellow
+    }
+
+    # Validate token cache removal
+    $TokenCacheCount = $__EntraOpsSession.MsGraphTokenCache.Count + $__EntraOpsSession.ArmTokenCache.Count
+    $TokenCacheCleaned = $TokenCacheCount -eq 0
+    if ($TokenCacheCleaned) {
+        Write-Host "  ✓ Token Cache          : Cleared (0 entries)" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Token Cache          : $TokenCacheCount entries remaining" -ForegroundColor Yellow
+    }
+
     # Overall status
-    $AllCleared = ($null -eq $AzContextCheck) -and ($null -eq $MgContextCheck) -and ($MemoryCacheCount -eq 0) -and ($MemoryCacheMetadataCount -eq 0) -and $AuthTypeCleaned
+    $AllCleared = ($null -eq $AzContextCheck) -and ($null -eq $MgContextCheck) -and ($MemoryCacheCount -eq 0) -and ($MemoryCacheMetadataCount -eq 0) -and $AuthTypeCleaned -and $TenantContextCleaned -and $TokenCacheCleaned
     
     Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
     if ($AllCleared) {

@@ -16,7 +16,7 @@
     String to define the prefix of the Conditional Access Inclusion Groups. Default is "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
 
 .PARAMETER RbacSystems
-    Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
+    Array of RBAC systems to be processed. Default is Azure, EntraID, IdentityGovernance, ResourceApps, DeviceManagement, Defender.
 
 .PARAMETER AdminUnitName
     Name of the Administrative Unit which should be used by creating security groups. By default, groups will be created on directory-level and not assigned to an administrative unit.
@@ -42,11 +42,18 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
         [string]$GroupPrefix = "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
+        [ValidateSet("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
+        [Array]$RbacSystems = ("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
         ,
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $False)]
         [String]$AdminUnitName
+        ,
+        [Parameter(Mandatory = $False)]
+        [boolean]$ApplyConditionalAccessTargetGroups = $false
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateRange(0, 1)]
+        [double]$RemovalSafetyThreshold = 0.5
     )
 
     foreach ($RbacSystem in $RbacSystems) {
@@ -75,8 +82,10 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
             Write-Verbose "Create CA target group for $($RbacSystem) - $($TierLevel.AdminTierLevelName)"
 
             $Name = "$GroupPrefix" + $TierLevel.AdminTierLevelName + "." + $($RbacSystem)
-            $Group = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/v1.0/groups?`$filter=DisplayName eq '$Name'" -OutputType PSObject -DisableCache)
+            $Groups = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/v1.0/groups?`$filter=DisplayName eq '$(ConvertTo-EntraOpsODataStringLiteral -Value $Name)'" -OutputType PSObject -DisableCache)
+            $Group = Select-EntraOpsUniqueGraphObject -InputObject $Groups -ObjectDescription "group '$Name'" -AllowNotFound
             if (-not $Group.id) {
+                $CreatedGroupObject = $null
 
                 $GroupParams = @{
                     "@odata.type"   = "#Microsoft.Graph.Group"
@@ -91,7 +100,8 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
                 Write-Host "Creating Conditional Access Target Group $($Name)"
                 if ($AdminUnitName) {
                     try {
-                        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($AdminUnitName)'" -DisableCache).id
+                        $AdministrativeUnits = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$(ConvertTo-EntraOpsODataStringLiteral -Value $AdminUnitName)'" -DisableCache)
+                        $AdminUnitId = (Select-EntraOpsUniqueGraphObject -InputObject $AdministrativeUnits -ObjectDescription "administrative unit '$AdminUnitName'").id
                         $CreatedGroupObject = Invoke-MgGraphRequest -Method "POST" -Body $GroupParams -Uri "https://graph.microsoft.com/beta/administrativeUnits/$($AdminUnitId)/members/" -ErrorAction Stop
                     }
                     catch {
@@ -100,21 +110,36 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
                 }
                 else {
                     try {
-                        $CreatedGroupObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $GroupParams -Uri "/beta/groups"
+                        $CreatedGroupObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $GroupParams -Uri "/beta/groups" -ThrowOnFailure
                     }
                     catch {
                         Write-Error "Can not create Group $($Name)! Error: $_"
                     }
                 }
 
-                # Check if Security Group has been created successfully, wait for delay and retry if not available yet
-                Try {
-                    Do { Start-Sleep -Seconds 1 }
-                    Until ($Group = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/groups/$($CreatedGroupObject.id)" -DisableCache))
-                    Write-Host "$($Group.DisplayName) has been created successfully" -f Green
-                }
-                Catch {
-                    Write-Warning "$($GroupParams.DisplayName) not available yet"
+                # Poll only after group creation returns an object ID.
+                if ($CreatedGroupObject.id) {
+                    # Check if Security Group has been created successfully, wait for delay and retry if not available yet
+                    $Group = $null
+
+                    $MaxPollSeconds = 60
+
+                    for ($i = 0; $i -lt $MaxPollSeconds -and -not $Group; $i++) {
+
+                        $Group = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/groups/$($CreatedGroupObject.id)" -DisableCache -SuppressNotFoundWarning
+
+                        if (-not $Group) { Start-Sleep -Seconds 1 }
+
+                    }
+                    if ($Group) {
+
+                        Write-Host "$($Group.DisplayName) has been created successfully" -ForegroundColor Green
+
+                    } else {
+
+                        Write-Warning "$Name not available after $MaxPollSeconds second(s)."
+
+                    }
                 }
             }
             else {

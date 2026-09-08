@@ -25,7 +25,7 @@
 function Get-EntraOpsPrivilegedEntraIdRoles {
     param (
         [Parameter(Mandatory = $False)]
-        [System.String]$TenantId = (Get-AzContext).Tenant.Id
+        [System.String]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("User", "Group", "ServicePrincipal")]
@@ -88,6 +88,11 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $DirObjLookup = @{}
 
     if ($SampleMode -eq $True) {
+        foreach ($SampleFile in @("$EntraOpsBaseFolder/Samples/AadRoleManagementRoleDefinitions.json", "$EntraOpsBaseFolder/Samples/AadRoleManagementAssignments.json")) {
+            if (-not (Test-Path -LiteralPath $SampleFile)) {
+                throw "Sample file $SampleFile not found — SampleMode requires sample data files under Samples/"
+            }
+        }
         $AadRoleDefinitions = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementRoleDefinitions.json" | ConvertFrom-Json -Depth 10
         $AadRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementAssignments.json" | ConvertFrom-Json -Depth 10
         $AadEligibleRoleAssignments = @()
@@ -123,7 +128,10 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $AadRoleAssignmentsByPim = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$select=id,roleDefinitionId,assignmentType,endDateTime,startDateTime,roleAssignmentOriginId" -OutputType PSObject
         # Fetch Tenant Governance relationships for delegated admin role assignments
         try {
-            $TgRelationships = Invoke-EntraOpsMsGraphQuery -Uri "/beta/directory/tenantGovernance/governanceRelationships"
+            # -ThrowOnFailure so a real API failure (e.g. missing permission) lands in the catch
+            # below instead of silently returning $null - @($null).Count is 1, not 0, so without
+            # this the failure path would misreport "Fetched 1 relationship(s)" on every error.
+            $TgRelationships = Invoke-EntraOpsMsGraphQuery -Uri "/beta/directory/tenantGovernance/governanceRelationships" -ThrowOnFailure
             Write-Host "Fetched $(@($TgRelationships).Count) Tenant Governance relationship(s) from API" -ForegroundColor Gray
         } catch {
             Write-Warning "Tenant Governance relationships not available (API error or insufficient permissions): $_"
@@ -194,9 +202,6 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     # Separate principals (users/groups/servicePrincipals) from scopes (AUs, other objects)
     $PrincipalIds = [System.Collections.Generic.HashSet[string]]::new()
     $ScopeIds = [System.Collections.Generic.HashSet[string]]::new()
-    # Track principal IDs that are known to reside in a foreign (managing) tenant.
-    # These objects cannot be resolved via home-tenant endpoints and should not generate warnings.
-    $ForeignPrincipalIds = [System.Collections.Generic.HashSet[string]]::new()
     $GuidPattern = "([0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12})"
 
     foreach ($AadRoleAssignment in $AadRoleAssignments) {
@@ -228,7 +233,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     # Collect group IDs from Tenant Governance delegated admin assignments for principal resolution
     $ActiveTgRelationships = $TgRelationships | Where-Object { $_.status -eq "active" }
 
-    # Diagnostic: Log TG relationship filtering results to help troubleshoot missing data
+    # Report Tenant Governance relationships that cannot participate in collection.
     if (@($TgRelationships).Count -gt 0 -and @($ActiveTgRelationships).Count -eq 0) {
         $AllStatuses = @($TgRelationships | ForEach-Object { $_.status }) | Select-Object -Unique
         Write-Warning "Found $(@($TgRelationships).Count) TG relationship(s) but none with status 'active'. Statuses found: $($AllStatuses -join ', ')"
@@ -240,7 +245,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 })
         }
 
-        # Diagnostic: Dump first relationship's property names for API schema debugging
+        # Include one relationship schema sample in verbose output.
         $FirstTg = $TgRelationships | Select-Object -First 1
         if ($FirstTg) {
             $PropNames = ($FirstTg | Get-Member -MemberType NoteProperty, Property | Select-Object -ExpandProperty Name) -join ', '
@@ -291,14 +296,6 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             continue
         }
 
-        foreach ($DelegatedGroupAssignment in $TgRelationship.policySnapshot.delegatedAdministrationRoleAssignments) {
-            if ($DelegatedGroupAssignment.groupId) {
-                $PrincipalIds.Add($DelegatedGroupAssignment.groupId) | Out-Null
-                # These groups reside in the governing (managing) tenant — mark as foreign so
-                # home-tenant resolution does not attempt to resolve them or log spurious warnings.
-                $ForeignPrincipalIds.Add($DelegatedGroupAssignment.groupId) | Out-Null
-            }
-        }
     }
 
     Write-Host "Resolving $($PrincipalIds.Count) principals and $($ScopeIds.Count) scopes using type-specific batch endpoints..."
@@ -379,20 +376,59 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             }
         }
         
-        # Check for unresolved principals and attempt individual fallback resolution.
-        # Foreign (managing-tenant) group IDs are excluded — they can never be resolved via the
-        # home-tenant endpoint and their absence is expected, not an error.
-        $UnresolvedPrincipals = $PrincipalIdArray | Where-Object {
-            -not $DirObjLookup.ContainsKey($_) -and -not $ForeignPrincipalIds.Contains($_)
-        }
+        # Tenant Governance groups are resolved independently through remoteTenantGroups and are
+        # not added to PrincipalIds. Every ID here belongs to a home-tenant role assignment and
+        # must retain the normal fallback path, even when TG references the same group ID.
+        $UnresolvedPrincipals = $PrincipalIdArray | Where-Object { -not $DirObjLookup.ContainsKey($_) }
         
         if ($UnresolvedPrincipals.Count -gt 0) {
-            Write-Verbose "$($UnresolvedPrincipals.Count) principal(s) not resolved via type-specific endpoints, attempting individual resolution..."
-            
+            Write-Verbose "$($UnresolvedPrincipals.Count) principal(s) not resolved via type-specific endpoints, attempting batched directoryObjects resolution..."
+
+            # Batch the leftovers through the generic directoryObjects/getByIds endpoint first
+            # (covers types outside user/group/servicePrincipal, e.g. devices) - one round-trip
+            # per 1000 ids instead of one GET per principal. Ids absent from the response are
+            # confirmed deleted/unsupported; the per-principal GET below remains only as a
+            # fallback when the batch call itself fails.
+            $BatchFallbackWorked = $true
+            try {
+                $DirObjBatchSize = 1000
+                $UnresolvedArray = @($UnresolvedPrincipals)
+                for ($i = 0; $i -lt $UnresolvedArray.Count; $i += $DirObjBatchSize) {
+                    $Batch = @($UnresolvedArray[$i..([Math]::Min($i + $DirObjBatchSize - 1, $UnresolvedArray.Count - 1))])
+                    $Body = @{ ids = $Batch } | ConvertTo-Json
+                    $Response = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/directoryObjects/getByIds?`$select=id,displayName" -Body $Body -OutputType PSObject -ThrowOnFailure
+                    foreach ($Obj in @($Response)) {
+                        if ($null -ne $Obj.id -and -not $DirObjLookup.ContainsKey($Obj.id)) {
+                            $DirObjLookup[$Obj.id] = $Obj
+                        }
+                    }
+                }
+            } catch {
+                Write-Verbose "Batched directoryObjects resolution failed, falling back to individual lookups: $($_.Exception.Message)"
+                $BatchFallbackWorked = $false
+            }
+
             $IndividualResolvedCount = 0
             $ConfirmedDeletedCount = 0
-            
+
             foreach ($UnresolvedId in $UnresolvedPrincipals) {
+                if ($DirObjLookup.ContainsKey($UnresolvedId)) {
+                    $IndividualResolvedCount++
+                    continue
+                }
+                if ($BatchFallbackWorked) {
+                    # Authoritative batch response did not contain this id - confirmed deleted/orphaned.
+                    $ConfirmedDeletedCount++
+                    Write-Verbose "Confirmed deleted/not found: $UnresolvedId"
+                    if ($null -ne $WarningMessages) {
+                        $WarningMessages.Add([PSCustomObject]@{
+                                Type    = "RoleAssignmentResolution"
+                                Message = "Principal $UnresolvedId could not be resolved (likely deleted or insufficient permissions)."
+                                Target  = $UnresolvedId
+                            })
+                    }
+                    continue
+                }
                 # Suppress warnings from Invoke-EntraOpsMsGraphQuery for expected 404s
                 try {
                     # Try individual resolution as fallback
@@ -918,7 +954,31 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
     if ($null -ne $ActiveTgRelationships -and $ActiveTgRelationships.Count -gt 0) {
         Write-Host "Processing ... Remote Tenant Groups"
-        $RemoteTgGroups = Invoke-EntraOpsMsGraphQuery -Uri "/beta/directory/remoteTenantGroups" -OutputType PSObject
+        # Remote tenant root group lookup: the only way to resolve a display name for
+        # delegated admin groups living in a (non-managing) governing tenant. Best-effort -
+        # a failure here must not abort the whole role collection.
+        $RemoteTgGroups = @()
+        try {
+            $RemoteTgGroups = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/directory/remoteTenantGroups" -OutputType PSObject)
+        } catch {
+            Write-Warning "Could not fetch remote tenant groups (remote tenant root group resolution unavailable): $($_.Exception.Message)"
+            if ($null -ne $WarningMessages) {
+                $WarningMessages.Add([PSCustomObject]@{
+                        Type    = "TenantGovernance"
+                        Message = "Failed to fetch /beta/directory/remoteTenantGroups - TG group display names fall back to governing tenant name: $($_.Exception.Message)"
+                        Target  = "/beta/directory/remoteTenantGroups"
+                    })
+            }
+        }
+
+        # O(1) lookup by remote group id for the parallel block below (avoids scanning
+        # the whole array in every runspace).
+        $RemoteTgGroupLookup = @{}
+        foreach ($RemoteTgGroup in $RemoteTgGroups) {
+            if (-not [string]::IsNullOrEmpty($RemoteTgGroup.remoteGroupId) -and -not $RemoteTgGroupLookup.ContainsKey($RemoteTgGroup.remoteGroupId)) {
+                $RemoteTgGroupLookup[$RemoteTgGroup.remoteGroupId] = $RemoteTgGroup
+            }
+        }
 
         Write-Host "Processing $($ActiveTgRelationships.Count) active Tenant Governance relationship(s)..."
 
@@ -982,6 +1042,9 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 $DirObjLookup = $using:DirObjLookup
                 $RoleDefLookup = $using:RoleDefLookup
                 $LocalWarnings = $using:ParallelWarningsTg
+                # Remote tenant group lookup must be imported explicitly - outer variables are
+                # not visible inside ForEach-Object -Parallel without $using:.
+                $RemoteTgGroupLookup = $using:RemoteTgGroupLookup
 
                 $RoleId = "$($TgAssignment.GoverningTenantId)_$($TgAssignment.GroupId)_$($TgAssignment.RoleTemplateId)"
 
@@ -1011,9 +1074,27 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         })
                 }
 
-                # Resolve Group display name from DirObjLookup
+                # Resolve group display name via the remote tenant groups lookup (remote tenant
+                # root group). These groups live in the governing tenant and can never be resolved
+                # through home-tenant endpoints. Prefer the actual group display name (same property
+                # Get-EntraOpsPrivilegedEntraObject uses), fall back to the remote tenant's primary
+                # domain, then to the governing tenant name.
                 $GroupDisplayName = $null
-                $GroupDisplayName = $RemoteTgGroups | Where-Object { $_.remoteGroupId -eq $TgAssignment.GroupId } | Select-Object -ExpandProperty remoteTenantPrimaryDomain
+                $RemoteTgGroup = $RemoteTgGroupLookup[$TgAssignment.GroupId]
+                if ($null -ne $RemoteTgGroup) {
+                    $GroupDisplayName = if (-not [string]::IsNullOrEmpty($RemoteTgGroup.remoteGroupDisplayName)) {
+                        $RemoteTgGroup.remoteGroupDisplayName
+                    } else {
+                        $RemoteTgGroup.remoteTenantPrimaryDomain
+                    }
+                }
+                if ([string]::IsNullOrEmpty($GroupDisplayName)) {
+                    $GroupDisplayName = if (-not [string]::IsNullOrEmpty($TgAssignment.GoverningTenantName)) {
+                        "$($TgAssignment.GoverningTenantName) (remote tenant group)"
+                    } else {
+                        "[Remote tenant group: $($TgAssignment.GroupId)]"
+                    }
+                }
 
                 [pscustomobject]@{
                     RoleAssignmentId                      = $RoleId
@@ -1079,7 +1160,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             
             # Expand local groups (current Graph context)
             foreach ($GroupWithRbacAssignment in $LocalGroups) {
-                $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId) -TenantId $TenantId
+                $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId) -TenantId $TenantId -WarningMessages $WarningMessages
                 foreach ($TransitiveMember in $TransitiveMembers) {
                     $Member = [pscustomobject]@{
                         displayName               = $TransitiveMember.displayName
@@ -1103,13 +1184,19 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
                 $AuthType = $__EntraOpsSession.AuthenticationType
                 $IsInteractiveAuth = $AuthType -in @('UserInteractive', 'DeviceAuthentication')
+                # In REST-only mode (Connect-EntraOps -UseInvokeRestMethodOnly), the Graph SDK is not
+                # installed by design - the "context switch" must not go through Connect-MgGraph.
+                # Invoke-EntraOpsMsGraphQuery's REST path instead reads CurrentGraphTenantId from the
+                # session to pick the right cached token and cache-scoping key for this call.
+                $IsRestOnlyMode = [bool]$__EntraOpsSession['UseInvokeRestMethodOnly']
 
                 # Home token needed only for non-interactive restore (Connect-MgGraph -AccessToken).
                 # For interactive, home restore uses Connect-MgGraph -TenantId (MSAL cache).
                 # Managing tenant always uses Get-AzAccessToken (silent for all auth types because
                 # Connect-EntraOps already pre-authenticated to managing tenant via Get-AzAccessToken).
+                # Not needed in REST-only mode, where restore is just clearing CurrentGraphTenantId.
                 $HomeToken = $null
-                if (-not $IsInteractiveAuth) {
+                if (-not $IsRestOnlyMode -and -not $IsInteractiveAuth) {
                     try {
                         $HomeToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $Global:TenantIdContext -AsSecureString -ErrorAction Stop).Token
                     } catch {
@@ -1128,22 +1215,46 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     "GroupMember.Read.All",
                     "PrivilegedAccess.Read.AzureADGroup",
                     "PrivilegedEligibilitySchedule.Read.AzureADGroup",
+                    "RemoteTenantGroups.Read.All",
                     "RoleManagement.Read.All",
                     "User.Read.All"
                 )
 
                 foreach ($TenantGroup in $CrossTenantGroupsByTenant) {
                     $ForeignTenantId = $TenantGroup.Name
+
+                    # A Graph context switch is only possible for the configured managing tenant
+                    # (pre-authenticated by Connect-EntraOps). Groups from any other foreign tenant
+                    # (e.g. Tenant Governance governing tenants) cannot be expanded or resolved -
+                    # they were already marked as foreign principals during collection and their
+                    # display name comes from the remoteTenantGroups (remote tenant root group)
+                    # lookup instead.
+                    if ([string]::IsNullOrEmpty($Global:ManagingTenantIdContext) -or $ForeignTenantId -ne $Global:ManagingTenantIdContext) {
+                        Write-Verbose "Skipping transitive expansion for $($TenantGroup.Group.Count) group(s) in tenant $ForeignTenantId - not the configured managing tenant, no Graph context available."
+                        if ($WarningMessages) {
+                            $WarningMessages.Add([PSCustomObject]@{
+                                    Type    = "CrossTenant-ExpansionSkipped"
+                                    Message = "Skipped transitive expansion of $($TenantGroup.Group.Count) group(s) in tenant $ForeignTenantId - tenant is not the configured managing tenant ('$Global:ManagingTenantIdContext'), display names resolve via remote tenant root group only."
+                                    Target  = $ForeignTenantId
+                                })
+                        }
+                        continue
+                    }
+
                     try {
-                        Write-Verbose "Switching MgGraph context to tenant $ForeignTenantId for transitive group expansion ($($TenantGroup.Group.Count) groups)"
-                        # Always use Get-AzAccessToken for managing tenant (silent — Az session has
-                        # a cached token from Connect-EntraOps pre-auth, no browser/device prompt).
-                        $ForeignToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ForeignTenantId -AsSecureString -ErrorAction Stop).Token
-                        Connect-MgGraph -AccessToken $ForeignToken -NoWelcome -ErrorAction Stop
+                        Write-Verbose "Switching Graph tenant context to tenant $ForeignTenantId for transitive group expansion ($($TenantGroup.Group.Count) groups)"
+                        if ($IsRestOnlyMode) {
+                            $__EntraOpsSession['CurrentGraphTenantId'] = $ForeignTenantId
+                        } else {
+                            # Always use Get-AzAccessToken for managing tenant (silent — Az session has
+                            # a cached token from Connect-EntraOps pre-auth, no browser/device prompt).
+                            $ForeignToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ForeignTenantId -AsSecureString -ErrorAction Stop).Token
+                            Connect-MgGraph -AccessToken $ForeignToken -NoWelcome -ErrorAction Stop
+                        }
 
                         foreach ($GroupWithRbacAssignment in $TenantGroup.Group) {
                             try {
-                                $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId) -TenantId $ForeignTenantId
+                                $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId) -TenantId $ForeignTenantId -WarningMessages $WarningMessages
                                 foreach ($TransitiveMember in $TransitiveMembers) {
                                     $Member = [pscustomobject]@{
                                         displayName               = $TransitiveMember.displayName
@@ -1184,7 +1295,9 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         # Non-interactive: Connect-MgGraph -AccessToken uses the Az app token which
                         #              carries full application permissions.
                         try {
-                            if ($IsInteractiveAuth) {
+                            if ($IsRestOnlyMode) {
+                                $__EntraOpsSession.Remove('CurrentGraphTenantId')
+                            } elseif ($IsInteractiveAuth) {
                                 Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop
                             } elseif ($null -ne $HomeToken) {
                                 Connect-MgGraph -AccessToken $HomeToken -NoWelcome -ErrorAction Stop

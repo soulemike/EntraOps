@@ -1,0 +1,264 @@
+import { expect, test } from "@playwright/test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const wizardUrl = pathToFileURL(fileURLToPath(new URL("index.html", import.meta.url))).href;
+
+test("shows the live JSON preview below the configuration form", async ({ page }) => {
+    await page.goto(wizardUrl);
+
+    const panelsBox = await page.locator("#wizPanels").boundingBox();
+    const previewBox = await page.locator("#wizPreviewSection").boundingBox();
+    expect(previewBox.y).toBeGreaterThanOrEqual(panelsBox.y + panelsBox.height);
+    await expect(page.getByRole("heading", { name: "Live JSON preview" })).toBeVisible();
+    await expect(page.locator("#wizPreview")).toContainText('"TenantName"');
+    await expect(page.locator("#wizPreview")).not.toContainText('"./.github/workflows"');
+});
+
+test("Tenant Governance provider selection and clearing update the live configuration preview", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Tenant Governance/ }).click();
+
+    const picker = page.locator('[data-key="TgResourcesToInclude"]');
+    const options = picker.locator('input[data-tg-resource]');
+    const providerOptionCount = await options.count();
+
+    await picker.getByRole("button", { name: "Clear all" }).click();
+    await expect(picker.locator(".tg-resource-summary strong")).toHaveText("0 of 56 selected");
+
+    await picker.getByRole("button", { name: "Select provider" }).click();
+    await expect(picker.locator('input[data-tg-resource]:checked')).toHaveCount(providerOptionCount);
+    await expect(picker.locator(".tg-resource-summary strong")).toHaveText(`${providerOptionCount} of 56 selected`);
+    await expect(page.locator("#wizPreview")).toContainText('"ResourcesToInclude": [');
+
+    await picker.getByRole("button", { name: "Clear all" }).click();
+    await expect(options.locator(":checked")).toHaveCount(0);
+    await expect(picker.locator(".tg-resource-summary strong")).toHaveText("0 of 56 selected");
+    await expect(page.locator("#wizPreview")).toContainText('"ResourcesToInclude": []');
+});
+
+test("navigates Tenant Governance resources by provider and family", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Tenant Governance/ }).click();
+
+    const authenticationFamily = page.locator('[data-tg-family="microsoft.entra|Authentication method policy"]');
+    await expect(authenticationFamily.getByText("Authentication Method Policy Email", { exact: true })).toBeVisible();
+
+    await authenticationFamily.locator('[data-tg-family-select="microsoft.entra|Authentication method policy"]').check();
+    await expect(page.locator("#wizPreview")).toContainText('"microsoft.entra.authenticationMethodPolicyEmail"');
+
+    await page.locator('[data-tg-provider="microsoft.intune"]').click();
+    await expect(page.getByRole("button", { name: /Device compliance/ })).toBeVisible();
+    await page.locator('[data-tg-search]').fill("deviceCompliancePolicyIos");
+    await expect(page.getByText("Device Compliance Policy Ios", { exact: true })).toBeVisible();
+    await expect(page.getByText("Device Compliance Policy Android", { exact: true })).toBeHidden();
+});
+
+test("exports every Tenant Governance snapshot retry schedule", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Tenant Governance/ }).click();
+
+    await expect(page.locator('[data-field="TgSnapshotScheduledCronCompleteRetry1"] [data-cron-preview]')).toHaveText("30 7 * * *");
+    await expect(page.locator('[data-field="TgSnapshotScheduledCronCompleteRetry2"] [data-cron-preview]')).toHaveText("0 8 * * *");
+    await expect(page.locator("#wizPreview")).toContainText('"SnapshotScheduledCronCompleteRetry1": "30 7 * * *"');
+    await expect(page.locator("#wizPreview")).toContainText('"SnapshotScheduledCronCompleteRetry2": "0 8 * * *"');
+});
+
+test("preserves EIDSCA finding exclusions through import and export", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            ConfigurationAnalyzer: { EidscaExcludedFindings: ["EIDSCA.AP01", "EIDSCA.AP02"] }
+        }))
+    });
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="EidscaExcludedFindings"]')).toHaveValue("EIDSCA.AP01, EIDSCA.AP02");
+    await expect(page.locator("#wizPreview")).toContainText('"EidscaExcludedFindings": [');
+    await expect(page.locator("#wizPreview")).toContainText('"EIDSCA.AP02"');
+});
+
+test("preserves updater, advanced CSA and unknown settings through import and export", async ({ page }) => {
+    await page.goto(wizardUrl);
+    const imported = {
+        TenantId: "00000000-0000-0000-0000-000000000000",
+        TenantName: "contoso.onmicrosoft.com",
+        AutomatedEntraOpsUpdate: {
+            Repository: "EntraOps-Insiders",
+            Branch: "0123456789012345678901234567890123456789",
+            ValidationFrequency: "Never",
+            RunBrowserTests: false,
+            TargetUpdateFolders: ["./EntraOps", "./Reports", "./package.json"],
+            FutureUpdateSetting: "preserve-me"
+        },
+        CustomSecurityAttributes: {
+            PrivilegedUserAdminTierLevelAttribute: "customUserTier",
+            PrivilegedUserAdminTierLevelNameAttribute: "customUserTierName",
+            PrivilegedServicePrincipalAdminTierLevelAttribute: "customSpTier",
+            PrivilegedServicePrincipalAdminTierLevelNameAttribute: "customSpTierName"
+        },
+        FutureSection: { Enabled: true, Nested: { Value: 42 } }
+    };
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify(imported))
+    });
+
+    const preview = page.locator("#wizPreview");
+    await expect(preview).toContainText('"Repository": "EntraOps-Insiders"');
+    await expect(preview).toContainText('"ValidationFrequency": "Never"');
+    await expect(preview).toContainText('"RunBrowserTests": false');
+    await expect(preview).toContainText('"./package.json"');
+    await expect(preview).toContainText('"FutureUpdateSetting": "preserve-me"');
+    await expect(preview).toContainText('"PrivilegedUserAdminTierLevelAttribute": "customUserTier"');
+    await expect(preview).toContainText('"FutureSection"');
+    await expect(preview).toContainText('"Value": 42');
+});
+
+test("exports and imports deleted Azure RBAC principal handling", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Control Plane Scope/ }).click();
+
+    await expect(page.locator('[data-key="DeletedPrincipalAssignmentHandling"]')).toHaveValue("Filter");
+    await expect(page.locator("#wizPreview")).toContainText('"DeletedPrincipalAssignmentHandling": "Filter"');
+
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AzureRbacClassification: { DeletedPrincipalAssignmentHandling: "Keep" }
+        }))
+    });
+
+    await expect(page.locator('[data-key="DeletedPrincipalAssignmentHandling"]')).toHaveValue("Keep");
+    await expect(page.locator("#wizPreview")).toContainText('"DeletedPrincipalAssignmentHandling": "Keep"');
+});
+
+test("imports legacy nested automated reporting configuration", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AutomatedRmauAssignmentsForUnprotectedObjects: {
+                AutomatedReportingGeneration: {
+                    ApplyAutomatedReportingGeneration: true,
+                    GenerateAccessPathMap: false
+                }
+            }
+        }))
+    });
+
+    await expect(page.locator("#wizPreview")).toContainText('"ApplyAutomatedReportingGeneration": true');
+    await expect(page.locator("#wizPreview")).toContainText('"GenerateAccessPathMap": false');
+});
+
+test("normalizes a removal threshold from any automation section", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AutomatedElmCatalogProtection: { RemovalSafetyThreshold: 0.25 }
+        }))
+    });
+
+    const preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.AutomatedConditionalAccessTargetGroups.RemovalSafetyThreshold).toBe(0.25);
+    expect(preview.AutomatedAdministrativeUnitManagement.RemovalSafetyThreshold).toBe(0.25);
+    expect(preview.AutomatedRmauAssignmentsForUnprotectedObjects.RemovalSafetyThreshold).toBe(0.25);
+    expect(preview.AutomatedElmCatalogProtection.RemovalSafetyThreshold).toBe(0.25);
+});
+
+test("requires tenant identity before downloading the configuration", async ({ page }) => {
+    await page.goto(wizardUrl);
+
+    const tenantId = page.locator('[data-key="TenantId"]');
+    const tenantName = page.locator('[data-key="TenantName"]');
+    await expect(tenantId).toHaveAttribute("required", "");
+    await expect(tenantName).toHaveAttribute("required", "");
+    await expect(page.locator('[data-field="TenantName"] .wiz-field-required')).toHaveText("Required");
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: /Download EntraOpsConfig\.json/ }).click();
+    await expect(tenantId).toBeFocused();
+
+    await tenantId.fill("00000000-0000-0000-0000-000000000000");
+    await tenantName.fill("contoso.onmicrosoft.com");
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: /Download EntraOpsConfig\.json/ }).click();
+    await (await download).cancel();
+});
+
+test("keeps report release publishing opt-in and exports its retention setting", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="PublishReportsAsRelease"]')).not.toBeChecked();
+    await expect(page.locator('[data-key="ReportingReleasesToKeep"]')).toHaveValue("10");
+    const preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.AutomatedReportingGeneration.PublishReportsAsRelease).toBe(false);
+    expect(preview.AutomatedReportingGeneration.ReportingReleasesToKeep).toBe(10);
+    expect(preview.ClassificationExplorer.GenerateChangeHistory).toBe(false);
+});
+
+test("preserves enabled Classification Explorer change history through import and export", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            ClassificationExplorer: { GenerateChangeHistory: true }
+        }))
+    });
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="ClassificationExplorerGenerateChangeHistory"]')).toBeChecked();
+    const preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.ClassificationExplorer.GenerateChangeHistory).toBe(true);
+});
+
+test("preserves explicitly empty report release retention through import and export", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AutomatedReportingGeneration: {
+                PublishReportsAsRelease: true,
+                ReportingReleasesToKeep: ""
+            }
+        }))
+    });
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="ReportingReleasesToKeep"]')).toHaveValue("");
+    const preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.AutomatedReportingGeneration.ReportingReleasesToKeep).toBe("");
+});
+
+test("hydrates a partial draft from the beginner setup guide", async ({ page }) => {
+    const draft = {
+        TenantId: "00000000-0000-0000-0000-000000000000",
+        TenantName: "contoso.onmicrosoft.com",
+        AuthenticationType: "UserInteractive",
+        ConsoleOutput: { IncludeObjectDetails: true },
+        DevOpsPlatform: "None",
+        RbacSystems: ["Azure", "EntraID"],
+        LogAnalytics: {
+            IngestToLogAnalytics: true,
+            DataCollectionRuleName: "entraops-dcr"
+        }
+    };
+
+    await page.goto(`${wizardUrl}#onboarding=${encodeURIComponent(JSON.stringify(draft))}`);
+
+    await expect(page.locator("#wizImportStatus")).toHaveText("Setup answers applied");
+    await expect(page.locator('[data-key="TenantName"]')).toHaveValue("contoso.onmicrosoft.com");
+    await expect(page.locator('[data-key="AuthenticationType"]')).toHaveValue("UserInteractive");
+    await expect(page.locator('[data-key="IncludeObjectDetails"]')).toBeChecked();
+    await expect(page.locator("#wizPreview")).toContainText('"IncludeObjectDetails": true');
+    await expect(page.locator("#wizPreview")).toContainText('"DataCollectionRuleName": "entraops-dcr"');
+});

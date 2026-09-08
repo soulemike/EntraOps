@@ -1,0 +1,168 @@
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --neutral-bg: #1f1f1f;
+    --neutral-surface: #292929;
+    --neutral-surface-alt: #333333;
+    --neutral-stroke: #454545;
+    --neutral-stroke-strong: #5c5c5c;
+    --neutral-fg: #f5f5f5;
+    --neutral-fg-secondary: #c8c8c8;
+    --neutral-fg-disabled: #8f8f8f;
+    --brand: #4da3e8;
+    --brand-hover: #78b9ed;
+    --brand-pressed: #78b9ed;
+    --brand-bg: #123552;
+    --brand-bg-strong: #184568;
+    --brand-fill: #006cbe;
+    --brand-fill-hover: #005a9e;
+    --tier-control: #f1707a;
+    --tier-management: #f1bd54;
+    --tier-user: #73c47b;
+    --nav-bg: #171717;
+    --nav-bg-2: #202020;
+    --nav-fg: #f5f5f5;
+    --nav-fg-muted: #c8c8c8;
+    --nav-active: #4da3e8;
+    --shadow-2: 0 1.6px 3.6px rgba(0, 0, 0, 0.35), 0 0.3px 0.9px rgba(0, 0, 0, 0.22);
+    --shadow-8: 0 3.2px 7.2px rgba(0, 0, 0, 0.42), 0 0.6px 1.8px rgba(0, 0, 0, 0.30);
+}
+
+:root[data-theme="dark"] .ai-disclaimer {
+    background: #4a3905;
+    border-color: #9a7711;
+    color: #f1d57a;
+}
+
+:root[data-theme="dark"] .prose blockquote,
+:root[data-theme="dark"] .prose pre,
+:root[data-theme="dark"] .prose code,
+:root[data-theme="dark"] .prose table,
+:root[data-theme="dark"] .prose th,
+:root[data-theme="dark"] .prose td,
+:root[data-theme="dark"] .docs-search-results {
+    border-color: var(--neutral-stroke);
+}
+
+:root[data-theme="dark"] .prose pre,
+:root[data-theme="dark"] .prose code {
+    background: #1b1b1b;
+    color: var(--neutral-fg);
+}
+
+:root[data-theme="dark"] .prose code {
+    color: #ffc0dd;
+}
+
+:root[data-theme="dark"] .prose th {
+    background: var(--neutral-surface-alt);
+}
+
+:root[data-theme="dark"] .prose tr:nth-child(even) td {
+    background: #252525;
+}
+
+:root[data-theme="dark"] .tile p,
+:root[data-theme="dark"] .foot-note {
+    color: var(--neutral-fg-secondary);
+}
+
+:root[data-theme="dark"] .tag {
+    background: #243847;
+    border-color: #4a718c;
+    color: #d8e8f5;
+}
+
+:root[data-theme="dark"] .callout.tip {
+    background: #163b29;
+}
+
+:root[data-theme="dark"] .callout.warning {
+    background: #44340e;
+}
+
+:root[data-theme="dark"] .callout.important {
+    background: #4a2429;
+}
+
+:root[data-theme="dark"] .guide-mode,
+:root[data-theme="dark"] .onboarding-progress-track {
+    background: #454545;
+}
+
+:root[data-theme="dark"] .guide-mode-button,
+:root[data-theme="dark"] .onboarding-progress,
+:root[data-theme="dark"] .setup-lead,
+:root[data-theme="dark"] .setup-choice-desc,
+:root[data-theme="dark"] .setup-field small,
+:root[data-theme="dark"] .setup-summary span,
+:root[data-theme="dark"] .setup-run-list p,
+:root[data-theme="dark"] .setup-privacy {
+    color: var(--neutral-fg-secondary);
+}
+
+:root[data-theme="dark"] .guide-mode-button.active,
+:root[data-theme="dark"] .onboarding,
+:root[data-theme="dark"] .setup-choice,
+:root[data-theme="dark"] .setup-input,
+:root[data-theme="dark"] .setup-choice.selected .setup-choice-mark,
+:root[data-theme="dark"] .setup-actions {
+    background: var(--neutral-surface);
+    color: var(--neutral-fg);
+}
+
+:root[data-theme="dark"] .onboarding,
+:root[data-theme="dark"] .setup-choice,
+:root[data-theme="dark"] .setup-input,
+:root[data-theme="dark"] .setup-summary,
+:root[data-theme="dark"] .setup-actions,
+:root[data-theme="dark"] .onboarding-progress,
+:root[data-theme="dark"] .setup-summary div,
+:root[data-theme="dark"] .setup-summary div:nth-child(odd),
+:root[data-theme="dark"] .setup-category-picker {
+    border-color: var(--neutral-stroke);
+}
+
+:root[data-theme="dark"] .setup-choice:hover {
+    border-color: var(--neutral-stroke-strong);
+}
+
+:root[data-theme="dark"] .setup-choice.selected {
+    background: var(--brand-bg);
+    border-color: var(--brand);
+    box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
+:root[data-theme="dark"] .setup-choice-title,
+:root[data-theme="dark"] .setup-field,
+:root[data-theme="dark"] .setup-input {
+    color: var(--neutral-fg);
+}
+
+:root[data-theme="dark"] .setup-details {
+    background: var(--neutral-surface-alt);
+}
+
+:root[data-theme="dark"] .setup-note {
+    background: #173d2a;
+}
+
+:root[data-theme="dark"] .setup-note span {
+    color: var(--neutral-fg-secondary);
+}
+
+.theme-toggle {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 4px;
+    line-height: 1;
+}
+
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    outline: none;
+}

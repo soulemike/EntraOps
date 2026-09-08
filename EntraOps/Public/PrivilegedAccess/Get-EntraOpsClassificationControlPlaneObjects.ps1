@@ -41,6 +41,7 @@
 
 .PARAMETER AzureHighPrivilegedScopes
     Azure resource scopes (management group or subscription paths) to restrict the Azure Resource Graph query.
+    Each configured value is matched exactly against the role assignment's scope; child scopes are not included.
     Use "*" (default) to include all scopes, including management groups.
 
 .PARAMETER ExposureCriticalityLevel
@@ -88,10 +89,10 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         [object]$PrivilegedObjectClassificationSource = "All"
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$EntraIdClassificationParameterFile = "$DefaultFolderClassification\Templates\Classification_AadResources.Param.json"
+        [System.String]$EntraIdClassificationParameterFile = "$DefaultFolderClassification/Templates/Classification_AadResources.Param.json"
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$EntraIdCustomizedClassificationFile = "$DefaultFolderClassification\$($TenantNameContext)\Classification_AadResources.json"
+        [System.String]$EntraIdCustomizedClassificationFile = "$DefaultFolderClassification/$($TenantNameContext)/Classification_AadResources.json"
         ,
         [Parameter(Mandatory = $false)]
         [string]$EntraOpsEamFolder = "$DefaultFolderClassifiedEam"
@@ -111,6 +112,15 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         ,
         [Parameter(Mandatory = $false)]
         [object]$PrivilegedObjectIds
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
     )
 
     $PrivilegedObjects = @()
@@ -139,7 +149,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
             Write-Warning "No privileged objects found in EntraOps!"
         } else {
             $EntraOpsObjectClassification = $EntraOpsAllPrivilegedObjects | Where-Object { $_.ObjectAdminTierLevelName -eq "ControlPlane" } `
-            | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices `
+            | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice `
             | ForEach-Object {
                 $PrivilegedObject = $_ 
                 $ClassificationReason = @("ObjectAdminTierLevelName")
@@ -153,7 +163,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
 
             $EntraOpsRoleClassification = $EntraOpsAllPrivilegedObjects | Where-Object { $_.Classification.AdminTierLevelName -contains "ControlPlane" } `
             | ForEach-Object {
-                $PrivilegedObject = $_ | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, RoleSystem
+                $PrivilegedObject = $_ | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice, RoleSystem
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ObjectSignInName -Value ($PrivilegedObject.ObjectUserPrincipalName) -Force | Out-Null
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value ($PrivilegedObject | Select-Object -Unique RoleSystem) -Force | Out-Null
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "EntraOps" -Force | Out-Null
@@ -166,7 +176,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     #endregion
 
     #region Get list of all privileged objects by Azure Resource Graph
-    if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "AzResourceGraph") {
+    if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "PrivilegedRolesFromAzGraph") {
         Write-Host "Get privileged objects from Azure Resource Graph..."
         # Query template and update them with parameter value of high privileged Azure roles and scopes
         $Query = 'AuthorizationResources
@@ -190,20 +200,28 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         }
 
         # Get details of high privileged objects
-        $HighPrivilegedObjectIdsFromAzGraph = (Invoke-EntraOpsAzGraphQuery -KqlQuery $Query)
-        $PrivilegedObjects += $HighPrivilegedObjectIdsFromAzGraph | Select-Object -Unique PrincipalId, PrincipalType | foreach-object {
+        # Fail rather than truncate: a partial result here drops privileged principals from the
+        # Control Plane object list, which is indistinguishable from them not being privileged.
+        $HighPrivilegedObjectIdsFromAzGraph = (Invoke-EntraOpsAzGraphQuery -KqlQuery $Query -ThrowOnFailure)
+        $UniqueHighPrivilegedObjects = @($HighPrivilegedObjectIdsFromAzGraph | Select-Object -Unique PrincipalId, PrincipalType | Where-Object { -not [string]::IsNullOrEmpty($_.PrincipalId) } | ForEach-Object { [PSCustomObject]@{ ObjectId = $_.PrincipalId; ObjectType = $_.PrincipalType } })
+        $AzGraphObjectDetailsCache = @{}
+        if ($UniqueHighPrivilegedObjects.Count -gt 0) {
+            $AzGraphObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution -UniqueObjects $UniqueHighPrivilegedObjects -TenantId $TenantId -EnableParallelProcessing $EnableParallelProcessing -ParallelThrottleLimit $ParallelThrottleLimit
+        }
+        $PrivilegedObjects += $UniqueHighPrivilegedObjects | ForEach-Object {
             $HighPrivilegedObjectId = $_
-            try {
-                if ($null -ne (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($HighPrivilegedObjectId.PrincipalId)" )) {
-                    $HighPrivilegedRoles = $HighPrivilegedObjectIdsFromAzGraph | Where-Object { $_.PrincipalId -eq $HighPrivilegedObjectId.PrincipalId -and $_.PrincipalType -eq $HighPrivilegedObjectId.PrincipalType } | Select-Object -Unique RoleScope, RoleName
-                    $PrivilegedObject = Get-EntraOpsPrivilegedEntraObject -AadObjectId $HighPrivilegedObjectId.PrincipalId | Where-Object { $_.ObjectType -ne "unknown" }`
-                    | Select-Object ObjectId, @{Name = 'ObjectType'; Expression = { $_.'ObjectType'.tolower() } }, ObjectSubType, ObjectDisplayName, ObjectSignInName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
-                    $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $HighPrivilegedRoles -Force | Out-Null
-                    $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "Azure Resource Graph" -Force | Out-Null
-                    return $PrivilegedObject
-                }
-            } catch {
-                Write-Warning "High privileged object with id $($HighPrivilegedObjectId.PrincipalId) not found! $_"
+            $ResolvedObject = $AzGraphObjectDetailsCache[$HighPrivilegedObjectId.ObjectId]
+            if ($null -ne $ResolvedObject -and $ResolvedObject.ObjectType -ne "unknown") {
+                # Azure Resource Graph gives no row-order guarantee for joins, so RoleScope/RoleName pairs can
+                # come back in a different order on every run - sort deterministically to avoid a spurious diff
+                # in ScopeReasoning_ControlPlane.json each time the classification is regenerated with unchanged data.
+                $HighPrivilegedRoles = $HighPrivilegedObjectIdsFromAzGraph | Where-Object { $_.PrincipalId -eq $HighPrivilegedObjectId.ObjectId -and $_.PrincipalType -eq $HighPrivilegedObjectId.ObjectType } | Sort-Object RoleScope, RoleName | Select-Object -Unique RoleScope, RoleName
+                $PrivilegedObject = $ResolvedObject | Select-Object ObjectId, @{Name = 'ObjectType'; Expression = { $_.'ObjectType'.tolower() } }, ObjectSubType, ObjectDisplayName, ObjectSignInName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice
+                $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $HighPrivilegedRoles -Force | Out-Null
+                $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "Azure Resource Graph" -Force | Out-Null
+                $PrivilegedObject
+            } else {
+                Write-Warning "High privileged object with id $($HighPrivilegedObjectId.ObjectId) not found!"
             }
         }
     }
@@ -213,20 +231,27 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "PrivilegedEdgesFromExposureManagement") {
         Write-Host "Get privileged objects from exposure graph edges and nodes in Exposure Management..."
         $Timespan = "P1D"
+        # Performance: single-pass Tier0Assets scan (was 3 full ExposureGraphNodes scans unioned) and,
+        # most importantly, the node join side is pre-filtered to just the filtered edges' source nodes
+        # BEFORE the expensive mv-expand over EntityIds - previously the mv-expand ran over the ENTIRE
+        # ExposureGraphNodes table (every resource/device/identity node), which dominated query runtime.
         $Query = '
-        let Tier0CloudResources = ExposureGraphNodes
-        | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.environmentName == "Azure");
-        let Tier0EntraObjects = ExposureGraphNodes
-            | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.primaryProvider == "AzureActiveDirectory");
-        let Tier0Devices = ExposureGraphNodes
-            | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeLabel == "device") and (NodeProperties.rawData.isAzureADJoined == true);
-        let Tier0Assets = union Tier0EntraObjects, Tier0Devices, Tier0CloudResources | project NodeId;
+        let Tier0Assets = ExposureGraphNodes
+            | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%)
+            | where (NodeLabel != "device" and parse_json(Categories) !has "identities")
+                or (NodeProperties.rawData.primaryProvider == "AzureActiveDirectory")
+                or (NodeLabel == "device" and NodeProperties.rawData.isAzureADJoined == true)
+            | project NodeId;
         let SensitiveRelation = dynamic(["has permissions to","can authenticate as","has role on","has credentials of","affecting", "can authenticate as", "Member of", "frequently logged in by"]);
         // Devices are not supported yet, no AadObject Id available in ExposureGraphNodes, DeviceInfo shows only AadDeviceId
         let FilteredNodes = dynamic(["user","group","serviceprincipal","managedidentity","device"]);
-        ExposureGraphEdges
-        | where EdgeLabel in (SensitiveRelation) and (TargetNodeId in (Tier0Assets) or SourceNodeId in (Tier0Assets)) and SourceNodeLabel in (FilteredNodes)
+        let SensitiveEdges = ExposureGraphEdges
+            | where EdgeLabel in (SensitiveRelation) and SourceNodeLabel in (FilteredNodes)
+            | where TargetNodeId in (Tier0Assets) or SourceNodeId in (Tier0Assets);
+        let SensitiveSourceNodeIds = SensitiveEdges | distinct SourceNodeId;
+        SensitiveEdges
         | join kind=leftouter ( ExposureGraphNodes
+            | where NodeId in (SensitiveSourceNodeIds)
             | mv-expand parse_json(EntityIds)
             | where parse_json(EntityIds).type == "AadObjectId"
             | extend AadObjectId = tostring(parse_json(EntityIds).id)
@@ -238,20 +263,35 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         | summarize by ObjectDisplayName, SourceNodeName, tolower(ObjectType), ObjectId, NodeId, tostring(ClassificationReason)'
         $Query = $Query.Replace("%CriticalLevel%", $ExposureCriticalityLevel)
         $Body = @{
-            "Query" = $Query;
+            "Query"    = $Query;
             "Timespan" = $Timespan;
         } | ConvertTo-Json
         $PrivilegedObjectsGraphEdges = (Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/security/runHuntingQuery" -Body $Body).results
         if ($null -ne $PrivilegedObjectsGraphEdges) {
-            $PrivilegedObjects += $PrivilegedObjectsGraphEdges | Select-Object -Unique ObjectDisplayName, ObjectId, ObjectType | ForEach-Object {
+            $UniqueGraphEdgeObjects = @($PrivilegedObjectsGraphEdges | Select-Object -Unique ObjectDisplayName, ObjectId, ObjectType | Where-Object { -not [string]::IsNullOrEmpty($_.ObjectId) })
+            $XspmObjectDetailsCache = @{}
+            if ($UniqueGraphEdgeObjects.Count -gt 0) {
+                $XspmResolutionObjects = @($UniqueGraphEdgeObjects | ForEach-Object { [PSCustomObject]@{ ObjectId = $_.ObjectId; ObjectType = $_.ObjectType } })
+                $XspmObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution -UniqueObjects $XspmResolutionObjects -TenantId $TenantId -EnableParallelProcessing $EnableParallelProcessing -ParallelThrottleLimit $ParallelThrottleLimit
+            }
+            $PrivilegedObjects += $UniqueGraphEdgeObjects | ForEach-Object {
                 $GraphEdge = $_
-                $PrivilegedObject = Get-EntraOpsPrivilegedEntraObject -AadObjectId $GraphEdge.ObjectId | Where-Object { $_.ObjectType -ne "unknown" }`
-                | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
-                $ClassificationReason = @()
-                $ClassificationReason += ($PrivilegedObjectsGraphEdges | Where-Object { $_.ObjectId -eq $GraphEdge.ObjectId -and $_.ObjectType -eq $GraphEdge.ObjectType }).ClassificationReason | ConvertFrom-Json
-                $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $ClassificationReason -Force | Out-Null
-                $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "XSPM" -Force | Out-Null
-                return $PrivilegedObject
+                # Normalize ObjectType casing (Get-EntraOpsPrivilegedEntraObject can return mixed-case values,
+                # e.g. from the Graph @odata.type) so the same object isn't later treated as two distinct
+                # entries by the ObjectId+ObjectType uniqueness check below.
+                $ResolvedObject = $XspmObjectDetailsCache[$GraphEdge.ObjectId]
+                if ($null -ne $ResolvedObject -and $ResolvedObject.ObjectType -ne "unknown") {
+                    $PrivilegedObject = $ResolvedObject | Select-Object ObjectId, @{Name = 'ObjectType'; Expression = { $_.'ObjectType'.tolower() } }, ObjectSubType, ObjectDisplayName, ObjectSignInName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice
+                    $ClassificationReason = @()
+                    $ClassificationReason += ($PrivilegedObjectsGraphEdges | Where-Object { $_.ObjectId -eq $GraphEdge.ObjectId -and $_.ObjectType -eq $GraphEdge.ObjectType }).ClassificationReason | ConvertFrom-Json
+                    # Kusto's "summarize by" gives no ordering guarantee, so EdgeLabel/TargetNodeName pairs can come
+                    # back in a different order on every run - sort deterministically to avoid a spurious diff in
+                    # ScopeReasoning_ControlPlane.json each time the classification is regenerated with unchanged data.
+                    $ClassificationReason = @($ClassificationReason | Sort-Object EdgeLabel, TargetNodeName)
+                    $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $ClassificationReason -Force | Out-Null
+                    $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "XSPM" -Force | Out-Null
+                    $PrivilegedObject
+                }
             }
         }
     }
@@ -262,6 +302,8 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         Write-Host "Get privileged objects from manual list of object ids..."
         $PrivilegedObjects += $PrivilegedObjectIds | ForEach-Object {
             $PrivilegedObject = Get-EntraOpsPrivilegedEntraObject -AadObjectId $_
+            # Normalize ObjectType casing for the same reason as the XSPM source above.
+            $PrivilegedObject.ObjectType = $PrivilegedObject.ObjectType.tolower()
             $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value @("Manual") -Force | Out-Null
             $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "Manual" -Force | Out-Null
             return $PrivilegedObject
@@ -326,9 +368,21 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     #endregion
 
     #region Summarize and return list of privileged objects
-    $PrivilegedObjects | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, RestrictedManagementByAadRole, RestrictedManagementByRAG, RestrictedManagementByRMAU, OwnedDevices, AssignedAdministrativeUnits | ForEach-Object {
+    # Sort deterministically (ObjectId as final tiebreaker) so the output order is stable across runs -
+    # otherwise objects sharing the same ObjectType/ObjectDisplayName (e.g. same-named managed identities)
+    # can swap positions between runs purely due to upstream API pagination/enumeration order, producing
+    # spurious diff noise with no actual data change.
+    $PrivilegedObjects = $PrivilegedObjects | Sort-Object ObjectType, ObjectDisplayName, ObjectId
+    $PrivilegedObjects | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, ObjectTenantId, RestrictedManagementByAadRole, RestrictedManagementByRAG, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice, AssignedAdministrativeUnits | ForEach-Object {
         $PrivilegedObject = $_
         $Classifications = $PrivilegedObjects | Where-Object { $_.ObjectId -eq $PrivilegedObject.ObjectId -and $_.ObjectType -eq $PrivilegedObject.ObjectType } | select-object ClassificationReason, ClassificationSource
+        # An object can carry multiple classification-reason entries (one per originating source: EntraOps
+        # per-RBAC-scope hits, Azure Resource Graph, XSPM edges, ...), collected here via a plain filter with no
+        # inherent order. Since ClassificationReason/ClassificationSource mix scalars and differently-shaped
+        # objects (RoleSystem vs EdgeLabel/TargetNodeName), sort by their compact JSON representation - this is a
+        # function of content only, so the order is stable across runs regardless of upstream arrival order
+        # (notably the XSPM Kusto query, which gives no row-order guarantee).
+        $Classifications = @($Classifications | Sort-Object { $_ | ConvertTo-Json -Compress -Depth 5 })
         $PrivilegedObject | Add-Member -MemberType NoteProperty -Name Classification -Value $Classifications -Force | Out-Null
         return $PrivilegedObject
     }

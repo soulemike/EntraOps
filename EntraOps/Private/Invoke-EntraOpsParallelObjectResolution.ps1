@@ -81,10 +81,30 @@ function Invoke-EntraOpsParallelObjectResolution {
                     $PreFetchedObjects = @($PreFetchedObjects) # Ensure array
                     $PreFetchStats.PreFetchedCount += $PreFetchedObjects.Count
                     
+                    # Resolve the tenant discriminator exactly as Invoke-EntraOpsMsGraphQuery does,
+                    # so pre-populated keys are found by its cache lookup (which is tenant-scoped
+                    # to prevent cross-tenant cache poisoning when processing multiple tenants in
+                    # the same session/runspace). Order must match: CurrentGraphTenantId (cross-tenant
+                    # switch, REST-only) -> MgContext -> TenantIdContext -> default.
+                    $CacheTenantId = $__EntraOpsSession['CurrentGraphTenantId']
+                    if ([string]::IsNullOrEmpty($CacheTenantId)) {
+                        try {
+                            $CacheTenantId = (Get-MgContext -ErrorAction Stop).TenantId
+                        } catch {
+                            Write-Verbose "Unable to determine current Graph tenant context for cache scoping: $_"
+                        }
+                    }
+                    if ([string]::IsNullOrEmpty($CacheTenantId)) {
+                        $CacheTenantId = $Global:TenantIdContext
+                    }
+                    if ([string]::IsNullOrEmpty($CacheTenantId)) {
+                        $CacheTenantId = "default"
+                    }
+
                     foreach ($Obj in $PreFetchedObjects) {
                         # Construct the exact cache key the consumer function will use
-                        # Must match the full URL format used by Invoke-EntraOpsMsGraphQuery
-                        $CacheKey = "https://graph.microsoft.com/beta/directoryObjects/$($Obj.id)?`$select=$PropsToSelect"
+                        # Must match the full URL + tenant format used by Invoke-EntraOpsMsGraphQuery
+                        $CacheKey = "$CacheTenantId#https://graph.microsoft.com/beta/directoryObjects/$($Obj.id)?`$select=$PropsToSelect"
                         
                         if (-not $__EntraOpsSession.GraphCache.ContainsKey($CacheKey)) {
                             $__EntraOpsSession.GraphCache[$CacheKey] = $Obj
@@ -125,29 +145,56 @@ function Invoke-EntraOpsParallelObjectResolution {
     $ObjectDetailsCache = @{}
     
     # Determine if parallel processing is viable (PowerShell 7+ guaranteed by module prerequisite)
-    $HasSufficientObjects = $UniqueObjectIds.Count -ge 20
-    $IsUsingMgGraphSDK = -not $Global:UseAzPwshOnly
-    $UseParallel = $EnableParallelProcessing -and $HasSufficientObjects -and $IsUsingMgGraphSDK
+    # Parallel runspaces authenticate either through the Graph SDK's process-wide auth context
+    # (SDK mode) or through the shared session's pre-warmed MsGraphTokenCache (REST-only mode:
+    # Connect-EntraOps -UseInvokeRestMethodOnly skips Connect-MgGraph entirely for non-interactive
+    # auth, so no SDK context exists - the token is pre-warmed here in the main thread because
+    # Get-AzAccessToken inside fresh runspaces is not guaranteed to see the Az context).
+    # Threshold 5: sequential resolution costs ~4-6s per object (Get-EntraOpsPrivilegedEntraObject
+    # makes several Graph calls beyond the pre-fetch), so the runspace pool pays off well below the
+    # former threshold of 20.
+    $HasSufficientObjects = $UniqueObjectIds.Count -ge 5
+    $IsRestOnlyMode = [bool]$__EntraOpsSession['UseInvokeRestMethodOnly']
+    $IsUsingMgGraphSDK = $false
+    if (-not $IsRestOnlyMode) {
+        try {
+            $IsUsingMgGraphSDK = $null -ne (Get-MgContext -ErrorAction Stop)
+        } catch {
+            Write-Verbose "Microsoft Graph SDK context not available - parallel object resolution requires it: $($_.Exception.Message)"
+        }
+    }
+    $RestOnlyParallelReady = $false
+    if ($IsRestOnlyMode -and $EnableParallelProcessing) {
+        $RestOnlyParallelReady = Initialize-EntraOpsRestOnlyParallelToken
+    }
+    $HasParallelAuth = $IsUsingMgGraphSDK -or $RestOnlyParallelReady
+    $UseParallel = $EnableParallelProcessing -and $HasSufficientObjects -and $HasParallelAuth
     
     if ($UseParallel) {
-        Write-Host "Using parallel processing with $ParallelThrottleLimit threads (Microsoft Graph SDK authentication)..."
-        Write-Verbose "MgGraph authentication context is process-scoped and will be accessible in parallel runspaces"
+        $AuthModeLabel = if ($IsUsingMgGraphSDK) { "Microsoft Graph SDK authentication" } else { "REST-only with pre-warmed token" }
+        Write-Host "Using parallel processing with $ParallelThrottleLimit threads ($AuthModeLabel)..."
         
-        # Verify MgGraph connection exists
-        $MgContext = Get-MgContext
-        if ($null -eq $MgContext) {
-            Write-Warning "Microsoft Graph is not connected. Falling back to sequential processing."
-            $UseParallel = $false
-        } else {
-            Write-Verbose "MgGraph Context: TenantId=$($MgContext.TenantId), Scopes=$($MgContext.Scopes -join ', ')"
-            
-            Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
+        # SDK mode: verify MgGraph connection exists (REST-only mode was validated by the pre-warm)
+        $MgGraphModulePath = $null
+        if ($IsUsingMgGraphSDK) {
+            $MgContext = Get-MgContext
+            if ($null -eq $MgContext) {
+                Write-Warning "Microsoft Graph is not connected. Falling back to sequential processing."
+                $UseParallel = $false
+            } else {
+                Write-Verbose "MgGraph Context: TenantId=$($MgContext.TenantId), Scopes=$($MgContext.Scopes -join ', ')"
+                Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
+                $MgGraphModulePath = (Get-Module Microsoft.Graph.Authentication).Path
+            }
+        }
+        
+        if ($UseParallel) {
             $EntraOpsModulePath = Split-Path $PSScriptRoot -Parent
-            $MgGraphModulePath = (Get-Module Microsoft.Graph.Authentication).Path
             
             # Capture global variables needed by Get-EntraOpsPrivilegedEntraObject
             $LocalEntraOpsConfig = $Global:EntraOpsConfig
             $LocalEntraOpsBaseFolder = $Global:EntraOpsBaseFolder
+            $LocalTenantIdContext = $Global:TenantIdContext
             $LocalEntraOpsSession = $Script:__EntraOpsSession
 
             try {
@@ -157,15 +204,18 @@ function Invoke-EntraOpsParallelObjectResolution {
                     $LocalTenantId = $using:TenantId
                     $LocalEntraOpsPath = $using:EntraOpsModulePath
                     $LocalMgGraphPath = $using:MgGraphModulePath
+                    $LocalIsRestOnly = $using:IsRestOnlyMode
                     
                     try {
-                        if (-not (Get-Module -Name Microsoft.Graph.Authentication)) {
-                            Import-Module $LocalMgGraphPath -ErrorAction Stop
-                        }
-                        
-                        $ThreadMgContext = Get-MgContext
-                        if ($null -eq $ThreadMgContext) {
-                            throw "MgGraph context not available in parallel runspace"
+                        if (-not $LocalIsRestOnly) {
+                            if (-not (Get-Module -Name Microsoft.Graph.Authentication)) {
+                                Import-Module $LocalMgGraphPath -ErrorAction Stop
+                            }
+                            
+                            $ThreadMgContext = Get-MgContext
+                            if ($null -eq $ThreadMgContext) {
+                                throw "MgGraph context not available in parallel runspace"
+                            }
                         }
                         
                         # Import EntraOps module to get all functions
@@ -179,9 +229,15 @@ function Invoke-EntraOpsParallelObjectResolution {
                             throw "EntraOps module manifest not found at $EntraOpsModuleManifest"
                         }
                         
-                        # Initialize session variable with cache from main session
+                        # Inject the shared session INTO THE MODULE SCOPE: module functions resolve
+                        # $__EntraOpsSession from their own script scope (created fresh on import), so a
+                        # runspace-local $script:/$global: assignment never reaches them. Required for
+                        # REST-only auth (pre-warmed MsGraphTokenCache + UseInvokeRestMethodOnly flag)
+                        # and makes the pre-fetched GraphCache visible to runspaces in both modes.
                         if ($using:LocalEntraOpsSession) {
                             $script:__EntraOpsSession = $using:LocalEntraOpsSession
+                            $EntraOpsModuleInstance = Get-Module -Name EntraOps
+                            & $EntraOpsModuleInstance { param($s) Set-Variable -Name __EntraOpsSession -Value $s -Scope Script } $script:__EntraOpsSession
                         } elseif (-not (Get-Variable -Name __EntraOpsSession -Scope Script -ErrorAction SilentlyContinue)) {
                             $script:__EntraOpsSession = @{
                                 GraphCache    = @{}
@@ -189,10 +245,14 @@ function Invoke-EntraOpsParallelObjectResolution {
                             }
                         }
                         
-                        # Restore global variables in parallel runspace
-                        New-Variable -Name UseAzPwshOnly -Value $false -Scope Global -Force -ErrorAction SilentlyContinue
+                        # Restore global variables in parallel runspace. UseInvokeRestMethodOnly mirrors the
+                        # session mode: SDK mode authenticates via the process-wide MgGraph context, REST-only
+                        # mode via the shared session's pre-warmed token cache
+                        New-Variable -Name UseInvokeRestMethodOnly -Value $LocalIsRestOnly -Scope Global -Force -ErrorAction SilentlyContinue
                         New-Variable -Name EntraOpsConfig -Value $using:LocalEntraOpsConfig -Scope Global -Force -ErrorAction SilentlyContinue
                         New-Variable -Name EntraOpsBaseFolder -Value $using:LocalEntraOpsBaseFolder -Scope Global -Force -ErrorAction SilentlyContinue
+                        # Cache-key tenant scoping in REST-only mode falls back to this global (no MgContext)
+                        New-Variable -Name TenantIdContext -Value $using:LocalTenantIdContext -Scope Global -Force -ErrorAction SilentlyContinue
                         
                         $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $LocalTenantId
                         
@@ -243,8 +303,10 @@ function Invoke-EntraOpsParallelObjectResolution {
     if (-not $UseParallel) {
         if ($EnableParallelProcessing) {
             $Reasons = @()
-            if (-not $HasSufficientObjects) { $Reasons += "dataset too small (<20 objects)" }
-            if (-not $IsUsingMgGraphSDK) { $Reasons += "UseAzPwshOnly mode enabled" }
+            if (-not $HasSufficientObjects) { $Reasons += "dataset too small (<5 objects)" }
+            if (-not $HasParallelAuth) {
+                $Reasons += if ($IsRestOnlyMode) { "Graph token pre-warm for REST-only parallel processing failed" } else { "Microsoft Graph SDK context not available" }
+            }
             if ($Reasons.Count -gt 0) {
                 Write-Host "Using sequential processing: $($Reasons -join ', ')"
             }

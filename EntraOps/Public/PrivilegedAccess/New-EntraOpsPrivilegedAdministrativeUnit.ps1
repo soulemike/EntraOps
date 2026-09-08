@@ -33,12 +33,19 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
         [Array]$FilterObjectType = ("User", "Group")
         ,        
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
+        [ValidateSet("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
         [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "Selected", "All")]
         [string]$RestrictedAuMode = "Selected" #Default value will not create RMAU for Tier0 and EntraID and Identity Governance RBACs
+        ,
+        [Parameter(Mandatory = $False)]
+        [boolean]$ApplyAdministrativeUnitAssignments = $false
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateRange(0, 1)]
+        [double]$RemovalSafetyThreshold = 0.5
     )
 
     foreach ($RbacSystem in $RbacSystems) {
@@ -59,9 +66,11 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
 
             #region Verify existing or create new (Restricted Management) Administrative Units
             $Name = "Tier" + $TierLevel.EAMTierLevelTagValue + "-" + $TierLevel.EAMTierLevelName + "." + $RbacSystem
-            $AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($Name)'" -OutputType PSObject -DisableCache).displayName
+            $AdministrativeUnits = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$(ConvertTo-EntraOpsODataStringLiteral -Value $Name)'" -OutputType PSObject -DisableCache)
+            $AdministrativeUnit = (Select-EntraOpsUniqueGraphObject -InputObject $AdministrativeUnits -ObjectDescription "administrative unit '$Name'" -AllowNotFound).displayName
             if (-not $AdministrativeUnit) {
                 Write-Host "Creating Administrative Unit $($Name)"
+                $CreatedAuObject = $null
 
                 $AuParams = @{
                     DisplayName = $Name
@@ -76,27 +85,34 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
                     $AuParams.IsMemberManagementRestricted = $true
                     $body = $AuParams | ConvertTo-Json -Depth 10
                     try {
-                        $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits"
+                        $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits" -ThrowOnFailure
                     } catch {
                         Write-Warning "Can not create Administrative Unit $($AuParams.DisplayName)"
                     }
                 } else {
                     $Body = $AuParams | ConvertTo-Json -Depth 10
                     try {
-                        $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits"
+                        $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits" -ThrowOnFailure
                     } catch {
                         Write-Warning "Can not create Administrative Unit $($AuParams.DisplayName)! Error: $_"
                     }
 
                 }
 
-                # Check if AU has been created successfully, wait for delay and retry if not available yet
-                Try {
-                    Do { Start-Sleep -Seconds 1 }
-                    Until ($AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache))
-                    Write-Host "$($AdministrativeUnit.displayName) has been created successfully" -f Green
-                } Catch {
-                    Write-Warning "$($AuParams.DisplayName) not available yet"
+                # Poll only after Administrative Unit creation returns an object ID.
+                if ($CreatedAuObject.id) {
+                    # Check if AU has been created successfully, wait for delay and retry if not available yet
+                    $AdministrativeUnit = $null
+                    $MaxPollSeconds = 60
+                    for ($i = 0; $i -lt $MaxPollSeconds -and -not $AdministrativeUnit; $i++) {
+                        $AdministrativeUnit = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache -SuppressNotFoundWarning
+                        if (-not $AdministrativeUnit) { Start-Sleep -Seconds 1 }
+                    }
+                    if ($AdministrativeUnit) {
+                        Write-Host "$($AdministrativeUnit.displayName) has been created successfully" -ForegroundColor Green
+                    } else {
+                        Write-Warning "$($AuParams.DisplayName) not available after $MaxPollSeconds second(s)."
+                    }
                 }
             } else {
                 Write-Host "Administrative Unit $($AdministrativeUnit) already exists"

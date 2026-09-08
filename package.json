@@ -1,0 +1,12 @@
+{
+  "name": "entraops-docs-tests",
+  "private": true,
+  "scripts": {
+    "test:browser": "playwright test",
+    "test:reports": "playwright test --project=reports",
+    "test:wizard": "playwright test --project=docs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}

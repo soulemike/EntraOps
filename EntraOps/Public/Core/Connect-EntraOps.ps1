@@ -1,27 +1,47 @@
 <#
 .SYNOPSIS
-    Established connection to required PowerShell modules and requests access tokens for EntraOps PowerShell Module
+    Establishes connections to required PowerShell modules and requests EntraOps access tokens.
 
 .DESCRIPTION
     Connection to Azure Resource Management and Microsoft Graph API by using Connect-AzAccount and Connect-MgGraph.
 
 .PARAMETER AuthenticationType
     Type of authentication to be used for Azure and Microsoft Graph. Default is "AlreadyAuthenticated".
-    .NOTES
+
+.PARAMETER UseInvokeRestMethodOnly
+    Use Invoke-RestMethod instead of the Microsoft Graph SDK (Invoke-MgGraphRequest) for all
+    Invoke-EntraOps*Query cmdlets in this session. The Microsoft Graph SDK is neither required nor
+    installed in this mode; tokens are provided via -MsGraphAccessToken or acquired with
+    Get-AzAccessToken from the Az PowerShell context. Can also be set through the config file
+    (top-level setting "UseInvokeRestMethodOnly"); an explicit parameter wins over the config file.
+    Note: parallel object resolution requires the Graph SDK and falls back to sequential processing
+    in this mode. Connect-EntraOps itself also skips Connect-MgGraph for service-principal/managed-
+    identity AuthenticationType values (SystemAssignedMSI, UserAssignedMSI, FederatedCredentials,
+    AlreadyAuthenticated) in this mode - their Graph tokens come from Get-AzAccessToken instead, since
+    application permissions are fully contained in a client-credentials token without needing
+    per-request scopes. UserInteractive and DeviceAuthentication still call Connect-MgGraph (and thus
+    still require Microsoft.Graph.Authentication) even with this switch enabled, because only
+    Connect-MgGraph -Scopes can trigger the interactive/incremental consent prompt that delegated
+    Graph scopes require; a warning is emitted when this fallback applies.
 
 .EXAMPLE
     Using Interactive Sign-In of User with double authentication to Az PowerShell (Connect-AzAccount) and Microsoft Graph SDK (Connect-MgGraph)
-    Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "cloudlab.onmicrosoft.com"
+    Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 
 .EXAMPLE
     Using authenticated session to Az PowerShell (Connect-AzAccount) in GitHub workflow or any other workload identity environment to request access token for Microsoft Graph SDK (by Get-AzAccessToken) without any further initial authentication.
-    Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "cloudlab.onmicrosoft.com"
+    Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso.onmicrosoft.com"
 
 .EXAMPLE
     Using Managed Identity (User Assigned) to sign-in to Azure and Microsoft Graph
-    Connect-EntraOps -AuthenticationType "UserAssignedMSI" -AccountId "b8c2f9d2-9886-4981-b9c2-e8e3726a871d" -TenantName "cloudlab.onmicrosoft.com"
+    Connect-EntraOps -AuthenticationType "UserAssignedMSI" -AccountId "00000000-0000-0000-0000-000000000000" -TenantName "contoso.onmicrosoft.com"
 #>
 function Connect-EntraOps {
+    # -MsGraphAccessToken is a plaintext [string] by public contract (populated from workflow
+    # secrets/federated tokens in CI pipelines); Connect-MgGraph -AccessToken requires a
+    # SecureString, so the one-time in-memory conversion below is unavoidable without a breaking
+    # change to the parameter type.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'MsGraphAccessToken is an existing public string parameter fed by external pipeline secrets; converting it in memory for Connect-MgGraph -AccessToken does not expose a new plaintext secret, and changing the parameter to SecureString would break the public API.')]
     [cmdletbinding()]
     param (
         [Parameter(Mandatory = $False)]
@@ -40,9 +60,11 @@ function Connect-EntraOps {
         [System.String]$TenantName
         ,
         [Parameter(Mandatory = $False)]
+        [ValidatePattern('^$|^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
         [System.String]$TenantId
         ,
         [Parameter(Mandatory = $False)]
+        [ValidatePattern('^$|^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
         [System.String]$ManagingTenantId
         ,
         [Parameter(Mandatory = $False)]
@@ -124,11 +146,59 @@ Community Project by Thomas Naunheim - www.entraops.com
         #endregion
 
         #region Switch between Microsoft Graph SDK (Invoke-MgGraphRequest) and Azure PowerShell only in combination with Invoke-RestMethod
-        if ($UseInvokeRestMethodOnly -eq $true) {
-            New-Variable -Name UseInvokeRestMethodOnly -Value $True -Scope Global -Force
-        } else {
-            New-Variable -Name UseInvokeRestMethodOnly -Value $False -Scope Global -Force        
+        # Resolve the effective mode: explicit parameter > config file setting > default ($false)
+        if (-not $PSBoundParameters.ContainsKey('UseInvokeRestMethodOnly') -and $null -ne $EarlyConfig.UseInvokeRestMethodOnly) {
+            $UseInvokeRestMethodOnly = [bool]$EarlyConfig.UseInvokeRestMethodOnly
+            Write-Verbose "UseInvokeRestMethodOnly set from config file: $UseInvokeRestMethodOnly"
+        }
 
+        # The module-private session store is the authoritative home of the mode - all
+        # Invoke-EntraOps*Query cmdlets read it from there (a user-set global variable is
+        # only honored as legacy fallback when the session store has no value)
+        $__EntraOpsSession['UseInvokeRestMethodOnly'] = [bool]$UseInvokeRestMethodOnly
+
+        # Clean up the flag persisted as global variable by previous module versions
+        Remove-Variable -Name UseInvokeRestMethodOnly -Scope Global -Force -ErrorAction SilentlyContinue
+
+        # Start each connection with fresh token state: cached tokens from a previous connection may
+        # belong to another tenant and would otherwise be re-used until they expire. Tenant-keyed ARM
+        # token entries stay valid; only the context-dependent 'default' entry must go.
+        $__EntraOpsSession.MsGraphTokenCache.Clear()
+        $__EntraOpsSession.ArmTokenCache.Remove('default')
+
+        # Persist an explicitly provided Microsoft Graph access token in the module-private session
+        # store so the Invoke-RestMethod path of Invoke-EntraOpsMsGraphQuery can use it (required for
+        # token-based authentication where the Az context cannot mint new Graph tokens itself).
+        # Deliberately not a global variable: module scope keeps the token out of the user-visible
+        # session state (Get-Variable, transcripts, diagnostic dumps).
+        if (-not [string]::IsNullOrEmpty($MsGraphAccessToken)) {
+            # Read the real expiry from the JWT exp claim; fall back to a conservative default
+            $ProvidedTokenExpiry = [DateTime]::UtcNow.AddMinutes(50)
+            try {
+                $PayloadPart = ($MsGraphAccessToken -split '\.')[1].Replace('-', '+').Replace('_', '/')
+                switch ($PayloadPart.Length % 4) { 2 { $PayloadPart += '==' } 3 { $PayloadPart += '=' } }
+                $TokenPayload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($PayloadPart)) | ConvertFrom-Json
+                if ($TokenPayload.exp) { $ProvidedTokenExpiry = [DateTimeOffset]::FromUnixTimeSeconds($TokenPayload.exp).UtcDateTime }
+            } catch {
+                Write-Verbose "Could not parse expiry from provided Microsoft Graph access token: $($_.Exception.Message)"
+            }
+
+            $__EntraOpsSession.MsGraphTokenCache['provided'] = @{ Token = $MsGraphAccessToken; Expiry = $ProvidedTokenExpiry }
+
+            # Clean up a token persisted as global variable by previous module versions
+            Remove-Variable -Name MsGraphAccessToken -Scope Global -Force -ErrorAction SilentlyContinue
+        }
+
+        # Azure authentication and ARM access are required in every connection mode.
+        @(
+            @{ ModuleName = 'Az.Accounts'; ModuleVersion = '2.19.0' }
+            @{ ModuleName = 'Az.Resources'; ModuleVersion = '6.16.2' }
+        ) | ForEach-Object {
+            Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion
+        }
+
+        # The Microsoft Graph SDK is only required (and installed) when it is actually used
+        if (-not $__EntraOpsSession['UseInvokeRestMethodOnly']) {
             $RequiredCoreModules = @{
                 ModuleName    = 'Microsoft.Graph.Authentication'
                 ModuleVersion = '2.0.0'
@@ -155,13 +225,29 @@ Community Project by Thomas Naunheim - www.entraops.com
                 "PrivilegedAccess.Read.AzureADGroup",
                 "PrivilegedEligibilitySchedule.Read.AzureADGroup",
                 "Policy.Read.All",
+                "RemoteTenantGroups.Read.All",
                 "RoleManagement.Read.All",
                 "TenantGovernance-Relationship.Read.All",
                 "ThreatHunting.Read.All",
-                "User.Read.All"
+                "User.Read.All",
+                "Zone.Read.All"
             )
         }
         #endregion
+
+        # In UseInvokeRestMethodOnly mode, Invoke-EntraOps*Query cmdlets acquire and cache their own
+        # Microsoft Graph token via Get-AzAccessToken, so Connect-MgGraph is unnecessary for the
+        # service-principal/managed-identity authentication types below: their Graph permissions are
+        # Application permissions already admin-consented to the app, and a client-credentials token
+        # always contains every granted app role (no per-request scope negotiation needed).
+        # UserInteractive/DeviceAuthentication are the exception: Get-AzAccessToken cannot trigger the
+        # interactive/incremental consent prompt that delegated Graph scopes require, so those two
+        # authentication types still fall back to Connect-MgGraph (and therefore still require
+        # Microsoft.Graph.Authentication to be installed) even when UseInvokeRestMethodOnly is enabled.
+        $SkipGraphSdkAuth = [bool]$__EntraOpsSession['UseInvokeRestMethodOnly'] -and ($AuthenticationType -notin @('UserInteractive', 'DeviceAuthentication'))
+        if ($__EntraOpsSession['UseInvokeRestMethodOnly'] -and $AuthenticationType -in @('UserInteractive', 'DeviceAuthentication')) {
+            Write-Warning "UseInvokeRestMethodOnly is enabled, but AuthenticationType '$AuthenticationType' still requires Connect-MgGraph (Microsoft.Graph.Authentication module) as a fallback: Get-AzAccessToken cannot trigger the interactive/incremental admin-consent prompt needed for delegated Microsoft Graph scopes, only Connect-MgGraph -Scopes can. Use a service-principal-based AuthenticationType (SystemAssignedMSI, UserAssignedMSI, FederatedCredentials or AlreadyAuthenticated) to avoid this Graph SDK dependency, or provide an already-consented -MsGraphAccessToken."
+        }
 
         #region Switch to choose authentication method for Azure and Microsoft Graph
         switch ( $AuthenticationType ) {
@@ -222,9 +308,13 @@ Community Project by Thomas Naunheim - www.entraops.com
                     Write-Output "Logging in to Azure..."
                     Connect-AzAccount -Identity -ErrorAction Stop
                     Write-Output "Succesfully logged in to Azure"
-                    Write-Output "Logging in to Microsoft Graph..."
-                    Connect-MgGraph -Identity -ErrorAction Stop -NoWelcome
-                    Write-Output "Succesfully logged in to Microsoft Graph"
+                    if (-not $SkipGraphSdkAuth) {
+                        Write-Output "Logging in to Microsoft Graph..."
+                        Connect-MgGraph -Identity -ErrorAction Stop -NoWelcome
+                        Write-Output "Succesfully logged in to Microsoft Graph"
+                    } else {
+                        Write-Verbose "UseInvokeRestMethodOnly is enabled: skipping Connect-MgGraph, Microsoft Graph tokens will be acquired via Get-AzAccessToken when needed."
+                    }
                 } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
@@ -235,9 +325,13 @@ Community Project by Thomas Naunheim - www.entraops.com
                     Write-Output "Logging in to Azure..."
                     Connect-AzAccount -Identity -AccountId $AccountId -ErrorAction Stop
                     Write-Output "Succesfully logged in to Azure"
-                    Write-Output "Logging in to Microsoft Graph..."
-                    Connect-MgGraph -Identity -ClientId $AccountId -NoWelcome -ErrorAction Stop
-                    Write-Output "Succesfully logged in to Microsoft Graph"
+                    if (-not $SkipGraphSdkAuth) {
+                        Write-Output "Logging in to Microsoft Graph..."
+                        Connect-MgGraph -Identity -ClientId $AccountId -NoWelcome -ErrorAction Stop
+                        Write-Output "Succesfully logged in to Microsoft Graph"
+                    } else {
+                        Write-Verbose "UseInvokeRestMethodOnly is enabled: skipping Connect-MgGraph, Microsoft Graph tokens will be acquired via Get-AzAccessToken when needed."
+                    }
                 } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
@@ -250,10 +344,12 @@ Community Project by Thomas Naunheim - www.entraops.com
                 try {
                     # Pre-authenticate to managing tenant for cross-tenant access
                     if (-not [string]::IsNullOrEmpty($ManagingTenantId)) {
-                        Write-Output "Pre-authenticating to managing tenant (Microsoft Graph)..."
                         $SecureManagingAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ManagingTenantId -AsSecureString).Token
-                        Connect-MgGraph -AccessToken $SecureManagingAccessToken -ErrorAction Stop -NoWelcome
-                        Write-Output "Successfully pre-authenticated to managing tenant $ManagingTenantId"
+                        if (-not $SkipGraphSdkAuth) {
+                            Write-Output "Pre-authenticating to managing tenant (Microsoft Graph)..."
+                            Connect-MgGraph -AccessToken $SecureManagingAccessToken -ErrorAction Stop -NoWelcome
+                            Write-Output "Successfully pre-authenticated to managing tenant $ManagingTenantId"
+                        }
                     }
 
                     # Connect to target tenant
@@ -262,7 +358,28 @@ Community Project by Thomas Naunheim - www.entraops.com
                     } else {
                         $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
                     }
-                    Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
+                    if (-not $SkipGraphSdkAuth) {
+                        Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
+                    } else {
+                        Write-Verbose "UseInvokeRestMethodOnly is enabled: skipping Connect-MgGraph, Microsoft Graph tokens will be acquired via Get-AzAccessToken when needed."
+                    }
+
+                    # Pre-warm an ARM access token too (same pattern as above), while the GitHub OIDC
+                    # federated assertion behind this Az context is still fresh (it's only valid for a
+                    # few minutes). Az.Accounts caches acquired tokens per resource/tenant across the
+                    # job's remaining steps, so a later step's first-ever ARM request (e.g. Azure RBAC
+                    # collection) is served from this cached token instead of needing a new assertion
+                    # exchange once it has expired. Non-fatal: callers that never touch Azure RBAC
+                    # should not fail Connect-EntraOps over this optimization.
+                    try {
+                        if (-not [string]::IsNullOrEmpty($TenantId)) {
+                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -TenantId $TenantId -AsSecureString).Token
+                        } else {
+                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -AsSecureString).Token
+                        }
+                    } catch {
+                        Write-Verbose "Could not pre-warm an Azure Resource Manager access token: $($_.Exception.Message)"
+                    }
                 } catch {
                     throw $_.Exception
                 }
@@ -270,15 +387,17 @@ Community Project by Thomas Naunheim - www.entraops.com
             AlreadyAuthenticated {
                 # Recommendation 2: Optimize context retrieval to avoid redundant cmdlet calls
                 $CurrentAzContext = Get-AzContext
-                $CurrentMgContext = Get-MgContext
+                $CurrentMgContext = if (-not $SkipGraphSdkAuth) { Get-MgContext } else { $null }
 
                 # Pre-authenticate to managing tenant for cross-tenant access
                 if (-not [string]::IsNullOrEmpty($ManagingTenantId) -and $Null -ne $CurrentAzContext.Tenant.Id) {
                     try {
-                        Write-Output "Pre-authenticating to managing tenant (Microsoft Graph)..."
                         $SecureManagingAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ManagingTenantId -AsSecureString).Token
-                        Connect-MgGraph -AccessToken $SecureManagingAccessToken -ErrorAction Stop -NoWelcome
-                        Write-Output "Successfully pre-authenticated to managing tenant $ManagingTenantId"
+                        if (-not $SkipGraphSdkAuth) {
+                            Write-Output "Pre-authenticating to managing tenant (Microsoft Graph)..."
+                            Connect-MgGraph -AccessToken $SecureManagingAccessToken -ErrorAction Stop -NoWelcome
+                            Write-Output "Successfully pre-authenticated to managing tenant $ManagingTenantId"
+                        }
                     } catch {
                         Write-Warning "Failed to pre-authenticate to managing tenant: $($_.Exception.Message)"
                     }
@@ -287,9 +406,11 @@ Community Project by Thomas Naunheim - www.entraops.com
                 if ($AccountId -and $MsGraphAccessToken -and $AzArmAccessToken) {
                     Connect-AzAccount -AccountId $AccountId -AccessToken $AzArmAccessToken -Tenant $TenantName
 
-                    $SecureMsGraphAccessToken = $MsGraphAccessToken | ConvertTo-SecureString -AsPlainText -Force
-                    Connect-MgGraph -AccessToken $SecureMsGraphAccessToken -NoWelcome
-                    
+                    if (-not $SkipGraphSdkAuth) {
+                        $SecureMsGraphAccessToken = $MsGraphAccessToken | ConvertTo-SecureString -AsPlainText -Force
+                        Connect-MgGraph -AccessToken $SecureMsGraphAccessToken -NoWelcome
+                    }
+
                 } elseif ($Null -ne $CurrentAzContext.Tenant.Id -and $Null -ne $CurrentMgContext.TenantId) {
                     try {
                         $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
@@ -299,12 +420,16 @@ Community Project by Thomas Naunheim - www.entraops.com
                         throw "Failed to connect to Microsoft Graph using Azure access token: $ErrorMessage"
                     }                    
                 } elseif ($Null -ne $CurrentAzContext.Tenant.Id) {
-                    try {
-                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
-                        Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
-                    } catch {
-                        $ErrorMessage = if ($null -ne $_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
-                        throw "Failed to connect to Microsoft Graph using Azure access token: $ErrorMessage"
+                    if ($SkipGraphSdkAuth) {
+                        Write-Verbose "UseInvokeRestMethodOnly is enabled: skipping Connect-MgGraph, Microsoft Graph tokens will be acquired via Get-AzAccessToken when needed."
+                    } else {
+                        try {
+                            $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
+                            Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
+                        } catch {
+                            $ErrorMessage = if ($null -ne $_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
+                            throw "Failed to connect to Microsoft Graph using Azure access token: $ErrorMessage"
+                        }
                     }
                 } else {
                     Write-Error -Message 'User or workload is not already authenticated. This authentication method is the default for EntraOps. Check "Get-Help Connect-EntraOps" to review the various options. Authenticated Azure PowerShell session is required for using "AlreadyAuthenticated" mode.'
@@ -322,7 +447,7 @@ Community Project by Thomas Naunheim - www.entraops.com
                 Write-Output "Successfully switched Azure context to target tenant"
             }
 
-            $VerifyMgContext = Get-MgContext
+            $VerifyMgContext = if (-not $SkipGraphSdkAuth) { Get-MgContext } else { $null }
             if ($VerifyMgContext -and $VerifyMgContext.TenantId -ne $TenantId) {
                 Write-Output "Microsoft Graph is connected to $($VerifyMgContext.TenantId), reconnecting to target tenant $TenantId..."
                 try {
@@ -339,13 +464,18 @@ Community Project by Thomas Naunheim - www.entraops.com
         #region Summary of established connection to ARM and Microsoft Graph API
         # Recommendation 3: Optimize context retrieval and verbose output generation
         Write-Verbose -Message "Connected to Azure Management"
-        $AzContext = Get-AzContext | Select-Object Account, Tenant, TokenCache
+        $AzContextRaw = Get-AzContext
+        $AzContext = $AzContextRaw | Select-Object Account, Tenant, TokenCache
         Write-Verbose ($AzContext | Out-String)
 
-        # Retrieve MG context once
-        $MgContextRaw = Get-MgContext
-        
-        Write-Verbose -Message "Connected to Microsoft Graph"
+        # Retrieve MG context once (skipped when Connect-MgGraph was itself skipped in REST-only mode)
+        $MgContextRaw = if (-not $SkipGraphSdkAuth) { Get-MgContext } else { $null }
+
+        if ($MgContextRaw) {
+            Write-Verbose -Message "Connected to Microsoft Graph"
+        } else {
+            Write-Verbose -Message "Not connected via Microsoft Graph SDK (UseInvokeRestMethodOnly mode: tokens are acquired via Get-AzAccessToken as needed)"
+        }
         $MgContext = $MgContextRaw | Select-Object ClientId, TenantId, AppName, ContextScope
         Write-Verbose -Message ($MgContext | Out-String)
 
@@ -354,7 +484,27 @@ Community Project by Thomas Naunheim - www.entraops.com
         Write-Verbose -Message ($MgScopes | Out-String)
         #endregion
 
+        #region Validate baseline Graph scopes for already-authenticated user sessions
+        if ($AuthenticationType -eq 'AlreadyAuthenticated' -and $AzContextRaw.Account.Type -eq 'User' -and $MgContextRaw) {
+            $MissingScopes = @($Scopes | Where-Object { $_ -notin $MgContextRaw.Scopes })
+            $TenantGovernanceRelationshipScope = 'TenantGovernance-Relationship.Read.All'
+            $MissingBaselineScopes = @($MissingScopes | Where-Object { $_ -ne $TenantGovernanceRelationshipScope })
+            if ($MissingBaselineScopes.Count -gt 0) {
+                Write-Warning "The already-authenticated user session is missing $($MissingBaselineScopes.Count) baseline EntraOps delegated scope(s): $($MissingBaselineScopes -join ', '). Dependent collection steps may fail with 403 Forbidden. Reconnect with the missing scopes consented."
+            }
+            if ($MissingScopes -contains $TenantGovernanceRelationshipScope) {
+                $HasManagingTenantConfiguration = -not [string]::IsNullOrWhiteSpace($ManagingTenantId) -or -not [string]::IsNullOrWhiteSpace($ManagingTenantName)
+                if ($HasManagingTenantConfiguration) {
+                    Write-Warning "The already-authenticated user session is missing '$TenantGovernanceRelationshipScope'. Tenant Governance delegated-administration relationships may not be discovered or analyzed. Reconnect with this delegated scope consented."
+                } else {
+                    Write-Warning "The already-authenticated user session is missing '$TenantGovernanceRelationshipScope'. No ManagingTenantId or ManagingTenantName is configured, so this may be acceptable only if you have verified that no Tenant Governance delegated-administration relationships exist. Without this scope, unknown relationships cannot be discovered or analyzed."
+                }
+            }
+        }
+        #endregion
+
         #region Import Environment variables if exists
+        $IncludeObjectDetails = $false
         if ($ConfigFilePath) {
             try {
                 $EntraOpsConfig = Get-Content -Path $ConfigFilePath | ConvertFrom-Json -Depth 10 -AsHashtable
@@ -369,6 +519,10 @@ Community Project by Thomas Naunheim - www.entraops.com
             if ($EntraOpsConfig.AutomatedAdministrativeUnitManagement) { $EntraOpsConfig.AutomatedAdministrativeUnitManagement.Remove("ApplyAdministrativeUnitAssignments") }
             if ($EntraOpsConfig.AutomatedConditionalAccessTargetGroups) { $EntraOpsConfig.AutomatedConditionalAccessTargetGroups.Remove("ApplyConditionalAccessTargetGroups") }
             if ($EntraOpsConfig.AutomatedRmauAssignmentsForUnprotectedObjects) { $EntraOpsConfig.AutomatedRmauAssignmentsForUnprotectedObjects.Remove("ApplyRmauAssignmentsForUnprotectedObjects") }
+            if ($EntraOpsConfig.AutomatedElmCatalogProtection) { $EntraOpsConfig.AutomatedElmCatalogProtection.Remove("ApplyPrivilegedElmCatalogProtection") }
+            if ($EntraOpsConfig.ConsoleOutput -and $null -ne $EntraOpsConfig.ConsoleOutput.IncludeObjectDetails) {
+                $IncludeObjectDetails = [bool]$EntraOpsConfig.ConsoleOutput.IncludeObjectDetails
+            }
 
             New-Variable -Name EntraOpsConfig -Value $EntraOpsConfig -Scope Global -Force
             Write-Verbose -Message "Config file $($ConfigFilePath) imported"
@@ -380,14 +534,17 @@ Community Project by Thomas Naunheim - www.entraops.com
         New-Variable -Name TenantNameContext -Value $TenantName -Scope Global -Force
         New-Variable -Name ManagingTenantIdContext -Value $ManagingTenantId -Scope Global -Force
         New-Variable -Name ManagingTenantNameContext -Value $ManagingTenantName -Scope Global -Force
-        New-Variable -Name XdrAvdHuntingAccess -Value ((Get-MgContext).Scopes -contains "ThreatHunting.Read.All") -Scope Global -Force
+        New-Variable -Name EntraOpsIncludeObjectDetails -Value $IncludeObjectDetails -Scope Global -Force
+        New-Variable -Name XdrAvdHuntingAccess -Value (-not $SkipGraphSdkAuth -and (Get-MgContext).Scopes -contains "ThreatHunting.Read.All") -Scope Global -Force
         $__EntraOpsSession['AuthenticationType'] = $AuthenticationType
+        # $DefaultFolderClassification is always the Classification/ root; consumers append
+        # $TenantNameContext or Templates/ themselves (Resolve-EntraOpsClassificationPath,
+        # Import-EntraOpsClassificationOverwrites, Update-EntraOpsClassificationControlPlaneScope, ...).
+        New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/" -Scope Global -Force
         if ($MultiTenantRepo -eq $true) {
-            New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/$($TenantName)/" -Scope Global -Force
             New-Variable -Name DefaultFolderClassifiedEam -Value "$EntraOpsBaseFolder/PrivilegedEAM/$($TenantName)/" -Scope Global -Force
             Write-Verbose -Message "Multi Tenant in Repository"
         } else {
-            New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/" -Scope Global -Force
             New-Variable -Name DefaultFolderClassifiedEam -Value "$EntraOpsBaseFolder/PrivilegedEAM/" -Scope Global -Force
             Write-Verbose -Message "Single Tenant in Repository"
         }
@@ -419,7 +576,7 @@ Community Project by Thomas Naunheim - www.entraops.com
             }
             
             # Get Microsoft Graph context
-            $MgContext = Get-MgContext
+            $MgContext = if (-not $SkipGraphSdkAuth) { Get-MgContext } else { $null }
             if ($MgContext) {
                 Write-Host "  Graph Account       : $($MgContext.Account)" -ForegroundColor Green
                 Write-Host "  Graph Tenant        : $($MgContext.TenantId)" -ForegroundColor White
@@ -435,6 +592,8 @@ Community Project by Thomas Naunheim - www.entraops.com
                     }
                     Write-Host "  Graph Scopes        : $ScopeDisplay" -ForegroundColor White
                 }
+            } elseif ($SkipGraphSdkAuth) {
+                Write-Host "  Graph Account       : Not connected (UseInvokeRestMethodOnly - tokens acquired via Get-AzAccessToken as needed)" -ForegroundColor Gray
             } else {
                 Write-Host "  Graph Account       : Not connected" -ForegroundColor Gray
             }

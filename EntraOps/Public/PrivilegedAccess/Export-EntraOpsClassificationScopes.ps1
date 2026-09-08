@@ -54,6 +54,7 @@ function Export-EntraOpsClassificationScopes {
                 "c5393580-f805-4401-95e8-94b7a6ef2fc2", # Office 365 Management APIs
                 "499b84ac-1321-427f-aa17-267ca6975798", # Azure DevOps
                 "688413c8-5319-43e1-9a0e-42f49da53686", # Verified ID STS Controller
+                "3db474b9-6a0c-4840-96ac-1fceb342124f", # Microsoft Entra Verified ID
                 "58c746b0-a0b0-4647-a8f6-12dde5981638", # Azure AD Identity Governance Insights
                 "7b7531ad-5926-4f2d-8a1d-38495ad33e17", # Azure Advanced Threat Protection
                 "93625bc8-bfe2-437a-97e0-3d0060024faa", # Microsoft password reset service
@@ -72,7 +73,7 @@ function Export-EntraOpsClassificationScopes {
         }
     }
     $AppRoleProviders = foreach ($AppRoleProviderId in $AppRoleProviderIds) {
-        (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '$AppRoleProviderId'" -OutputType PSObject).value | select-object appId, appRoles, publishedPermissionScopes
+        Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '$(ConvertTo-EntraOpsODataStringLiteral -Value $AppRoleProviderId)'" -OutputType PSObject | select-object appId, appRoles, publishedPermissionScopes
     }
 
     # Collect warnings during processing
@@ -87,9 +88,11 @@ function Export-EntraOpsClassificationScopes {
             # Apply Classification (Delegated permissions match ResourceScope 'Delegation' or 'All')
             $AppRoleTierLevelClassification = $ClassificationAppRoles | where-object { ($_.TierLevelDefinition | where-object { $_.ResourceScope -in @("Delegation", "All") -and $_.ResourceAppId -eq $CurrentAppId }).RoleDefinitionActions -contains $($Scope.value) } | select-object EAMTierLevelName, EAMTierLevelTagValue
             $AppRoleServiceClassification = $ClassificationAppRoles | select-object -ExpandProperty TierLevelDefinition | where-object { $_.ResourceScope -in @("Delegation", "All") -and $_.ResourceAppId -eq $CurrentAppId -and $_.RoleDefinitionActions -contains $($Scope.value) } | select-object Service
+            # Reset per permission so a non-Graph resource cannot inherit the previous Graph app's calls.
+            $AppRoleAuthorizedApiCalls = @()
             if ($IncludeAuthorizedApiCalls -eq $True -and $_.appId -eq "00000003-0000-0000-c000-000000000000") {
                 # Apply Autorized Graph Calls if AppRoleProvider is Microsoft Graph
-                $AppRoleAuthorizedApiCalls = $AllAuthorizedApiCalls | where-object { $_.PermissionName -contains $($Scope.value) } | select-object -ExpandProperty API
+                $AppRoleAuthorizedApiCalls = @($AllAuthorizedApiCalls | where-object { $_.PermissionName -contains $($Scope.value) } | select-object -ExpandProperty API | Sort-Object -Unique)
             }
 
             if ($AppRoleTierLevelClassification.Count -gt 1 -and $AppRoleServiceClassification.Count -gt 1) {
@@ -158,7 +161,7 @@ function Export-EntraOpsClassificationScopes {
         }
     }
 
-    $ScopesOutput = $ScopesOutput | Sort-Object ScopeDisplayName
+    $ScopesOutput = $ScopesOutput | Sort-Object ScopeDisplayName, AppId, ScopeId
     $ScopesOutput | ConvertTo-Json -Depth 10 | Out-File .\Classification\Classification_Scopes.json -Force
     $ScopesOutput | Where-Object { $_.AppId -eq "00000003-0000-0000-c000-000000000000" } | ConvertTo-Json -Depth 10 | Out-File .\Classification\Classification_MsGraphScopes.json -Force
 

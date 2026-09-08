@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="690" viewBox="0 0 1200 690" role="img" aria-labelledby="title desc">
+  <title id="title">EntraOps workflow timing and dependencies</title>
+  <desc id="desc">The scheduled Privileged EAM pull triggers independent push and reporting workflows after success. Tenant Governance snapshot collection is a separate start and collect sequence, whose latest accepted snapshot is read by a later reporting run.</desc>
+  <style>
+    .title { font: 700 24px system-ui, -apple-system, sans-serif; fill: #1f1f1f; }
+    .lane { font: 700 15px system-ui, -apple-system, sans-serif; fill: #3b3a39; }
+    .head { font: 700 15px system-ui, -apple-system, sans-serif; fill: #1f1f1f; }
+    .head-tight { font: 700 13px system-ui, -apple-system, sans-serif; fill: #1f1f1f; }
+    .head-compact { font: 700 12px system-ui, -apple-system, sans-serif; fill: #1f1f1f; }
+    .body { font: 13px system-ui, -apple-system, sans-serif; fill: #3b3a39; }
+    .small { font: 12px system-ui, -apple-system, sans-serif; fill: #605e5c; }
+    .label { font: 700 12px system-ui, -apple-system, sans-serif; fill: #fff; }
+    .box { stroke-width: 2; rx: 8; }
+    .arrow { fill: none; stroke: #605e5c; stroke-width: 2.5; marker-end: url(#arrow); }
+    .dash { stroke-dasharray: 7 6; }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 Z" fill="#605e5c"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="690" fill="#f7f7f8"/>
+  <text x="44" y="48" class="title">EntraOps workflow timing and dependencies</text>
+  <text x="44" y="74" class="small">Times shown are shipped defaults. Optional workflows run only after their feature is enabled in EntraOpsConfig.json.</text>
+
+  <rect x="30" y="100" width="1140" height="250" rx="10" fill="#fff" stroke="#d2d2d7"/>
+  <text x="54" y="132" class="lane">Privileged EAM collection and reporting</text>
+  <rect x="66" y="166" width="220" height="104" class="box" fill="#e8f3ff" stroke="#0078d4"/>
+  <text x="86" y="197" class="head-compact">Pull-EntraOpsPrivilegedEAM</text>
+  <text x="86" y="222" class="body">Daily at 09:30 UTC</text>
+  <text x="86" y="244" class="small">default scheduled trigger</text>
+  <path d="M286 218 H390" class="arrow"/>
+  <text x="302" y="204" class="label" fill="#605e5c">success only</text>
+  <path d="M390 218 V166 H448" class="arrow"/>
+  <path d="M390 218 V294 H448" class="arrow"/>
+  <rect x="450" y="138" width="245" height="104" class="box" fill="#e9f6ee" stroke="#107c10"/>
+  <text x="470" y="169" class="head">Push-EntraOpsPrivilegedEAM</text>
+  <text x="470" y="194" class="body">publishes collection output</text>
+  <text x="470" y="216" class="small">runs in parallel with reporting</text>
+  <rect x="450" y="266" width="300" height="104" class="box" fill="#fff4ce" stroke="#c19c00"/>
+  <text x="470" y="297" class="head-tight">Push-EntraOpsPrivilegedReporting</text>
+  <text x="470" y="322" class="body">generates and publishes reports</text>
+  <text x="470" y="344" class="small">waits for Pull success, not Push completion</text>
+  <rect x="782" y="266" width="320" height="104" class="box" fill="#f4f4f4" stroke="#8a8886"/>
+  <text x="802" y="297" class="head">Optional direct reporting schedule</text>
+  <text x="802" y="322" class="body">Monday at 09:00 UTC</text>
+  <text x="802" y="344" class="small">disabled by default; can run without a pull</text>
+  <path d="M782 318 H753" class="arrow"/>
+
+  <rect x="30" y="390" width="1140" height="265" rx="10" fill="#fff" stroke="#d2d2d7"/>
+  <text x="54" y="422" class="lane">Optional Tenant Governance snapshots</text>
+  <rect x="66" y="458" width="220" height="110" class="box" fill="#fcebdc" stroke="#ca5010"/>
+  <text x="86" y="489" class="head">Start UTCM snapshot</text>
+  <text x="86" y="514" class="body">06:00 UTC</text>
+  <text x="86" y="536" class="small">creates the Graph job; does not wait</text>
+  <path d="M286 513 H385" class="arrow"/>
+  <rect x="388" y="458" width="250" height="110" class="box" fill="#fcebdc" stroke="#ca5010"/>
+  <text x="408" y="489" class="head">Collect pending snapshot</text>
+  <text x="408" y="514" class="body">07:00, 07:30, and 08:00 UTC</text>
+  <text x="408" y="536" class="small">checks once; publishes only</text>
+  <text x="408" y="555" class="small">when complete</text>
+  <path d="M638 513 H737" class="arrow"/>
+  <rect x="740" y="458" width="230" height="110" class="box" fill="#f4f4f4" stroke="#8a8886"/>
+  <text x="760" y="489" class="head">Git-backed snapshot</text>
+  <text x="760" y="514" class="small">latest complete or allowed</text>
+  <text x="760" y="533" class="small">partial state</text>
+  <text x="760" y="552" class="small">resource types with errors stay stale</text>
+  <path d="M855 458 V408 H770 V330 H753" class="arrow dash"/>
+  <text x="982" y="430" class="small">read by the next reporting run</text>
+  <text x="982" y="448" class="small">no direct trigger</text>
+  <text x="54" y="616" class="small">Manual runs can start, collect, or run-and-wait a snapshot. Reporting rejects snapshots older than 30 hours unless explicitly allowed.</text>
+</svg>

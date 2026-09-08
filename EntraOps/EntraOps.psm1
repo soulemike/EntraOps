@@ -1,6 +1,9 @@
-# Enforce PowerShell 7+ (Core) as a hard prerequisite
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    throw "EntraOps requires PowerShell 7.0 or later (PowerShell Core). Current version: $($PSVersionTable.PSVersion). Please install PowerShell 7+ from https://aka.ms/powershell"
+# Enforce PowerShell 7.4+ (Core) as a hard prerequisite.
+# 7.4 is the floor because byte-preserving redirection of native command output (used by the
+# Privilege History generator to capture "git archive" zip output) only became the default in 7.4;
+# on 7.1-7.3 the stream is decoded as text and the archive is silently corrupted.
+if ($PSVersionTable.PSVersion -lt [Version]'7.4') {
+    throw "EntraOps requires PowerShell 7.4 or later (PowerShell Core). Current version: $($PSVersionTable.PSVersion). Please install PowerShell 7.4+ from https://aka.ms/powershell"
 }
 
 # Suppress welcome banner when loading in parallel runspaces (env var set by parallel blocks)
@@ -18,7 +21,7 @@ Foreach ($import in @($Public + $Private)) {
         Write-Verbose "Importing $($Import.FullName)"
         . $import.fullname
     } Catch {
-        Write-Error -Message "Failed to import function $($import.fullname): $_"
+        throw "Failed to import function $($import.fullname): $_"
     }
 }
 
@@ -43,18 +46,35 @@ if ($IsWindows -or $env:OS -match 'Windows_NT') {
 
 $PersistentCachePath = Join-Path $CacheRoot "EntraOps"
 
-$__EntraOpsSession = @{
-    GraphCache          = @{}
-    CacheMetadata       = @{}
+$__EntraOpsSession = [hashtable]::Synchronized(@{
+    # Shared by reference with parallel runspaces (e.g. Invoke-EntraOpsParallelObjectResolution).
+    # Synchronized hashtables protect individual operations; compound updates use explicit locking.
+    GraphCache          = [hashtable]::Synchronized(@{})
+    CacheMetadata       = [hashtable]::Synchronized(@{})
+    MsGraphTokenCache   = [hashtable]::Synchronized(@{})
+    ArmTokenCache       = [hashtable]::Synchronized(@{})
+    # GroupObjectId -> $true once a group has been confirmed to have no PIM for Groups eligibility/
+    # assignment data (Get-EntraOpsPrivilegedTransitiveGroupMember) - a group revisited via a different
+    # nesting/catalog path within the same session skips the repeat (and, for structurally PIM-incapable
+    # groups, always-failing) Graph probe instead of re-querying and re-warning every time.
+    NonPimGroupIds      = [hashtable]::Synchronized(@{})
+    RetryStatistics     = [hashtable]::Synchronized(@{
+        TotalRetries               = 0
+        ThrottledRequests          = 0
+        FailedRequests             = 0
+        NonRetryableRequests       = 0
+        FailedRequestDetails       = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+        NonRetryableRequestDetails = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+    })
     PersistentCachePath = $PersistentCachePath
     DefaultCacheTTL     = 3600  # Default 1 hour for dynamic data
     StaticDataCacheTTL  = 3600  # 1 hour for static reference data (role definitions, etc.)
     AuthenticationType  = $null  # Set by Connect-EntraOps; used to determine cross-tenant token acquisition strategy
-}
+})
 New-Variable -Name __EntraOpsSession -Value $__EntraOpsSession -Scope Script -Force
 
 # Ensure persistent cache directory exists
-if (-not (Test-Path $__EntraOpsSession.PersistentCachePath)) {
+if (-not (Test-Path -LiteralPath $__EntraOpsSession.PersistentCachePath)) {
     try {
         New-Item -ItemType Directory -Path $__EntraOpsSession.PersistentCachePath -Force | Out-Null
         Write-Verbose "Created persistent cache directory: $($__EntraOpsSession.PersistentCachePath)"

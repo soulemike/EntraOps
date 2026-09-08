@@ -17,11 +17,29 @@
     String to define the prefix of the Conditional Access Inclusion Groups. Default is "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
 
 .PARAMETER RbacSystems
-    Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
+    Array of RBAC systems to be processed. Default is Azure, EntraID, IdentityGovernance, ResourceApps, DeviceManagement, Defender.
+
+.PARAMETER RemovalSafetyThreshold
+    Fraction of current members that may be removed in a single run before the sync aborts the group as a
+    suspected upstream data issue. Default is 0.5 (50%).
+
+.PARAMETER ForceRemovalBeyondSafetyThreshold
+    Apply removals even when they exceed RemovalSafetyThreshold. Needed to reconcile a group that drifted
+    far from its desired state (for example one over-populated by an earlier run), because such a group
+    can never converge on its own - every run recomputes the same oversized delta and aborts again.
+    Review the delta from a normal (aborting) run first, then re-run with this switch.
+
+.PARAMETER IncludeObjectDetails
+    Include object display names and detailed API errors in console output. Defaults to
+    ConsoleOutput.IncludeObjectDetails from EntraOpsConfig.json. Object IDs are always shown.
 
 .EXAMPLE
     Update Conditional Access Target Groups for EntraID, IdentityGovernance and ResourceApps RBAC systems with assigned User and Group objects
     Update-EntraOpsPrivilegedConditionalAccessGroup -GroupPrefix "sug_Entra.CA.IncludeUsers.PrivilegedAccounts." -RbacSystems ("EntraID", "IdentityGovernance")
+
+.EXAMPLE
+    Apply a cleanup that the safety threshold blocked, after reviewing the reported delta
+    Update-EntraOpsPrivilegedConditionalAccessGroup -RbacSystems ("IdentityGovernance") -ForceRemovalBeyondSafetyThreshold
 #>
 
 function Update-EntraOpsPrivilegedConditionalAccessGroup {
@@ -40,11 +58,27 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
         [string]$GroupPrefix = "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "Defender")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement", "Defender")
+        [ValidateSet("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
+        [Array]$RbacSystems = ("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
         ,
         [Parameter(Mandatory = $false)]
         [String]$AdminUnitName
+        ,
+        [Parameter(Mandatory = $false)]
+        [string]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateRange(0.0, 1.0)]
+        [double]$RemovalSafetyThreshold = 0.5
+        ,
+        [Parameter(Mandatory = $False)]
+        [switch]$ForceRemovalBeyondSafetyThreshold
+        ,
+        [Parameter(Mandatory = $False)]
+        [boolean]$IncludeObjectDetails = [bool]$Global:EntraOpsIncludeObjectDetails
+        ,
+        [Parameter(Mandatory = $False)]
+        [boolean]$ApplyConditionalAccessTargetGroups = $false
     )
 
 
@@ -79,7 +113,7 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
         $PrivilegedEam = @()
         $PrivilegedEam += Get-ChildItem -Path $ClassificationEamFile | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
         $PrivilegedEam = $PrivilegedEam | Where-Object { $_.ObjectType -in $FilterObjectType }
-        $PrivilegedEamCount = ($PrivilegedEam | Where-Object { $null -eq $_.ClassificationEamFile }).count
+        $PrivilegedEamCount = ($PrivilegedEam | Where-Object { $null -eq $_.Classification }).count
         if ($PrivilegedEamCount -gt 0) {
             Write-Warning "Numbers of objects without classification: $PrivilegedEamCount"
             $WarningMessages.Add([PSCustomObject]@{ Type = "UnclassifiedObjects"; Message = "$PrivilegedEamCount object(s) without classification in $RbacSystem" })
@@ -97,7 +131,10 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
             Write-Host ""
             Write-Host "  Group: $GroupName" -ForegroundColor White
 
-            $GroupId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/v1.0/groups?`$filter=DisplayName eq '$GroupName'" -OutputType PSObject -DisableCache).id
+            $Groups = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/v1.0/groups?`$filter=DisplayName eq '$(ConvertTo-EntraOpsODataStringLiteral -Value $GroupName)'" -OutputType PSObject -DisableCache)
+            # -AllowNotFound: a missing group is handled by the NOT FOUND skip branch below so the
+            # remaining tiers/RBAC systems still synchronize; duplicates still throw (F-10 safety).
+            $GroupId = (Select-EntraOpsUniqueGraphObject -InputObject $Groups -ObjectDescription "group '$GroupName'" -AllowNotFound).id
             if ($null -eq $GroupId) {
                 Write-Warning "  [SKIP] Could not find group: $GroupName"
                 $WarningMessages.Add([PSCustomObject]@{ Type = "GroupNotFound"; Message = "Could not find group: $GroupName" })
@@ -115,6 +152,14 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
 
             $PrivilegedObjects = @()
             $PrivilegedObjects = ($PrivilegedEamClassifiedObjects | Where-Object { $_.Classification.AdminTierLevelName -contains $TierLevel.AdminTierLevelName -and $_.RoleSystem -eq $RbacSystem })
+
+            $ForeignTenantObjects = @($PrivilegedObjects | Where-Object { -not [string]::IsNullOrEmpty($_.ObjectTenantId) -and $_.ObjectTenantId -ne $TenantId })
+            if ($ForeignTenantObjects.Count -gt 0) {
+                Write-Warning "  [SKIP] Excluded $($ForeignTenantObjects.Count) object(s) not owned by tenant $TenantId"
+                $WarningMessages.Add([PSCustomObject]@{ Type = "ForeignTenantObject"; Message = "Skipped $($ForeignTenantObjects.Count) object(s) not owned by tenant $TenantId for $GroupName" })
+            }
+            $PrivilegedObjects = @($PrivilegedObjects | Where-Object { [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $TenantId })
+
             $CurrentGroupMembers = @()
             $CurrentGroupMembers = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/groups/$($GroupId)/members" -OutputType PSObject -DisableCache)
 
@@ -137,17 +182,22 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                     try {
                         $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($PrivObj.ObjectId)" -DisableCache -OutputType PSObject
                         $MemberType = $GroupMember.'@odata.type'.Replace('#microsoft.graph.', '')
-                        Write-Host "  [+] ADD  [$MemberType] $($GroupMember.displayName)" -ForegroundColor Green
+                        if ($IncludeObjectDetails) {
+                            Write-Host "  [+] ADD  [$MemberType] $($GroupMember.displayName)" -ForegroundColor Green
+                        } else {
+                            Write-Host "  [+] ADD  [$MemberType] $($PrivObj.ObjectId)" -ForegroundColor Green
+                        }
 
                         $OdataBody = @{
                             '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($PrivObj.ObjectId)"
                         } | ConvertTo-Json
 
-                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject
+                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject -ThrowOnFailure
                         $GrpAdded++
                     } catch {
-                        Write-Warning "  [!] FAIL ADD $($PrivObj.ObjectId): $_"
-                        $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "FAIL ADD $($PrivObj.ObjectId) to $GroupName`: $_" })
+                        $AddFailureMessage = if ($IncludeObjectDetails) { "FAIL ADD $($PrivObj.ObjectId) to $GroupName`: $_" } else { "Failed to add object $($PrivObj.ObjectId) to $GroupName" }
+                        Write-Warning "  [!] $AddFailureMessage"
+                        $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $AddFailureMessage })
                         $GrpFailed++
                     }
                 }
@@ -162,43 +212,62 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                     Write-Host "  Delta: +$($MembersToAdd.Count) to add  -$($MembersToRemove.Count) to remove" -ForegroundColor Yellow
                 }
 
-                # Safety threshold: refuse to remove more than 50% of current members to protect against partial API failures
-                $RemovalThreshold = [Math]::Ceiling($CurrentIds.Count * 0.5)
-                if ($MembersToRemove.Count -gt $RemovalThreshold -and $CurrentIds.Count -gt 5) {
-                    Write-Warning "  [ABORT] $($MembersToRemove.Count) removals exceeds 50% safety threshold ($RemovalThreshold of $($CurrentIds.Count) members). This may indicate an upstream data issue. Review and apply manually."
-                    $WarningMessages.Add([PSCustomObject]@{ Type = "SafetyAbort"; Message = "Aborted $GroupName`: $($MembersToRemove.Count) removals exceeds 50% safety threshold ($RemovalThreshold of $CurrentMemberCount members)" })
+                # Enforce the configured membership-removal threshold.
+                $SafetyCheck = Test-EntraOpsRemovalSafetyThreshold -CurrentCount $CurrentIds.Count -RemovalCount $MembersToRemove.Count -RemovalSafetyThreshold $RemovalSafetyThreshold
+                $ThresholdPercent = $SafetyCheck.ThresholdPercent
+                $RemovalThreshold = $SafetyCheck.RemovalThreshold
+                $ExceedsThreshold = $SafetyCheck.Exceeds
+                $SkipRemovals = $ExceedsThreshold -and -not $ForceRemovalBeyondSafetyThreshold
+                if ($SkipRemovals) {
+                    Write-Warning "  [ABORT] $($MembersToRemove.Count) removals exceeds $ThresholdPercent% safety threshold ($RemovalThreshold of $($CurrentIds.Count) members). This may indicate an upstream data issue. Review the delta above, then re-run with -ForceRemovalBeyondSafetyThreshold to apply."
+                    $WarningMessages.Add([PSCustomObject]@{ Type = "SafetyAbort"; Message = "Aborted $GroupName`: $($MembersToRemove.Count) removals exceeds $ThresholdPercent% safety threshold ($RemovalThreshold of $($CurrentIds.Count) members) - re-run with -ForceRemovalBeyondSafetyThreshold to apply" })
                     $GrpStatus = "ABORTED"
                 } else {
+                    if ($ExceedsThreshold) {
+                        Write-Warning "  [FORCED] Applying $($MembersToRemove.Count) removals despite exceeding the $ThresholdPercent% safety threshold ($RemovalThreshold of $($CurrentIds.Count) members) - requested via -ForceRemovalBeyondSafetyThreshold."
+                        $WarningMessages.Add([PSCustomObject]@{ Type = "SafetyOverride"; Message = "Forced $($MembersToRemove.Count) removals in $GroupName beyond the $ThresholdPercent% safety threshold ($RemovalThreshold of $($CurrentIds.Count) members)" })
+                        $GrpStatus = "FORCED"
+                    }
                     foreach ($MemberChange in $MembersToRemove) {
                         try {
                             $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($MemberChange.InputObject)" -OutputType PSObject
                             $MemberType  = $GroupMember.'@odata.type'.Replace('#microsoft.graph.', '')
-                            Write-Host "  [-] REM  [$MemberType] $($GroupMember.displayName)" -ForegroundColor Yellow
-                            Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/groups/$($GroupId)/members/$($MemberChange.InputObject)/`$ref" -OutputType PSObject
+                            if ($IncludeObjectDetails) {
+                                Write-Host "  [-] REM  [$MemberType] $($GroupMember.displayName)" -ForegroundColor Yellow
+                            } else {
+                                Write-Host "  [-] REM  [$MemberType] $($MemberChange.InputObject)" -ForegroundColor Yellow
+                            }
+                            Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/groups/$($GroupId)/members/$($MemberChange.InputObject)/`$ref" -OutputType PSObject -ThrowOnFailure
                             $GrpRemoved++
                         } catch {
-                            Write-Warning "  [!] FAIL REMOVE $($MemberChange.InputObject): $_"
-                            $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "FAIL REMOVE $($MemberChange.InputObject) from $GroupName`: $_" })
+                            $RemoveFailureMessage = if ($IncludeObjectDetails) { "FAIL REMOVE $($MemberChange.InputObject) from $GroupName`: $_" } else { "Failed to remove object $($MemberChange.InputObject) from $GroupName" }
+                            Write-Warning "  [!] $RemoveFailureMessage"
+                            $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $RemoveFailureMessage })
                             $GrpFailed++
                         }
                     }
-                    foreach ($MemberChange in $MembersToAdd) {
-                        try {
-                            $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($MemberChange.InputObject)" -DisableCache -OutputType PSObject
-                            $MemberType  = $GroupMember.'@odata.type'.Replace('#microsoft.graph.', '')
+                }
+                foreach ($MemberChange in $MembersToAdd) {
+                    try {
+                        $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($MemberChange.InputObject)" -DisableCache -OutputType PSObject
+                        $MemberType  = $GroupMember.'@odata.type'.Replace('#microsoft.graph.', '')
+                        if ($IncludeObjectDetails) {
                             Write-Host "  [+] ADD  [$MemberType] $($GroupMember.displayName)" -ForegroundColor Green
-
-                            $OdataBody = @{
-                                '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($MemberChange.InputObject)"
-                            } | ConvertTo-Json
-
-                            Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject
-                            $GrpAdded++
-                        } catch {
-                            Write-Warning "  [!] FAIL ADD $($MemberChange.InputObject): $_"
-                            $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "FAIL ADD $($MemberChange.InputObject) to $GroupName`: $_" })
-                            $GrpFailed++
+                        } else {
+                            Write-Host "  [+] ADD  [$MemberType] $($MemberChange.InputObject)" -ForegroundColor Green
                         }
+
+                        $OdataBody = @{
+                            '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($MemberChange.InputObject)"
+                        } | ConvertTo-Json
+
+                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject -ThrowOnFailure
+                        $GrpAdded++
+                    } catch {
+                        $AddFailureMessage = if ($IncludeObjectDetails) { "FAIL ADD $($MemberChange.InputObject) to $GroupName`: $_" } else { "Failed to add object $($MemberChange.InputObject) to $GroupName" }
+                        Write-Warning "  [!] $AddFailureMessage"
+                        $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $AddFailureMessage })
+                        $GrpFailed++
                     }
                 }
             }
@@ -237,10 +306,12 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
     }
     Write-Host "=========================================================" -ForegroundColor Cyan
     Write-Host ""
-    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages
+    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages -IncludeObjectDetails $IncludeObjectDetails
     $SyncSummary | Format-Table -AutoSize -Property RbacSystem, Group, MembersBefore,
         @{Name = 'Added';   Expression = { $_.Added };   Align = 'Right'},
         @{Name = 'Removed'; Expression = { $_.Removed }; Align = 'Right'},
         @{Name = 'Failed';  Expression = { $_.Failed };  Align = 'Right'},
         Status
+
+    Assert-EntraOpsConditionalAccessGroupSyncSucceeded -SyncSummary @($SyncSummary)
 }

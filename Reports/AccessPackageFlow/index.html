@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Access Package Flow</title>
+    <meta name="description"
+        content="Access Package Flow: visualize Entra ID Governance entitlement management as a filterable Sankey flow (requestor scope, assignment policy, access package, target resource role), enriched with access-tier classification of requestors, approvers and target resources to flag self-service access to privileged resources and under-privileged approvers." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Access Package Flow</span>
+            <span class="sub" id="tenantName">Tenant Governance</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link" href="https://learn.microsoft.com/en-us/entra/id-governance/entitlement-management-overview"
+            target="_blank" rel="noopener noreferrer">Entitlement Management docs &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration Analyzer</span></a>
+                <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+                <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+                <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span class="ico">&#9733;</span><span>EIDSCA
+                    Findings</span></a>
+            <div class="nav-item active nav-subitem"><span class="ico">&#8523;</span><span>Access Package Flow</span></div>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span class="ico">&#128477;&#65038;</span><span>PIM Request
+                    Flow</span></a>
+
+            <div class="nav-group-label">Sections</div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secApSankey"><span class="ico">&#8523;</span><span>Access
+                    Package Flow</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secApFlags"><span class="ico">&#9888;</span><span>Risk
+                    Flags</span></div>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; Access Package
+                    Flow</div>
+                <h1>Access Package Flow</h1>
+                <p>Visualize Entra ID Governance entitlement management from a captured <a
+                        href="../ConfigurationAnalyzer/index.html">Tenant Governance Snapshot</a> as a filterable
+                    Sankey flow - <b>Requestor scope &rarr; Assignment policy &rarr; Access package &rarr; Target
+                        resource role</b> - the same pattern as <a href="../ConditionalAccessAnalysis/index.html">Conditional
+                        Access Analysis</a>'s CA Policy Flow. Every requestor, approver and target resource that
+                    resolves to a known object is enriched with its access tier (from the optional <a
+                        href="../EamDashboard/index.html">EAM Dashboard</a> classification), to help identify access
+                    packages that grant Control Plane / Management Plane resources without approval, or whose
+                    approver is classified at a lower privilege tier than the resource being approved.
+                </p>
+            </div>
+
+            <div class="card-pad" id="apEmptyState">
+                <p><strong>No Configuration Analyzer dataset found.</strong> This app reuses the same dataset as <a
+                        href="../ConfigurationAnalyzer/index.html">Configuration Analyzer</a> - generate
+                    <code>../ConfigurationAnalyzer/data/configuration-analyzer-data.js</code> from your repository's
+                    git history first:
+                </p>
+                <p><code>Import-Module ./EntraOps -Force; New-EntraOpsTenantGovernanceConfigurationAnalyzerData</code>
+                </p>
+                <p>The Tenant Governance Snapshot feature must be enabled
+                    (<code>EntraOpsConfig.json</code> &rsaquo;
+                    <code>TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot</code>) and at least one snapshot
+                    must have captured the <code>microsoft.entra.entitlementManagementAccessPackage*</code> resource
+                    types with <code>Save-EntraOpsTenantGovernanceSnapshotJson</code>. Then reload this page.
+                </p>
+            </div>
+
+            <div id="apContent" class="hidden">
+
+                <div class="grid cols-4" style="margin-bottom:16px;">
+                    <button class="stat stat-action" type="button" data-ap-metric="all" aria-pressed="true">
+                        <div class="stat-accent"></div>
+                        <div class="stat-label">Assignment policies</div>
+                        <div class="stat-value" id="apStatPolicies">0</div>
+                    </button>
+                    <div class="stat">
+                        <div class="stat-accent"></div>
+                        <div class="stat-label">Access packages</div>
+                        <div class="stat-value" id="apStatPackages">0</div>
+                    </div>
+                    <button class="stat stat-action" type="button" data-ap-metric="noApproval" aria-pressed="false">
+                        <div class="stat-accent"></div>
+                        <div class="stat-label">Policies without approval</div>
+                        <div class="stat-value" id="apStatNoApproval">0</div>
+                    </button>
+                    <button class="stat stat-action" type="button" data-ap-metric="anyRisk" aria-pressed="false">
+                        <div class="stat-accent"></div>
+                        <div class="stat-label">Policies with risk flags</div>
+                        <div class="stat-value" id="apStatFlagged">0</div>
+                        <div class="stat-sub">Assignment data: <span id="apStatAssignData">not generated</span></div>
+                    </button>
+                </div>
+
+                <!-- ============================ Access Package Flow ============================ -->
+                <section class="card" style="margin-bottom:16px;" id="secApSankey">
+                    <div class="card-head">Access Package Flow
+                        <span class="hint">Requestor scope &rarr; Assignment policy &rarr; Access package &rarr;
+                            Target resource role. Click a node to trace it, click the background to clear.</span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter">
+                                <label for="apSnapshot">Snapshot</label>
+                                <select id="apSnapshot"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="apFltApproval">Approval</label>
+                                <select id="apFltApproval">
+                                    <option value="">All policies</option>
+                                    <option value="required">Approval required</option>
+                                    <option value="none">No approval required</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="apFltExpiration">Expiration</label>
+                                <select id="apFltExpiration">
+                                    <option value="">All policies</option>
+                                    <option value="none">No expiration</option>
+                                    <option value="fixed">Fixed expiration</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="apFltFlag">Risk flag</label>
+                                <select id="apFltFlag"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="apFltRequestorTier">Requestor access level</label>
+                                <select id="apFltRequestorTier">
+                                    <option value="">All levels</option>
+                                    <option value="ControlPlane">Control Plane</option>
+                                    <option value="ManagementPlane">Management Plane</option>
+                                    <option value="UserAccess">User Access</option>
+                                    <option value="Unclassified">Unclassified / unresolved</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="apFltMemberTier">Group member access level</label>
+                                <select id="apFltMemberTier">
+                                    <option value="">All member levels</option>
+                                    <option value="ControlPlane">Control Plane</option>
+                                    <option value="ManagementPlane">Management Plane</option>
+                                    <option value="UserAccess">User Access</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter">
+                                <label for="apFltCatalog">Catalog</label>
+                                <select id="apFltCatalog"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="apFltTargetType">Target resource type</label>
+                                <select id="apFltTargetType">
+                                    <option value="">All resource types</option>
+                                    <option value="Groups">Groups</option>
+                                    <option value="AzureRbac">Azure RBAC</option>
+                                    <option value="ApiPermissions">API permissions</option>
+                                    <option value="DirectoryRoles">Directory roles</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter grow">
+                                <label for="apFltSearch">Search</label>
+                                <div class="search">
+                                    <span class="search-ico">&#128269;</span>
+                                    <input type="text" id="apFltSearch"
+                                        placeholder="Policy, access package, requestor, approver, target&hellip;" />
+                                </div>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:6px;">
+                            <div class="eam-filter grow">
+                                <label>Columns</label>
+                                <div class="ca-toggle-row" id="apColToggles"></div>
+                            </div>
+                            <div class="eam-filter" style="align-self:flex-end;">
+                                <button class="btn small hidden" id="apClearTrace">Clear node trace</button>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;align-items:flex-end;">
+                            <div class="eam-filter grow"><span class="muted" id="apFreshness"></span><span class="muted" id="apFilterSummary"></span></div>
+                            <div class="eam-filter"><button class="btn small" type="button" id="apResetFilters">Reset filters</button></div>
+                            <div class="eam-filter"><button class="btn small" type="button" id="apExportFiltered">Export CSV + JSON</button></div>
+                        </div>
+                        <div class="legend" style="margin-bottom:6px;">
+                            <span class="item"><span class="swatch" style="background:#a4262c;"></span>Control Plane
+                                resource / policy with a fail-level flag</span>
+                            <span class="item"><span class="swatch" style="background:#c07807;"></span>Management
+                                Plane resource / policy with a warn-level flag</span>
+                            <span class="item"><span class="swatch" style="background:#0e700e;"></span>User Access
+                                resource / approval required</span>
+                            <span class="item"><span class="swatch" style="background:#0078d4;"></span>No approval
+                                required (no flag)</span>
+                            <span class="item"><span class="swatch" style="background:#a19f9d;"></span>Unclassified /
+                                unresolved</span>
+                            <span class="item"><span class="swatch" style="background:#5c2d91;"></span>Access package</span>
+                        </div>
+                        <div class="diagram-wrap">
+                            <svg id="apSankey"></svg>
+                            <div id="apSankeyEmpty" class="muted hidden" style="padding:24px;"></div>
+                        </div>
+                        <div id="apFlowDetail" class="hidden" style="margin-top:12px;"></div>
+                        <div id="apGroupMemberDetail" class="hidden" style="margin-top:12px;"></div>
+                    </div>
+                </section>
+
+                <!-- ============================ Risk Flags ============================ -->
+                <section class="card" style="margin-bottom:16px;" id="secApFlags">
+                    <div class="card-head">Risk Flags
+                        <span class="hint">Access packages where the requestor scope, approval requirement or
+                            approver's tier looks inconsistent with the privilege of the target resource</span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter">
+                                <label for="apFlagGroup">Group flags by</label>
+                                <select id="apFlagGroup">
+                                    <option value="none">No grouping</option>
+                                    <option value="tier" selected>Access level</option>
+                                    <option value="catalog">Catalog</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="apFlagSort">Sort flags by</label>
+                                <select id="apFlagSort">
+                                    <option value="severity">Severity</option>
+                                    <option value="tier">Access level</option>
+                                    <option value="catalog">Catalog</option>
+                                    <option value="policy">Policy name</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter" style="align-self:flex-end;">
+                                <label>Groups</label>
+                                <div class="ap-risk-actions">
+                                    <button class="btn small" id="apExpandAllRiskGroups" type="button">Expand all</button>
+                                    <button class="btn small" id="apCollapseAllRiskGroups" type="button">Collapse all</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter grow">
+                                <label for="apFlagSearch">Search risk flags</label>
+                                <div class="search">
+                                    <span class="search-ico">&#128269;</span>
+                                    <input type="text" id="apFlagSearch" placeholder="Policy, catalog, access package or flag&hellip;" />
+                                </div>
+                            </div>
+                            <div class="eam-filter" style="align-self:flex-end;"><button class="btn small" id="apExportRiskFlags" type="button">Export CSV + JSON</button></div>
+                        </div>
+                        <div id="apFlagsBody"></div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Reuses the Configuration Analyzer's dataset (generated by
+         New-EntraOpsTenantGovernanceConfigurationAnalyzerData) instead of duplicating it. -->
+    <script src="../ConfigurationAnalyzer/data/configuration-analyzer-data.js"></script>
+    <!-- Optional: EAM Dashboard's per-object tier/classification dataset. Required to
+         resolve requestor/approver/target identities to an access tier - without it every
+         node is shown as Unclassified and risk flags cannot be computed. -->
+    <script src="../EamDashboard/data/eam-dashboard-data.js"></script>
+    <!-- Optional: currently assigned access package principals (generated by
+         New-EntraOpsAccessPackageFlowData). When absent, the "Assigned" enrichment is
+         simply disabled. -->
+    <script src="data/access-package-assignments-data.js"></script>
+    <!-- Shared snapshot/blob parsing model. -->
+    <script src="../ConfigurationAnalyzer/js/core.js"></script>
+    <script src="../shared/report-utils.js"></script>
+    <!-- d3 + d3-sankey vendored locally so the app is fully self-contained and
+         works offline / behind the strict CSP above. -->
+    <script src="assets/vendor/d3.min.js"></script>
+    <script src="assets/vendor/d3-sankey.min.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="../shared/object-inspector.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,100 @@
+name: Bug report
+description: Report a reproducible problem in EntraOps
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues before reporting a new defect. Do not include credentials, tokens, or unredacted tenant data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its impact.
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Affected area
+      description: Select the area most directly affected by this issue.
+      options:
+        - Classification model or tiering
+        - Privileged EAM collection or export
+        - Automated protection or removal safety
+        - PowerShell module, authentication, or permissions
+        - GitHub workflow or OIDC automation
+        - Tenant Governance snapshot or Configuration Analyzer
+        - Reporting app, generated data, or offline UI
+        - Sentinel, Log Analytics, WatchList, or BloodHound integration
+        - Documentation or Configuration Wizard
+        - Other or unsure
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproducible sequence, configuration details, and sanitized logs.
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: classification-reasoning
+    attributes:
+      label: Classification reasoning (classification issues only)
+      description: Paste the relevant GitHub Custom Agent answer that explains the classification reasoning. Redact secrets, personal data, and tenant-sensitive data before submitting.
+      placeholder: Paste the sanitized classification reasoning here, or leave empty when this is not a classification issue.
+    validations:
+      required: false
+  - type: textarea
+    id: diagnostic-context
+    attributes:
+      label: Relevant diagnostic context (optional)
+      description: Include only evidence relevant to the selected area. For example, the cmdlet and authentication type; sanitized Graph or ARM HTTP status, request IDs, and error text; workflow run URL, commit, job, and failed step; or report name, browser, generated-data source, and URL state.
+      placeholder: Paste sanitized, relevant diagnostic context here.
+    validations:
+      required: false
+  - type: textarea
+    id: verbose-output
+    attributes:
+      label: Sanitized cmdlet verbose output (optional)
+      description: For PowerShell issues, paste the relevant output from running the affected cmdlet with -Verbose. Redact tenant names and IDs, UPNs, object IDs, repository URLs, credentials, tokens, and any other sensitive values. Include the command and the first relevant error or warning.
+      placeholder: Paste sanitized -Verbose output here, or leave empty when it is not applicable.
+    validations:
+      required: false
+  - type: input
+    id: entraops-version
+    attributes:
+      label: EntraOps version or commit
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include PowerShell version, operating system, and execution environment.
+      placeholder: PowerShell 7.4, Ubuntu, GitHub Actions
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I removed secrets, tokens, personal data, and tenant-sensitive data from this report.
+          required: true

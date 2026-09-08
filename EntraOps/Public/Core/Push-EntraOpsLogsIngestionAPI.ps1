@@ -28,11 +28,11 @@
 
 .EXAMPLE
     Ingest JSON data to Log Analytics Custom Log Table 'PrivilegedEAM_CL' in Log Analytics Workspace
-    Push-EntraOpsLogIngestionAPI -JsonContent <VariableWithPlainJson> -DataCollectionRuleName "entraops-dcr" -DataCollectionResourceGroupName "entraops-rg" -DataCollectionRuleSubscriptionId "00000000-0000-0000-0000-000000000000"
+    Push-EntraOpsLogsIngestionAPI -JsonContent <VariableWithPlainJson> -DataCollectionRuleName "entraops-dcr" -DataCollectionResourceGroupName "entraops-rg" -DataCollectionRuleSubscriptionId "00000000-0000-0000-0000-000000000000"
 
 .EXAMPLE
     Get schema to update data collection transformation rule
-    Push-EntraOpsLogIngestionAPI -JsonContent <VariableWithPlainJson> -SampleDataOnly $true -DataCollectionRuleName "entraops-dcr" -DataCollectionResourceGroupName "entraops-rg" -DataCollectionRuleSubscriptionId "00000000-0000-0000-0000-000000000000"
+    Push-EntraOpsLogsIngestionAPI -JsonContent <VariableWithPlainJson> -SampleDataOnly $true -DataCollectionRuleName "entraops-dcr" -DataCollectionResourceGroupName "entraops-rg" -DataCollectionRuleSubscriptionId "00000000-0000-0000-0000-000000000000"
  #>
 
 function Push-EntraOpsLogsIngestionAPI {
@@ -63,25 +63,19 @@ function Push-EntraOpsLogsIngestionAPI {
 
     $ErrorActionPreference = "Stop"
 
-    Set-AzContext -SubscriptionId $DataCollectionRuleSubscriptionId | Out-Null
-
     Write-Verbose "Ingesting to Log Analytics Custom Log Table '$($TableName)'"
     Write-Verbose " DataCollectionRuleSubscriptionId '$($DataCollectionRuleSubscriptionId)'"
     Write-Verbose " DataCollectionRuleResourceGroup '$($DataCollectionResourceGroupName)'"
     Write-Verbose " DataCollectionRuleName: '$($DataCollectionRuleName)'"
     Write-Verbose " LogAnalyticsCustomLogTableName: '$($TableName)'"
 
-    # Authentication
-    $AccessToken = (Get-AzAccessToken -ResourceUrl "https://monitor.azure.com/" -AsSecureString).Token
-    $headers = @{"Authorization" = "Bearer $($AccessToken | ConvertFrom-SecureString -AsPlainText)"; "Content-Type" = "application/json" }
-
     # Add Timestamp to JSON data
     try {
-        $json = $JsonContent | ConvertFrom-Json -Depth 10
-        $json | ForEach-Object {
+        $Records = @($JsonContent | ConvertFrom-Json -Depth 10)
+        $Records | ForEach-Object {
             $_ | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue (Get-Date).ToUniversalTime().ToString("o") -Force
         }
-        $json = $json | ConvertTo-Json -Depth 10
+        $json = $Records | ConvertTo-Json -Depth 10 -AsArray
     }
     catch {
         Write-Error "Cannot convert JSON content to JSON object"
@@ -89,6 +83,14 @@ function Push-EntraOpsLogsIngestionAPI {
     }
 
     if ($SampleDataOnly -eq $false) {
+        $OriginalAzContext = Get-AzContext
+        try {
+            Set-AzContext -SubscriptionId $DataCollectionRuleSubscriptionId | Out-Null
+
+            # Authentication
+            $AccessToken = (Get-AzAccessToken -ResourceUrl "https://monitor.azure.com/" -AsSecureString).Token
+            $PlainAccessToken = ConvertFrom-SecureString -SecureString $AccessToken -AsPlainText
+            $headers = @{"Authorization" = "Bearer $PlainAccessToken"; "Content-Type" = "application/json" }
 
         # Get Data Collection Rule details and Uri
         $DcrArmUri = "https://management.azure.com/subscriptions/$($DataCollectionRuleSubscriptionId)/resourceGroups/$($DataCollectionResourceGroupName)/providers/Microsoft.Insights/dataCollectionRules/$($DataCollectionRuleName)?api-version=$($ApiVersion)"
@@ -110,9 +112,72 @@ function Push-EntraOpsLogsIngestionAPI {
         # Get Ingest API Uri
         $PostUri = "$DceIngestEndpointUrl/dataCollectionRules/$($Dcr.properties.immutableId)/streams/Custom-$($TableName)?api-version=2023-01-01"
 
-        # Ingest data to Log Analytics
-        Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $json -Headers $headers -Verbose
+        # Logs Ingestion API allows a maximum of 1 MB (1048576 bytes) per request.
+        # Split records into chunks below the limit (with buffer for JSON array overhead).
+        $MaxRequestBytes = 1000000
+        $ChunkIndex = 0
 
+        # Recursively serialize and, if the actual (Compress'd, AsArray) body still exceeds the
+        # limit, split the batch in half and retry each half. This does not rely on any
+        # per-record size *estimate* staying in sync with the real serialized size (which can
+        # drift due to JSON array/whitespace overhead, nesting depth accounting, etc.) - the
+        # actual body that will be transmitted is always measured before it is sent, so an
+        # oversized request can never reach the API.
+        function Send-EntraOpsLogsIngestionChunk {
+            param(
+                [Parameter(Mandatory = $true)]
+                [System.Collections.Generic.List[object]]$RecordsSubset
+            )
+
+            $Body = $RecordsSubset | ConvertTo-Json -Depth 10 -AsArray -Compress
+            $BodySize = [System.Text.Encoding]::UTF8.GetByteCount($Body)
+
+            if ($BodySize -gt $MaxRequestBytes -and $RecordsSubset.Count -gt 1) {
+                $SplitIndex = [Math]::Ceiling($RecordsSubset.Count / 2)
+                $FirstHalf = [System.Collections.Generic.List[object]]::new($RecordsSubset.GetRange(0, $SplitIndex))
+                $SecondHalf = [System.Collections.Generic.List[object]]::new($RecordsSubset.GetRange($SplitIndex, $RecordsSubset.Count - $SplitIndex))
+                Send-EntraOpsLogsIngestionChunk -RecordsSubset $FirstHalf
+                Send-EntraOpsLogsIngestionChunk -RecordsSubset $SecondHalf
+                return
+            }
+
+            if ($BodySize -gt $MaxRequestBytes) {
+                throw "Single record exceeds the 1 MB Logs Ingestion API request limit ($BodySize bytes). The record cannot be split safely."
+            }
+
+            $script:ChunkIndex++
+            Write-Verbose "Sending chunk $($script:ChunkIndex) with $($RecordsSubset.Count) record(s) and body size $BodySize bytes to Logs Ingestion API"
+            Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $Body -Headers $headers -Verbose
+        }
+
+        # Batch records up-front by an estimated per-record size to avoid serializing the whole
+        # (potentially large) record set to JSON up front just to measure it; the recursive
+        # splitter above then guarantees each batch actually sent is within the real limit.
+        $Batches = [System.Collections.Generic.List[object]]::new()
+        $CurrentBatch = [System.Collections.Generic.List[object]]::new()
+        $CurrentSize = 0
+
+        foreach ($Record in $Records) {
+            $RecordSize = [System.Text.Encoding]::UTF8.GetByteCount(($Record | ConvertTo-Json -Depth 10 -Compress)) + 1
+            if ($CurrentBatch.Count -gt 0 -and ($CurrentSize + $RecordSize) -gt $MaxRequestBytes) {
+                $Batches.Add($CurrentBatch)
+                $CurrentBatch = [System.Collections.Generic.List[object]]::new()
+                $CurrentSize = 0
+            }
+            $CurrentBatch.Add($Record)
+            $CurrentSize += $RecordSize
+        }
+        if ($CurrentBatch.Count -gt 0) { $Batches.Add($CurrentBatch) }
+
+        # Ingest data to Log Analytics
+        foreach ($Batch in $Batches) {
+            Send-EntraOpsLogsIngestionChunk -RecordsSubset $Batch
+        }
+        } finally {
+            if ($null -ne $OriginalAzContext) {
+                Set-AzContext -Context $OriginalAzContext | Out-Null
+            }
+        }
     }
     else {
         return $json

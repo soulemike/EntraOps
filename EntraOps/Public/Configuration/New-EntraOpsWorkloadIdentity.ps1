@@ -9,7 +9,7 @@
     Display name of the App Registration which will be created.
 
 .PARAMETER ExistingSpObjectId
-    ObjectId of the existing Service Principal which should be used. If not provided, a new App Registration will be created.
+    ObjectId of the existing Service Principal which should be used. If not provided, a new App Registration will be created. Can be combined with CreateFederatedCredential to complete or repair federation on the existing application.
 
 .PARAMETER ConfigFile
     Location of the config file which will be used to get required parameters. Default is ./EntraOpsConfig.json.
@@ -49,33 +49,57 @@ function New-EntraOpsWorkloadIdentity {
         [parameter(Mandatory = $True)]
         [string]$AppDisplayName,
 
-        [Parameter(Mandatory = $False, ParameterSetName = "ExistingSpObjectId")]
+        [Parameter(Mandatory = $False)]
         [string]$ExistingSpObjectId,
 
         [Parameter(Mandatory = $False)]
         [string]$ConfigFile = "$EntraOpsBasefolder/EntraOpsConfig.json",
 
-        [Parameter(ParameterSetName = "CreateFederatedCredential")]
+        [Parameter(Mandatory = $False)]
         [switch]$CreateFederatedCredential,
 
-        [Parameter(Mandatory, ParameterSetName = "CreateFederatedCredential")]
+        [Parameter(Mandatory = $False)]
         [string]$GitHubOrg,
 
-        [Parameter(Mandatory, ParameterSetName = "CreateFederatedCredential")]
+        [Parameter(Mandatory = $False)]
         [string]$GitHubRepo,
 
-        [Parameter(Mandatory, ParameterSetName = "CreateFederatedCredential")]
+        [Parameter(Mandatory = $False)]
         [ValidateSet("Branch", "Environment")]
         [string]$FederatedEntityType = "Branch",
 
-        [Parameter(Mandatory, ParameterSetName = "CreateFederatedCredential")]
-        [string]$FederatedEntityName = "main"
+        [Parameter(Mandatory = $False)]
+        [string]$FederatedEntityName = "main",
+
+        # Assign Reader at the ARM tenant root scope ("/") in addition to the root management group.
+        # Opt-in because a "/"-scoped assignment is only creatable after elevateAccess, is not shown in the
+        # portal RBAC blades, and is therefore routinely missed in access reviews and offboarding. It is only
+        # needed to enumerate role assignments made directly at "/"; the root management group assignment
+        # already covers every management group, subscription and resource below it.
+        [Parameter(Mandatory = $False)]
+        [switch]$GrantArmRootScopeReader
     )
 
     $ErrorActionPreference = "Stop"
+    $ProvisioningFailures = [System.Collections.Generic.List[string]]::new()
+
+    function Add-EntraOpsProvisioningFailure {
+        param ([Parameter(Mandatory = $true)][string]$Message)
+
+        $ProvisioningFailures.Add($Message)
+        Write-Warning $Message
+    }
 
     # Load configuration file
     $Config = Get-Content -Path $ConfigFile | ConvertFrom-Json
+    if ($CreateFederatedCredential) {
+        $GitHubOrg = $GitHubOrg.Trim()
+        $GitHubRepo = $GitHubRepo.Trim()
+        $FederatedEntityName = $FederatedEntityName.Trim()
+        if ([string]::IsNullOrWhiteSpace($GitHubOrg) -or [string]::IsNullOrWhiteSpace($GitHubRepo) -or [string]::IsNullOrWhiteSpace($FederatedEntityName)) {
+            throw "GitHubOrg, GitHubRepo, and FederatedEntityName must contain non-whitespace values when CreateFederatedCredential is specified."
+        }
+    }
 
     #region Import module and check connection to Graph and Azure Resource Manager API
     # Check if required Graph module is available
@@ -103,6 +127,13 @@ function New-EntraOpsWorkloadIdentity {
         Write-Verbose "Get details of existing Service Principal with ObjectId $ExistingSpObjectId..."
         try {
             $SpObject = Get-MgServicePrincipal -ServicePrincipalId $ExistingSpObjectId
+            if ($CreateFederatedCredential) {
+                $MatchingApplications = @(Get-MgApplication -Filter "appId eq '$($SpObject.AppId)'")
+                if ($MatchingApplications.Count -ne 1) {
+                    throw "Expected exactly one application for service principal '$ExistingSpObjectId' with appId '$($SpObject.AppId)', but found $($MatchingApplications.Count)."
+                }
+                $AppObject = $MatchingApplications[0]
+            }
         } catch {
             Write-Error "Failed to get Service Principal with ObjectId $ExistingSpObjectId. Error: $_"
         }
@@ -135,6 +166,47 @@ function New-EntraOpsWorkloadIdentity {
     Write-Verbose "Get Microsoft Graph API App Roles..."
     $MsGraph = Get-MgServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
 
+    try {
+        $ExistingGraphAppRoleAssignments = [System.Collections.Generic.List[object]]::new()
+        foreach ($Assignment in @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $SpObject.Id -All)) {
+            $ExistingGraphAppRoleAssignments.Add($Assignment)
+        }
+    } catch {
+        throw "Failed to read existing Microsoft Graph application permission assignments for $AppDisplayName. No permissions were changed. Error: $($_.Exception.Message)"
+    }
+
+    function Add-EntraOpsGraphApplicationPermissions {
+        param (
+            [Parameter(Mandatory = $true)][string[]]$PermissionNames,
+            [Parameter(Mandatory = $true)][string]$Purpose
+        )
+
+        foreach ($PermissionName in $PermissionNames) {
+            $MatchingRoles = @($MsGraph.AppRoles | Where-Object { $_.Value -eq $PermissionName })
+            if ($MatchingRoles.Count -ne 1) {
+                Add-EntraOpsProvisioningFailure -Message "Could not resolve the Microsoft Graph application permission '$PermissionName' for $Purpose."
+                continue
+            }
+
+            $GraphApiPermission = $MatchingRoles[0]
+            $ExistingAssignment = $ExistingGraphAppRoleAssignments | Where-Object {
+                $_.ResourceId -eq $MsGraph.Id -and $_.AppRoleId -eq $GraphApiPermission.Id
+            } | Select-Object -First 1
+            if ($ExistingAssignment) {
+                Write-Host "- Microsoft Graph API Permission $PermissionName is already assigned"
+                continue
+            }
+
+            Write-Host "- Adding $($GraphApiPermission.Origin) API Permission $PermissionName"
+            try {
+                $NewAssignment = New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $SpObject.Id -PrincipalId $SpObject.Id -ResourceId $MsGraph.Id -AppRoleId $GraphApiPermission.Id
+                $ExistingGraphAppRoleAssignments.Add($NewAssignment)
+            } catch {
+                Add-EntraOpsProvisioningFailure -Message "Failed to add Microsoft Graph API Permission '$PermissionName' to $AppDisplayName for $Purpose. Error: $($_.Exception.Message)"
+            }
+        }
+    }
+
     # Graph API permissions for Pull operations
     $PullPermissionsToAdd = @(
         "AdministrativeUnit.Read.All",
@@ -148,25 +220,19 @@ function New-EntraOpsWorkloadIdentity {
         "DirectoryRecommendations.Read.All",
         "EntitlementManagement.Read.All",
         "Group.Read.All",
+        "RemoteTenantGroups.Read.All",
         "PrivilegedAccess.Read.AzureADGroup",
         "PrivilegedEligibilitySchedule.Read.AzureADGroup",
         "Policy.Read.All",
         "RoleManagement.Read.All",  
         "TenantGovernance-Relationship.Read.All",  
         "ThreatHunting.Read.All",
-        "User.Read.All"
+        "User.Read.All",
+        "Zone.Read.All"
     )
 
     Write-Output "Adding Pull permissions..."
-    $GraphApiPermissions = $MsGraph.AppRoles | Where-Object { $_.Value -in $PullPermissionsToAdd }
-    foreach ($GraphApiPermission in $GraphApiPermissions) {
-        Write-Host "- Adding $($GraphApiPermission.Origin) API Permission $($GraphApiPermission.Value)"
-        try {
-            New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $SPObject.Id -PrincipalId $SPObject.Id -ResourceId $MsGraph.Id -AppRoleId $GraphApiPermission.Id | Out-Null
-        } catch {
-            Write-Warning "Failed to add API Permission $($GraphApiPermission.Value) to $AppDisplayName. Error: $_"
-        }
-    }
+    Add-EntraOpsGraphApplicationPermissions -PermissionNames $PullPermissionsToAdd -Purpose "Pull operations"
     #endregion
 
     #region Add required Microsoft Graph API Permissions for Push (Change) Operations
@@ -178,26 +244,70 @@ function New-EntraOpsWorkloadIdentity {
         )
     
         Write-Output "Adding Push permissions..."
-        $GraphApiPermissions = $MsGraph.AppRoles | Where-Object { $_.Value -in $PushPermissionsToAdd }
-        foreach ($GraphApiPermission in $GraphApiPermissions) {
-            Write-Host "- Adding $($GraphApiPermission.Origin) API Permission $($GraphApiPermission.Value)"
-            try {
-                New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $SPObject.Id -PrincipalId $SPObject.Id -ResourceId $MsGraph.Id -AppRoleId $GraphApiPermission.Id | Out-Null
-            } catch {
-                Write-Error "Failed to add API Permission $($GraphApiPermission.Value) to $AppDisplayName. Error: $_"
-            }
-        }        
+        Add-EntraOpsGraphApplicationPermissions -PermissionNames $PushPermissionsToAdd -Purpose "Push operations"
     } else {
         Write-Output "Skipping Push permissions... (ApplyAdministrativeUnitAssignments and/or ApplyRmauAssignmentsForUnprotectedObjects is set to false)"
     }
 
+    # Graph API permission for updating Entitlement Management catalogs to privileged catalogs
+    # Caution: Elevated permission, only assigned if ApplyPrivilegedElmCatalogProtection is enabled in the config file
+    # Required permission reference: https://learn.microsoft.com/en-us/graph/api/entitlementmanagement-update?view=graph-rest-beta
+    if ($Config.AutomatedElmCatalogProtection.ApplyPrivilegedElmCatalogProtection -eq $true) {
+        $ElmPushPermissionsToAdd = @(
+            "EntitlementManagement.ReadWrite.All"
+        )
+
+        Write-Output "Adding Push permissions for privileged ELM catalog protection..."
+        Write-Warning "EntitlementManagement.ReadWrite.All is an elevated permission and should be used with caution."
+        Add-EntraOpsGraphApplicationPermissions -PermissionNames $ElmPushPermissionsToAdd -Purpose "privileged ELM catalog protection"
+    } else {
+        Write-Output "Skipping Push permissions for privileged ELM catalog protection... (ApplyPrivilegedElmCatalogProtection is set to false)"
+    }
+
     #endregion
 
+    #region Add required Microsoft Graph API permission for Tenant Governance Snapshot (UTCM)
+    # ConfigurationMonitoring.ReadWrite.All is Microsoft's documented least-privileged permission for
+    # the createSnapshot API (required for both delegated and application auth - there is no
+    # Read.All-only option for creating a snapshot job, only for reading/listing existing ones).
+    # Reference: https://learn.microsoft.com/en-us/graph/api/configurationbaseline-createsnapshot
+    if ($Config.TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot -eq $true) {
+        $TenantGovernancePermissionsToAdd = @(
+            "ConfigurationMonitoring.ReadWrite.All"
+        )
+
+        Write-Output "Adding Tenant Governance Snapshot permissions..."
+        Add-EntraOpsGraphApplicationPermissions -PermissionNames $TenantGovernancePermissionsToAdd -Purpose "Tenant Governance snapshots"
+    } else {
+        Write-Output "Skipping Tenant Governance Snapshot permissions... (EnableTenantGovernanceSnapshot is set to false)"
+    }
+    #endregion
+
+    #region Configure Microsoft Tenant Configuration Management (UTCM) service principal permissions
+    # The Tenant Governance Snapshot feature relies on the first-party "Microsoft Tenant Configuration
+    # Management" service principal to read the configured Microsoft Entra resources on EntraOps'
+    # behalf. Delegate the creation and least-privileged permission assignment to the dedicated
+    # configuration cmdlet so it can also be run standalone (e.g. after extending
+    # TenantGovernanceSnapshot.ResourcesToInclude with new resource types) without re-running the
+    # whole workload identity setup.
+    # Reference: https://learn.microsoft.com/en-us/graph/utcm-entra-resources
+    if ($Config.TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot -eq $true) {
+        try {
+            Register-EntraOpsTenantGovernanceServicePrincipal -ResourcesToInclude $Config.TenantGovernanceSnapshot.ResourcesToInclude -TenantId $Config.TenantId | Out-Null
+        } catch {
+            Add-EntraOpsProvisioningFailure -Message "Failed to configure the Microsoft Tenant Configuration Management service principal. Error: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Output "Skipping Microsoft Tenant Configuration Management (UTCM) service principal setup... (EnableTenantGovernanceSnapshot is set to false)"
+    }
+    #endregion
 
     #region Add required Microsoft Entra ID (scoped) directory role for managing Conditional Access Target Groups
     if ($Config.AutomatedConditionalAccessTargetGroups.ApplyConditionalAccessTargetGroups -eq $true) {
         $AdminUnitName = $Config.AutomatedConditionalAccessTargetGroups.AdminUnitName
-        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($AdminUnitName)'" -OutputType PSObject -DisableCache).id
+        $AdminUnits = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$(ConvertTo-EntraOpsODataStringLiteral -Value $AdminUnitName)'" -OutputType PSObject -DisableCache)
+        # -AllowNotFound: a missing AU is the expected first-run state - the create branch below handles it.
+        $AdminUnitId = (Select-EntraOpsUniqueGraphObject -InputObject $AdminUnits -ObjectDescription "administrative unit '$AdminUnitName'" -AllowNotFound).id
         #region Create Administrative Unit if it does not exist
         if (-not $AdminUnitId) {
             Write-Host "Creating Administrative Unit $($AdminUnitName)"
@@ -212,7 +322,7 @@ function New-EntraOpsWorkloadIdentity {
             try {
                 $NewAdminUnitId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/administrativeUnits").id
             } catch {
-                Write-Warning "Can not create Administrative Unit $($AdminUnitName)! Error: $_"
+                Add-EntraOpsProvisioningFailure -Message "Cannot create required Administrative Unit '$AdminUnitName'. Error: $($_.Exception.Message)"
             }
 
             # Check if AU has been created successfully, wait for delay and retry if not available yet
@@ -221,7 +331,7 @@ function New-EntraOpsWorkloadIdentity {
                 Until ($AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -DisableCache).Id)
                 Write-Host "$($AdminUnitName) - $($AdminUnitId) has been created successfully" -f Green
             } Catch {
-                Write-Warning "$($AdminUnitName) not available yet"
+                Add-EntraOpsProvisioningFailure -Message "Required Administrative Unit '$AdminUnitName' is not available after creation. Error: $($_.Exception.Message)"
             }
         } else {
             Write-Host "Administrative Unit $($AdminUnitName) - $($AdminUnitId) already exists"
@@ -236,11 +346,21 @@ function New-EntraOpsWorkloadIdentity {
         }
 
         try {
-            $Body = $ScopedGroupAdminRoleParams | ConvertTo-Json -Depth 10
-            $DirectoryRoleAssignmentId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleAssignments").id
-            Write-Host "Assigned permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id) - $($DirectoryRoleAssignmentId)" -f Green
+            $ExistingScopedRoleAssignments = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/roleManagement/directory/roleAssignments?`$filter=principalId eq '$($SpObject.Id)'" -OutputType PSObject -DisableCache)
+            $ExistingScopedGroupAdminRole = $ExistingScopedRoleAssignments | Where-Object {
+                $_.roleDefinitionId -eq $ScopedGroupAdminRoleParams.roleDefinitionId -and
+                $_.directoryScopeId -eq $ScopedGroupAdminRoleParams.directoryScopeId
+            } | Select-Object -First 1
+
+            if ($ExistingScopedGroupAdminRole) {
+                Write-Host "The scoped Group Administrator role on Administrative Unit $AdminUnitName is already assigned to $($SpObject.Id)." -f Green
+            } else {
+                $Body = $ScopedGroupAdminRoleParams | ConvertTo-Json -Depth 10
+                $DirectoryRoleAssignmentId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleAssignments").id
+                Write-Host "Assigned permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id) - $($DirectoryRoleAssignmentId)" -f Green
+            }
         } catch {
-            Write-Warning "Can not assign permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id)! Error: $_"
+            Add-EntraOpsProvisioningFailure -Message "Cannot verify or assign the required scoped Group Administrator role on Administrative Unit '$AdminUnitName' to '$($SpObject.Id)'. Error: $($_.Exception.Message)"
         }
 
     } else {
@@ -249,22 +369,52 @@ function New-EntraOpsWorkloadIdentity {
     #endregion
 
     #region Add required role assignments in Azure RBAC
+    function Add-EntraOpsAzureRoleAssignment {
+        param (
+            [Parameter(Mandatory = $true)][string]$RoleDefinitionName,
+            [Parameter(Mandatory = $true)][string]$Scope,
+            [Parameter(Mandatory = $true)][string]$ObjectId,
+            [string]$ApplicationId,
+            [Parameter(Mandatory = $true)][string]$Purpose
+        )
+
+        try {
+            $ExistingAssignments = @(Get-AzRoleAssignment -ObjectId $ObjectId -RoleDefinitionName $RoleDefinitionName -Scope $Scope -ErrorAction Stop)
+        } catch {
+            Add-EntraOpsProvisioningFailure -Message "Failed to check the existing '$RoleDefinitionName' Azure role assignment at '$Scope' for $Purpose. Error: $($_.Exception.Message)"
+            return
+        }
+
+        if ($ExistingAssignments.Count -gt 0) {
+            Write-Output "The '$RoleDefinitionName' role at '$Scope' is already assigned for $Purpose."
+            return
+        }
+
+        try {
+            if ([string]::IsNullOrWhiteSpace($ApplicationId)) {
+                New-AzRoleAssignment -ObjectId $ObjectId -RoleDefinitionName $RoleDefinitionName -Scope $Scope | Out-Null
+            } else {
+                New-AzRoleAssignment -ApplicationId $ApplicationId -RoleDefinitionName $RoleDefinitionName -Scope $Scope | Out-Null
+            }
+        } catch {
+            Add-EntraOpsProvisioningFailure -Message "Failed to assign the '$RoleDefinitionName' Azure role at '$Scope' for $Purpose. Error: $($_.Exception.Message)"
+        }
+    }
+
     # Logic to add required role assignment in Azure RBAC
     function Add-AzureRolePermissions ($RoleDefinitionName, $ResourceGroupName, $SubscriptionId) {
         if (!$RoleDefinitionName -or !$ResourceGroupName -or !$SubscriptionId) {
-            Write-Error "SentinelResourceGroupName and DataCollectionResourceGroupName needs to be defined in environment file to configure permissions for Push operations."
+            Add-EntraOpsProvisioningFailure -Message "Resource group name, subscription ID, and role definition name must be configured before assigning Azure permissions for Push operations."
         } else {
             try {
-                Set-AzContext -SubscriptionId $SubscriptionId
-                Get-AzResourceGroup -Name $ResourceGroupName
+                Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
+                $ResourceGroup = Get-AzResourceGroup -Name $ResourceGroupName
             } catch {
-                Write-Error "Invalid Resource Group Name $($ResourceGroupName) to set $($RoleDefinitionName). Error: $_"
+                Add-EntraOpsProvisioningFailure -Message "Failed to resolve Azure resource group '$ResourceGroupName' in subscription '$SubscriptionId' for the '$RoleDefinitionName' assignment. Error: $($_.Exception.Message)"
+                return
             }
-            try {
-                New-AzRoleAssignment -ObjectId $SpObject.Id -RoleDefinitionName $RoleDefinitionName -ResourceGroupName $ResourceGroupName
-            } catch {
-                Write-Error "Failed to assign role $($RoleDefinitionName) to $($SpObject.DisplayName) on Resource Group $($ResourceGroupName). Error: $_"
-            }
+
+            Add-EntraOpsAzureRoleAssignment -RoleDefinitionName $RoleDefinitionName -Scope $ResourceGroup.ResourceId -ObjectId $SpObject.Id -Purpose "resource group '$ResourceGroupName'"
         }
     }
     Start-Sleep 5 # Wait for adding permission to new created Service Principal
@@ -275,7 +425,7 @@ function New-EntraOpsWorkloadIdentity {
             Add-AzureRolePermissions -RoleDefinitionName "Monitoring Metrics Publisher" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId
             Add-AzureRolePermissions -RoleDefinitionName "Reader" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId    
         } catch {
-            Write-Warning "Failed to assign roles on $($Config.LogAnalytics.DataCollectionResourceGroupName). Error: $_"
+            Add-EntraOpsProvisioningFailure -Message "Failed to assign required roles on Log Analytics resource group '$($Config.LogAnalytics.DataCollectionResourceGroupName)'. Error: $($_.Exception.Message)"
         }
     }
 
@@ -284,16 +434,31 @@ function New-EntraOpsWorkloadIdentity {
             Write-Output "Adding permissions to Resource Group of Sentinel Workspace on $($Config.SentinelWatchLists.SentinelResourceGroupName)..."
             Add-AzureRolePermissions -RoleDefinitionName "Microsoft Sentinel Contributor" -ResourceGroupName $Config.SentinelWatchLists.SentinelResourceGroupName -SubscriptionId $Config.SentinelWatchLists.SentinelSubscriptionId    
         } catch {
-            Write-Warning "Failed to assign roles on $($Config.SentinelWatchLists.SentinelResourceGroupName). Error: $_"
+            Add-EntraOpsProvisioningFailure -Message "Failed to assign required roles on Microsoft Sentinel resource group '$($Config.SentinelWatchLists.SentinelResourceGroupName)'. Error: $($_.Exception.Message)"
         }
     }
 
-    # Add required permissions to Reader Permission on Tenant Root group if AutomatedControlPlaneScopeUpdate is using Resource Graph to get sensitive Privileged Roles in Azure Tenant
-    # or any WatchList requires information from Azure Resource Graph (e.g., High Value Assets, Workload Identity Attack Paths or Managed Identity Assigned Resource Id)
-    if (($Config.AutomatedControlPlaneScopeUpdate.ApplyAutomatedControlPlaneScopeUpdate -eq $true -and $Config.AutomatedControlPlaneScopeUpdate.PrivilegedObjectClassificationSource -contains "PrivilegedRolesFromAzGraph") `
+    # Azure collection and Azure Resource Graph-backed features require Reader on the tenant root
+    # management group so all management groups, subscriptions and resources below it are visible.
+    if (($Config.RbacSystems -contains "Azure") `
+            -or ($Config.AutomatedControlPlaneScopeUpdate.ApplyAutomatedControlPlaneScopeUpdate -eq $true -and $Config.AutomatedControlPlaneScopeUpdate.PrivilegedObjectClassificationSource -contains "PrivilegedRolesFromAzGraph") `
             -or ($Config.SentinelWatchLists.WatchListTemplates -contains "HighValueAssets") -or ($Config.SentinelWatchLists.WatchListWorkloadIdentity -contains "WorkloadIdentityAttackPaths") -or ($Config.SentinelWatchLists.WatchListWorkloadIdentity -contains "ManagedIdentityAssignedResourceId")) {
         Write-Output "Adding permissions as Reader on Tenant Root Group for analyzing RBAC and/or Managed Identity resources..."
-        New-AzRoleAssignment -RoleDefinitionName "Reader" -Scope "/providers/Microsoft.Management/managementGroups/$($Config.TenantId)" -ObjectId $SpObject.Id
+        Add-EntraOpsAzureRoleAssignment -RoleDefinitionName "Reader" -Scope "/providers/Microsoft.Management/managementGroups/$($Config.TenantId)" -ObjectId $SpObject.Id -Purpose "Azure collection and Resource Graph analysis"
+    }
+
+    # Add required permissions as Reader on the ARM tenant root scope ("/") when Azure is included as
+    # RBAC system, to allow scanning of Azure RBAC role assignments (incl. elevateAccess-scoped
+    # assignments) across the entire tenant hierarchy.
+    if ($Config.RbacSystems -contains "Azure") {
+        if ($GrantArmRootScopeReader) {
+            Write-Warning "Assigning Reader at the ARM tenant root scope (/). This assignment is only visible via 'az role assignment list --scope /' and is NOT shown in the portal RBAC blades - include it in access reviews and offboarding, and remove it with 'az role assignment delete --scope /' when decommissioning EntraOps."
+            Write-Output "Adding permissions as Reader on ARM tenant root scope (/) for scanning Azure RBAC role assignments..."
+            $WorkloadIdentityAppId = if ($AppObject) { $AppObject.AppId } else { $SpObject.AppId }
+            Add-EntraOpsAzureRoleAssignment -RoleDefinitionName "Reader" -Scope "/" -ObjectId $SpObject.Id -ApplicationId $WorkloadIdentityAppId -Purpose "ARM tenant-root role-assignment discovery"
+        } else {
+            Write-Output "Skipping Reader assignment on ARM tenant root scope (/). Azure RBAC assignments made directly at '/' (after elevateAccess) will not be visible to EntraOps; everything under the root management group is still covered. Re-run with -GrantArmRootScopeReader to enable tenant-root visibility."
+        }
     }
     #endregion    
 
@@ -326,10 +491,33 @@ function New-EntraOpsWorkloadIdentity {
                 )
             }
 
+            $ExistingFederatedCredentials = @()
+            $CanCreateFederatedCredential = $true
             try {
-                New-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -BodyParameter $FederatedCredentialParam
+                $ExistingFederatedCredentials = @(Get-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -All)
             } catch {
-                Write-Warning "Failed to add Federated Credential to $AppDisplayName. Error: $_"
+                $CanCreateFederatedCredential = $false
+                Add-EntraOpsProvisioningFailure -Message "Failed to read existing federated credentials for $AppDisplayName. Error: $($_.Exception.Message)"
+            }
+
+            if ($CanCreateFederatedCredential) {
+                $ExistingFederatedCredential = $ExistingFederatedCredentials | Where-Object { $_.Name -eq $FederatedCredentialParam.name } | Select-Object -First 1
+                if ($ExistingFederatedCredential) {
+                    $AudienceDifference = @(Compare-Object -ReferenceObject @($FederatedCredentialParam.audiences) -DifferenceObject @($ExistingFederatedCredential.Audiences))
+                    if ($ExistingFederatedCredential.Issuer -ceq $FederatedCredentialParam.issuer -and
+                        $ExistingFederatedCredential.Subject -ceq $FederatedCredentialParam.subject -and
+                        $AudienceDifference.Count -eq 0) {
+                        Write-Output "Federated Credential '$($FederatedCredentialParam.name)' is already configured."
+                    } else {
+                        Add-EntraOpsProvisioningFailure -Message "Federated Credential '$($FederatedCredentialParam.name)' already exists but its issuer, subject, or audience does not match the requested GitHub identity. Remove or correct the existing credential before rerunning setup."
+                    }
+                } else {
+                    try {
+                        New-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -BodyParameter $FederatedCredentialParam | Out-Null
+                    } catch {
+                        Add-EntraOpsProvisioningFailure -Message "Failed to add Federated Credential '$($FederatedCredentialParam.name)' to $AppDisplayName. Error: $($_.Exception.Message)"
+                    }
+                }
             }
         } else {
             Write-Warning "Automation configuration of federated credential for DevOps Platform $($Config.DevOpsPlatform) is not implemented yet."
@@ -338,4 +526,9 @@ function New-EntraOpsWorkloadIdentity {
         Write-Verbose "Skipping Federated Credential configuration... (AuthenticationType is not Federated)"
     }
     #endregion
+
+    if ($ProvisioningFailures.Count -gt 0) {
+        $FailureSummary = ($ProvisioningFailures | ForEach-Object { "- $_" }) -join [Environment]::NewLine
+        throw "Workload identity provisioning did not complete successfully for service principal '$($SpObject.Id)'. Correct the following issue(s), then rerun the command with -ExistingSpObjectId '$($SpObject.Id)':$([Environment]::NewLine)$FailureSummary"
+    }
 }

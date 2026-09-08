@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Dashboard</title>
+    <meta name="description"
+        content="Enterprise Access Model Dashboard: static-web counterpart of the EntraOps Privileged EAM - Overview workbook, built from EntraOps Privileged EAM data." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Dashboard</span>
+            <span class="sub" id="tenantName">Enterprise Access Model</span>
+        </div>
+        <div class="spacer"></div>
+        <button type="button" class="eo-notification-button" id="notificationButton" aria-label="No unread changes"
+            title="Recent classification changes"><span class="eo-notification-bell" aria-hidden="true"></span><span
+                class="eo-notification-count hidden">0</span></button>
+        <a class="appbar-link"
+            href="https://learn.microsoft.com/en-us/security/privileged-access-workstations/privileged-access-access-model"
+            target="_blank" rel="noopener noreferrer">Enterprise Access Model docs &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <div class="nav-item active"><span class="ico">&#9635;</span><span>EAM Dashboard</span></div>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration
+                    Analyzer</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+                <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span class="ico">&#9733;</span><span>EIDSCA
+                    Findings</span></a>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span class="ico">&#8523;</span><span>Access
+                    Package Flow</span></a>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span class="ico">&#128477;&#65038;</span><span>PIM Request
+                    Flow</span></a>
+
+            <div class="nav-group-label">Sections</div>
+            <button type="button" class="nav-item section-item" data-target="secOverview"><span
+                    class="ico">&#9632;</span><span>Overview</span></button>
+            <button type="button" class="nav-item section-item" data-target="secAssets"><span
+                    class="ico">&#9823;</span><span>Privileged assets</span><span class="count"
+                    id="cnt-assets"></span></button>
+            <button type="button" class="nav-item section-item" data-target="secAssignments"><span
+                    class="ico">&#9737;</span><span>Role assignments</span><span class="count"
+                    id="cnt-assignments"></span></button>
+            <button type="button" class="nav-item section-item" data-target="secClassification"><span
+                    class="ico">&#10227;</span><span>Role classification</span><span class="count"
+                    id="cnt-classification"></span></button>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; EAM Dashboard
+                </div>
+                <h1>Enterprise Access Model Dashboard</h1>
+                <p>Filter privileged identities by RBAC system, tier level,
+                    service and principal type; click a tile or chart segment to cross-filter; select a privileged
+                    asset to drill into its role assignments and role classification.</p>
+            </div>
+
+            <!-- Filters (workbook parameters) -->
+            <section class="card card-pad" style="margin-bottom:16px;">
+                <div class="eam-filter-row" id="filterRow">
+                    <div class="eam-filter" id="fltRoleSystem"></div>
+                    <div class="eam-filter" id="fltTierLevel"></div>
+                    <div class="eam-filter" id="fltService"></div>
+                    <div class="eam-filter" id="fltObjectType"></div>
+                    <div class="eam-filter" id="fltLinkedIdentity"></div>
+                    <div class="eam-filter" id="fltPrivilegedType"></div>
+                </div>
+                <div class="eam-filter-row" style="margin-top:12px;">
+                    <div class="eam-filter grow">
+                        <label for="fltDisplayName">Search</label>
+                        <div class="search">
+                            <span class="search-ico">&#128269;</span>
+                            <input type="text" id="fltDisplayName"
+                                placeholder="Search display name, role name, scope name or role actions&hellip;" />
+                        </div>
+                    </div>
+                </div>
+                <div class="eam-active-exports hidden" id="activeExports"></div>
+            </section>
+
+            <!-- Overview: tiles + pies (workbook top row) -->
+            <div id="secOverview">
+                <div class="eam-row" style="margin-bottom:16px;">
+                    <section class="card eam-col-25">
+                        <div class="card-head">Sync source of privileged identities
+                            <span class="hint">Click to filter</span>
+                        </div>
+                        <div class="card-pad eam-tiles" id="syncTiles"></div>
+                    </section>
+                    <section class="card eam-col-25">
+                        <div class="card-head">Restricted management of privileged identities</div>
+                        <div class="card-pad eam-donut-wrap" id="restrictedPie"></div>
+                    </section>
+                    <section class="card eam-col-50">
+                        <div class="card-head">Assignments of privileged roles</div>
+                        <div class="card-pad eam-donut-wrap" id="assignmentPie"></div>
+                    </section>
+                </div>
+
+                <div class="eam-row" style="margin-bottom:16px;">
+                    <section class="card eam-col-50">
+                        <div class="card-head">Classification of privileged identities
+                            <span class="hint">Click to filter &middot; users, service principals &amp; unknown</span>
+                        </div>
+                        <div class="card-pad eam-tiles" id="objectTierTiles"></div>
+                    </section>
+                    <section class="card eam-col-50">
+                        <div class="card-head">Classification of privileged access
+                            <span class="hint">Click to filter</span>
+                        </div>
+                        <div class="card-pad eam-tiles" id="accessTierTiles"></div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- List of Privileged Assets -->
+            <section class="card" style="margin-bottom:16px;" id="secAssets">
+                <div class="card-head">List of Privileged Assets
+                    <span class="chip brand" id="assetCount"></span>
+                    <span class="chip warn hidden" id="assetSelChip"></span>
+                    <button class="btn small hidden" id="assetSelClear">Clear selection</button>
+                    <button class="btn small primary hidden" id="assetCompareBtn"
+                        title="Compare role assignments and classified role actions of the checked principals side by side">&#8644;
+                        Compare selected</button>
+                    <span class="hint">Check &#8644; boxes to compare principals &middot; click a row to drill into role
+                        assignments &middot; &#9734; adds the principal to the review list &middot; &#9432; explains its
+                        classification &middot; &#187; opens all details</span>
+                    <button class="btn small" id="assetCsv">Export CSV</button>
+                </div>
+                <div class="table-wrap eam-scroll">
+                    <table class="grid-table" id="assetTable">
+                        <thead>
+                            <tr>
+                                <th class="no-sort col-icon" title="Select for comparison">&#8644;</th>
+                                <th>Type</th>
+                                <th>Sub type</th>
+                                <th>Display name</th>
+                                <th>Object tier</th>
+                                <th>Restricted management</th>
+                                <th>Sync source</th>
+                                <th>Administrative units</th>
+                                <th>Linked identity</th>
+                                <th>RBAC systems</th>
+                                <th>Object Id</th>
+                                <th>Object tenant Id</th>
+                                <th class="no-sort col-icon" title="Add to review list">&#9733;</th>
+                                <th class="no-sort col-icon" title="Show classification reasoning and scope details">
+                                    &#9432;</th>
+                                <th class="no-sort col-icon" title="Show all details">&#187;</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="eam-pager hidden" id="assetPager"></div>
+                </div>
+            </section>
+
+            <!-- Related privileged role assignments -->
+            <section class="card" style="margin-bottom:16px;" id="secAssignments">
+                <div class="card-head">Related privileged role assignments
+                    <span class="chip brand" id="assignmentCount"></span>
+                    <span class="chip warn hidden" id="assignmentSelChip"></span>
+                    <button class="btn small hidden" id="assignmentSelClear">Clear selection</button>
+                    <span class="hint">Click or check rows to filter the role classification below by its role
+                        assignment &middot; &#9432; explains its classification &middot; &#187; opens all details</span>
+                    <button class="btn small" id="assignmentCsv">Export CSV</button>
+                </div>
+                <div class="table-wrap eam-scroll">
+                    <table class="grid-table" id="assignmentTable">
+                        <thead>
+                            <tr>
+                                <th class="no-sort col-icon"></th>
+                                <th>System</th>
+                                <th>Tier level</th>
+                                <th>Role</th>
+                                <th>Role type</th>
+                                <th>Scope</th>
+                                <th>PIM assignment</th>
+                                <th>Assignment type</th>
+                                <th>Eligibility by</th>
+                                <th>Transitive by</th>
+                                <th>Assignment subtype</th>
+                                <th>Nested via</th>
+                                <th>Service</th>
+                                <th class="no-sort col-icon" title="Add to review list">&#9733;</th>
+                                <th class="no-sort col-icon" title="Show classification reasoning and scope details">
+                                    &#9432;</th>
+                                <th class="no-sort col-icon" title="Show all details">&#187;</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="eam-pager hidden" id="assignmentPager"></div>
+                </div>
+            </section>
+
+            <!-- Related role classification -->
+            <section class="card" id="secClassification">
+                <div class="card-head">Related role classification
+                    <span class="chip brand" id="classificationCount"></span>
+                    <span class="hint">&#9432; explains classification reasoning &middot; &#187; opens all
+                        details</span>
+                    <button class="btn small" id="classificationCsv">Export CSV</button>
+                </div>
+                <div class="table-wrap eam-scroll">
+                    <table class="grid-table" id="classificationTable">
+                        <thead>
+                            <tr>
+                                <th>System</th>
+                                <th>Scope</th>
+                                <th>Role</th>
+                                <th>Tier level</th>
+                                <th>Service</th>
+                                <th>Tagged by</th>
+                                <th>Tagged by object</th>
+                                <th>Tagged by system</th>
+                                <th class="no-sort col-icon" title="Show classification reasoning and scope details">
+                                    &#9432;</th>
+                                <th class="no-sort col-icon" title="Show all details">&#187;</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="eam-pager hidden" id="classificationPager"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Context blade / drawer for cell details -->
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" tabindex="-1">
+        <div class="drawer-head">
+            <span class="title" id="drawerTitle"></span>
+            <button class="close" id="drawerClose" aria-label="Close details">&#10005;</button>
+        </div>
+        <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <!-- Principal comparison modal -->
+    <div class="eo-cmp-backdrop" id="cmpBackdrop"></div>
+    <div class="eo-cmp-modal" id="cmpModal" role="dialog" aria-modal="true" aria-labelledby="cmpTitle" tabindex="-1">
+        <div class="eo-cmp-head">
+            <span class="title" id="cmpTitle">&#8644; Principal comparison</span>
+            <button class="close" id="cmpClose" aria-label="Close comparison">&#10005;</button>
+        </div>
+        <div class="eo-cmp-body" id="cmpBody"></div>
+    </div>
+
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Embedded dataset (generated by New-EntraOpsPrivilegedEamDashboardData).
+         Optional at load time: when absent the app shows instructions instead of failing. -->
+    <script src="data/eam-dashboard-data.js"></script>
+    <script src="js/notifications.js"></script>
+    <script src="js/review.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Privilege History</title>
+    <meta name="description"
+        content="Privilege History: historic trends of privileged assets, role assignments and tier breaches over time, built from the git history of your EntraOps Privileged EAM export." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Privilege History</span>
+            <span class="sub" id="tenantName">Enterprise Access Model</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link"
+            href="https://learn.microsoft.com/en-us/security/privileged-access-workstations/privileged-access-access-model"
+            target="_blank" rel="noopener noreferrer">Enterprise Access Model docs &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <div class="nav-item active"><span class="ico">&#8635;</span><span>Privilege History</span></div>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration
+                    Analyzer</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+                <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span class="ico">&#9733;</span><span>EIDSCA
+                    Findings</span></a>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span class="ico">&#8523;</span><span>Access
+                    Package Flow</span></a>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span class="ico">&#128477;&#65038;</span><span>PIM Request
+                    Flow</span></a>
+
+            <div class="nav-group-label">Sections</div>
+            <div class="nav-item section-item" data-target="secTrends" role="button" tabindex="0"><span
+                    class="ico">&#9632;</span><span>Trends</span></div>
+            <div class="nav-item section-item" data-target="tmSnapshotPanel" role="button" tabindex="0"><span
+                    class="ico">&#9823;</span><span>Snapshot detail</span></div>
+            <div class="nav-item section-item" data-target="tmComparePanel" role="button" tabindex="0"><span
+                    class="ico">&#8644;</span><span>Compare</span></div>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; Privilege History
+                </div>
+                <h1>Privilege History</h1>
+                <p>Historic trends of privileged assets, role assignments and tier breaches over time, built from the
+                    git history of your EntraOps Privileged EAM export. Filter by RBAC System, RBAC Tier Level and
+                    Role, pick a time range, click a point on any chart to inspect that snapshot, and compare any two
+                    points in time (or a point vs. today's live data via the EAM Dashboard).</p>
+            </div>
+
+            <div class="card-pad" id="tmEmptyState">
+                <p><strong>No Privilege History dataset found.</strong> Generate
+                    <code>data/privilege-history-data.js</code>
+                    from your repository's git history first:
+                </p>
+                <p><code>Import-Module ./EntraOps -Force; New-EntraOpsPrivilegedEamPrivilegeHistoryData</code></p>
+                <p>Then reload this page. See <code>EntraOpsConfig.json</code> &rsaquo;
+                    <code>PrivilegeHistory.EnablePrivilegeHistory</code> to control whether
+                    <code>New-EntraOpsReportingData</code> generates this dataset automatically.
+                </p>
+            </div>
+
+            <div id="tmContent" class="hidden">
+                <!-- Filters (RBAC System / Tier Level / Role) apply to the snapshot detail & compare
+                     tables below; the trend charts show totals across every RBAC system and tier since
+                     that's what was aggregated at generation time. -->
+                <section class="card card-pad" style="margin-bottom:16px;">
+                    <div class="eam-filter-row" id="tmFilterRow">
+                        <div class="eam-filter" id="tmFltRoleSystem"></div>
+                        <div class="eam-filter" id="tmFltTierLevel"></div>
+                        <div class="eam-filter grow">
+                            <label for="tmFltRole">Role</label>
+                            <div class="search">
+                                <span class="search-ico">&#128269;</span>
+                                <input type="text" id="tmFltRole" placeholder="Search role definition name&hellip;" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="eam-filter-row" style="margin-top:12px;">
+                        <div class="eam-filter">
+                            <label for="tmRangeFrom">Time range from</label>
+                            <select id="tmRangeFrom"></select>
+                        </div>
+                        <div class="eam-filter">
+                            <label for="tmRangeTo">to</label>
+                            <select id="tmRangeTo"></select>
+                        </div>
+                        <div class="eam-filter">
+                            <label>&nbsp;</label>
+                            <button class="btn small" id="tmResetRange">Reset to full history</button>
+                        </div>
+                    </div>
+                </section>
+
+                <div id="secTrends">
+                    <div class="eam-row" style="margin-bottom:16px;">
+                        <section class="card eam-col-50">
+                            <div class="card-head">Privileged assets by tier<span class="hint">Click a point to
+                                    inspect that snapshot</span></div>
+                            <div class="card-pad tm-chart-wrap" id="tmChartAssets"></div>
+                        </section>
+                        <section class="card eam-col-50">
+                            <div class="card-head">Users assigned by tier</div>
+                            <div class="card-pad tm-chart-wrap" id="tmChartUsers"></div>
+                        </section>
+                    </div>
+                    <div class="eam-row" style="margin-bottom:16px;">
+                        <section class="card eam-col-50">
+                            <div class="card-head">Unique role assignments by tier</div>
+                            <div class="card-pad tm-chart-wrap" id="tmChartAssignments"></div>
+                        </section>
+                        <section class="card eam-col-50">
+                            <div class="card-head">Tier breaches
+                                <span class="hint">Role assignment reaches a more privileged tier than the
+                                    principal's own tier</span>
+                            </div>
+                            <div class="card-pad tm-chart-wrap" id="tmChartBreaches"></div>
+                        </section>
+                    </div>
+                </div>
+
+                <section class="card" style="margin-bottom:16px;" id="tmSnapshotPanel">
+                    <div class="card-head">Snapshot detail
+                        <span class="chip brand hidden" id="tmSnapshotChip"></span>
+                        <button class="btn small primary hidden" id="tmJumpToOverview">Open in EAM Dashboard
+                            Overview</button>
+                    </div>
+                    <div class="card-pad" id="tmSnapshotBody">
+                        <div class="muted">Click a point on any chart above to inspect a historic snapshot.</div>
+                    </div>
+                </section>
+
+                <section class="card" id="tmComparePanel">
+                    <div class="card-head">Compare two points in time
+                        <span class="hint">Compare the selected time range's start with its end (or with today's
+                            live data from the EAM Dashboard)</span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row">
+                            <div class="eam-filter">
+                                <label for="tmCompareBaseline">Baseline</label>
+                                <select id="tmCompareBaseline"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="tmCompareCurrent">Current</label>
+                                <select id="tmCompareCurrent"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label>&nbsp;</label>
+                                <button class="btn small primary" id="tmCompareRun">Compare</button>
+                            </div>
+                        </div>
+                        <div id="tmCompareResult" style="margin-top:12px;"></div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Embedded dataset (generated by New-EntraOpsPrivilegedEamPrivilegeHistoryData).
+         Optional at load time: when absent the app shows instructions instead of failing. -->
+    <!-- defer: the multi-MB data payloads parse after the document is available, so the
+         page shell and empty-state paint before the blob lands. Execution order is preserved. -->
+    <script defer src="data/privilege-history-data.js"></script>
+    <!-- Optional: the live EAM Dashboard dataset (same repository checkout), used to show
+         "then vs. now" deltas. Silently ignored when the EAM Dashboard app/data isn't present. -->
+    <script defer src="../EamDashboard/data/eam-dashboard-data.js"></script>
+    <script defer src="js/navCollapse.js"></script>
+    <script defer src="js/app.js"></script>
+</body>
+
+</html>

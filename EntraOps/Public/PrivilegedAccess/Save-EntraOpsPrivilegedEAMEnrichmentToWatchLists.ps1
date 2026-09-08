@@ -21,7 +21,8 @@
     Name of the Microsoft Sentinel workspace.
 
 .PARAMETER RbacSystems
-    Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
+    Array of RBAC systems to be processed. Default is Azure, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
+    AzureBilling and Defender remain available as explicit opt-in values.
 
 .PARAMETER WatchListTemplates
     Define scope of WatchList templates which should be updated. Default is "All". Supported templates are "VIPUsers", "HighValueAssets", "IdentityCorrelation".
@@ -52,7 +53,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
         ,
         [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
-        [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
+        [object]$RbacSystems = ("Azure", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
@@ -62,7 +63,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
     # --- Path safety: ensure ImportPath is under the expected base directory ---
     $ResolvedImportPath = [System.IO.Path]::GetFullPath($ImportPath)
     $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)
-    if (-not $ResolvedImportPath.StartsWith($ResolvedBaseFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (-not (Test-EntraOpsPathWithinRoot -Path $ImportPath -Root $EntraOpsBaseFolder -AllowRoot)) {
         throw "Security check failed: ImportPath '$ResolvedImportPath' is not under the expected base directory '$ResolvedBaseFolder'."
     }
 

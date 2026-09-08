@@ -46,7 +46,28 @@
           "microsoft.directory/deletedItems.agentIdentityBlueprintPrincipals/delete",
           "microsoft.directory/deletedItems.agentIdentityBlueprintPrincipals/restore",
           "microsoft.directory/deletedItems.agentIdentityBlueprints/delete",
-          "microsoft.directory/deletedItems.agentIdentityBlueprints/restore"
+          "microsoft.directory/deletedItems.agentIdentityBlueprints/restore",
+          "microsoft.directory/agentIdentityBlueprints/verification/update"
+        ]
+      },
+      {
+        "Category": "Microsoft.AzureAD",
+        "Service": "Tenant Governance",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "microsoft.directory/tenantGovernance/invitations/create",
+          "microsoft.directory/tenantGovernance/invitations/delete",
+          "microsoft.directory/tenantGovernance/policyTemplates/allProperties/update",
+          "microsoft.directory/tenantGovernance/policyTemplates/create",
+          "microsoft.directory/tenantGovernance/policyTemplates/delete",
+          "microsoft.directory/tenantGovernance/relatedTenants/refresh",
+          "microsoft.directory/tenantGovernance/relationships/allProperties/update",
+          "microsoft.directory/tenantGovernance/relationships/create",
+          "microsoft.directory/tenantGovernance/requests/allProperties/update",
+          "microsoft.directory/tenantGovernance/requests/create",
+          "microsoft.directory/tenantGovernance/settings/allProperties/update"
         ]
       },
       {
@@ -155,6 +176,7 @@
           "microsoft.directory/domains/federationConfiguration/delete",
           "microsoft.directory/hybridAuthenticationPolicy/allProperties/allTasks",
           "microsoft.directory/onPasswordSubmitCustomAuthenticationExtension/allProperties/allTasks",
+          "microsoft.directory/onPasswordUpdateCustomAuthenticationExtension/allProperties/allTasks",
           "microsoft.directory/organization/strongAuthentication/allTasks",
           "microsoft.directory/passwordHashSync/allProperties/allTasks",
           "microsoft.directory/userCredentialPolicies/basic/update",
@@ -211,11 +233,6 @@
           "microsoft.directory/conditionalAccessPolicies/delete",
           "microsoft.directory/conditionalAccessPolicies/owners/update",
           "microsoft.directory/conditionalAccessPolicies/tenantDefault/update",
-          "microsoft.directory/crossTenantAccessPolicies/basic/update",
-          "microsoft.directory/crossTenantAccessPolicies/create",
-          "microsoft.directory/crossTenantAccessPolicies/delete",
-          "microsoft.directory/crossTenantAccessPolicies/owners/update",
-          "microsoft.directory/crossTenantAccessPolicies/tenantDefault/update",
           "microsoft.directory/crossTenantAccessPolicy/basic/update",
           "microsoft.directory/crossTenantAccessPolicy/default/b2bCollaboration/update",
           "microsoft.directory/crossTenantAccessPolicy/default/b2bDirectConnect/update",
@@ -1169,8 +1186,6 @@
           "microsoft.directory/contacts/create",
           "microsoft.directory/contacts/delete",
           "microsoft.office365.exchange/allEntities/basic/allTasks",
-          "microsoft.office365.exchange/allRecipients/allProperties/allTasks",
-          "microsoft.office365.exchange/messageTracking/allProperties/allTasks",
           "microsoft.office365.exchange/migration/allProperties/allTasks",
           "microsoft.office365.exchange/recipients/allProperties/allTasks"
         ]
@@ -1228,6 +1243,7 @@
         ],
         "RoleDefinitionActions": [
           "microsoft.directory/auditLogs/allProperties/read",
+          "microsoft.directory/auditLogs/standard/read",
           "microsoft.directory/customSecurityAttributeAuditLogs/allProperties/read",
           "microsoft.directory/identityProtection/allProperties/read",
           "microsoft.directory/provisioningLogs/allProperties/read",
@@ -1284,7 +1300,6 @@
           "microsoft.hardware.support/shippingStatus/allProperties/read",
           "microsoft.hardware.support/warrantyClaims/allProperties/allTasks",
           "microsoft.hardware.support/warrantyClaims/allProperties/read",
-          "microsoft.hardware.support/warrantyClaims/create/AsOwner",
           "microsoft.hardware.support/warrantyClaims/createAsOwner"
         ]
       },
@@ -1404,7 +1419,7 @@
           "microsoft.directory/userCredentialPolicies/standard/read",
           "microsoft.directory/users/allProperties/read",
           "microsoft.directory/users/authenticationMethods/standard/read",
-          "microsoft.directory/users/authenticationMethods/standard/restrictedread",
+          "microsoft.directory/users/authenticationMethods/standard/restrictedRead",
           "microsoft.directory/users/lifeCycleInfo/read",
           "microsoft.directory/verifiableCredentials/configuration/allProperties/read",
           "microsoft.directory/verifiableCredentials/configuration/contracts/allProperties/read",
@@ -1412,7 +1427,16 @@
           "microsoft.edge/allEntities/allProperties/read",
           "microsoft.insights/allEntities/allProperties/read",
           "microsoft.insights/reports/allProperties/read",
-          "microsoft.networkAccess/allEntities/allProperties/read"
+          "microsoft.networkAccess/allEntities/allProperties/read",
+          "microsoft.directory/agentIdentities/allProperties/read",
+          "microsoft.directory/agentIdentityBlueprintPrincipals/allProperties/read",
+          "microsoft.directory/agentIdentityBlueprints/allProperties/read",
+          "microsoft.directory/tenantGovernance/invitations/standard/read",
+          "microsoft.directory/tenantGovernance/policyTemplates/standard/read",
+          "microsoft.directory/tenantGovernance/relatedTenants/standard/read",
+          "microsoft.directory/tenantGovernance/relationships/standard/read",
+          "microsoft.directory/tenantGovernance/requests/standard/read",
+          "microsoft.directory/tenantGovernance/settings/standard/read"
         ]
       },
       {
@@ -1442,16 +1466,6 @@
           "microsoft.viva.goals/allEntities/allProperties/read",
           "microsoft.viva.pulse/allEntities/allProperties/allTasks",
           "microsoft.viva.pulse/allEntities/allProperties/read"
-        ]
-      },
-      {
-        "Category": "Microsoft.AzureAD",
-        "Service": "Workload Identity Management",
-        "RoleAssignmentScopeName": [
-          "/"
-        ],
-        "RoleDefinitionActions": [
-          "microsoft.directory/servicePrincipals/managePermissionGrantsForGroup.microsoft-all-application-permissions"
         ]
       },
       {
@@ -1502,7 +1516,6 @@
           "microsoft.directory/directoryRoles/standard/read",
           "microsoft.directory/directoryRoleTemplates/allProperties/read",
           "microsoft.directory/domains/standard/read",
-          "microsoft.directory/groups.security/create/AsOwner",
           "microsoft.directory/groups/appRoleAssignments/read",
           "microsoft.directory/groups/memberOf/read",
           "microsoft.directory/groups/members/read",

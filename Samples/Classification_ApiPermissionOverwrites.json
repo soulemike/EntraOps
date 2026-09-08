@@ -1,0 +1,11 @@
+[
+  {
+    "RbacSystem": "ResourceApps",
+    "PermissionValue": "BitlockerKey.Read.All",
+    "PermissionType": "Application",
+    "Category": "Global Endpoint Credential Management",
+    "EAMTierLevelName": "ManagementPlane",
+    "EAMTierLevelTagValue": "1",
+    "Justification": "No privileged access workstation is present in the tenant."
+  }
+]

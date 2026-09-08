@@ -23,6 +23,14 @@
 
 .PARAMETER ParallelThrottleLimit
     Maximum number of parallel threads. Default is 10.
+
+.PARAMETER IncludeJustification
+    Include the Justification property (documenting a manual classification overwrite) on all Classification
+    entries of the returned objects. Default is $false, so the property is not present in the output at all.
+
+.PARAMETER IncludeObjectDetails
+    Include descriptive object details in warning output. Defaults to ConsoleOutput.IncludeObjectDetails from
+    EntraOpsConfig.json. Object IDs are always shown.
 #>
 
 function Get-EntraOpsPrivilegedEamResourceApps {
@@ -30,7 +38,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     [cmdletbinding()]
     param (
         [Parameter(Mandatory = $false)]
-        [System.String]$TenantId = (Get-AzContext).Tenant.Id
+        [System.String]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$FolderClassification = "$DefaultFolderClassification"
@@ -46,6 +54,12 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         ,
         [Parameter(Mandatory = $false)]
         [System.Int32]$ParallelThrottleLimit = 10
+        ,
+        [Parameter(Mandatory = $false)]
+        [switch]$IncludeJustification
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$IncludeObjectDetails = [bool]$Global:EntraOpsIncludeObjectDetails
     )
 
     # Ensure TenantId is always set before it propagates into parallel runspaces where
@@ -77,7 +91,18 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     #region Check if App Role Assignment and scope is defined in JSON classification
     Write-Host "Checking if App role and scope is defined in JSON classification..."
-    $AppRoleByClassificationJSON = Expand-EntraOpsPrivilegedEAMJsonFile -FilePath $ResourceAppsClassificationFilePath | select-object EAMTierLevelName, EAMTierLevelTagValue, Category, Service, ResourceAppId, ResourceScope, RoleAssignmentScopeName, ExcludedRoleAssignmentScopeName, RoleDefinitionActions, ExcludedRoleDefinitionActions
+    # Classification_ApiPermissions.json (Classification/Templates or tenant-specific) uses the same nested
+    # EAMTierLevelName/TierLevelDefinition[] schema as Azure/Defender/DeviceManagement/IdentityGovernance/
+    # AadResources (entries additionally carry ResourceAppId/ResourceScope). Expand-EntraOpsPrivilegedEAMJsonFile
+    # flattens it into one row per RoleDefinitionActions/RoleAssignmentScopeName pair, matching the shape the
+    # matching logic below expects. Do not confuse this with the separate, FLAT per-permission catalog of the
+    # same filename published at the root of the AzurePrivilegedIAM repository (Classification/Classification_
+    # ApiPermissions.json, PermissionValue/PermissionType/TargetAppId/Category schema) - that file is an
+    # independent artifact used for KQL/Sentinel lookups and the Classification Explorer's API Permissions
+    # browsing view, not consumed here.
+    $AppRoleByClassificationJSON = Expand-EntraOpsPrivilegedEAMJsonFile -FilePath $ResourceAppsClassificationFilePath
+
+    # Role action overwrites are already baked into the classification file by Update-EntraOpsClassificationControlPlaneScope.
     $AppRoleClassificationsByJSON = @()
     $AppRoleClassificationsByJSON += foreach ($AppRoleAssignment in $AppRoleAssignments | Select-Object -Unique RoleDefinitionId, RoleAssignmentScopeId, RoleDefinitionName, RoleType, ResourceAppId) {
         # Check if role action and scope exists in JSON classification, filtered by ResourceAppId and ResourceScope
@@ -104,16 +129,17 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             $UniqueClassifications = $ClassifiedWithMatchedActions | Select-Object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification += $UniqueClassifications | ForEach-Object {
                 $UniqueClass = $_
-                [array]$MatchedActions = @($ClassifiedWithMatchedActions | Where-Object {
+                $MatchedEntries = @($ClassifiedWithMatchedActions | Where-Object {
                         $_.EAMTierLevelName -eq $UniqueClass.EAMTierLevelName -and
                         $_.EAMTierLevelTagValue -eq $UniqueClass.EAMTierLevelTagValue -and
                         $_.Service -eq $UniqueClass.Service
-                    } | Select-Object -ExpandProperty MatchedAction | Select-Object -Unique)
+                    })
+                [array]$MatchedActions = @($MatchedEntries | Select-Object -ExpandProperty MatchedAction | Select-Object -Unique)
                 [PSCustomObject]@{
                     'AdminTierLevel'             = $UniqueClass.EAMTierLevelTagValue
                     'AdminTierLevelName'         = $UniqueClass.EAMTierLevelName
                     'Service'                    = $UniqueClass.Service
-                    'MatchedActions'             = if ($MatchedActions.Count -gt 0) { $MatchedActions } else { $null }
+                    'MatchedActions'             = if ($MatchedActions.Count -gt 0) { , @($MatchedActions) } else { $null }
                     'ScopedObjects'              = $null
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $null
@@ -150,7 +176,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $Classification = @()
         $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $AppRoleAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
         if ($ClassificationCollection.Classification.Count -gt 0) {
-            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service | select-object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem
+            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy | select-object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, Justification
         }
         $AppRoleAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $AppRoleAssignment
@@ -224,7 +250,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                             'Service'            = "Unclassified"
                         }
                     }
-                    $Classification = $Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, Service
+                    $Classification = @($Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, Service)
 
                     [PSCustomObject]@{
                         'ObjectId'                      = $ChildAgentIdentity.id
@@ -242,7 +268,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                         'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                         'RoleSystem'                    = "ResourceApps"
                         'Classification'                = $Classification
-                        'RoleAssignments'               = @($inheritablePermissionScopes | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
+                        'RoleAssignments'               = @($inheritablePermissionScopes | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
                         'Sponsors'                      = $ObjectDetails.Sponsors
                         'Owners'                        = $ObjectDetails.Owners
                         'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -262,7 +288,14 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     Write-Host "Classifying of all assigned privileged app roles to service principals..."
 
     # Optimization: Collect all unique ObjectIds and batch resolve details
-    $UniqueObjects = $AppRoleAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    # Case-insensitive dedup (mirrors Get-EntraOpsPrivilegedEAMAzure.ps1): Select-Object -Unique compares
+    # ObjectId case-sensitively and would emit the same principal twice when ids differ only in casing.
+    $UniqueObjects = @(
+        $AppRoleAssignments |
+            Where-Object { $null -ne $_.ObjectId } |
+            Group-Object -Property { "$($_.ObjectId)".ToLowerInvariant() } |
+            ForEach-Object { $_.Group[0] | Select-Object ObjectId, ObjectType }
+    )
     
     # Use helper function for parallel/sequential object resolution
     $ObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution `
@@ -273,20 +306,23 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     # Group assignments by ObjectId for fast lookup
     $AppRoleByObject = $AppRoleClassifications | Group-Object ObjectId -AsHashTable -AsString
+    $AgentIdObjectsByObject = if ($null -ne $AppRoleClassifiedAgentIdObjectsByParentId) {
+        $AppRoleClassifiedAgentIdObjectsByParentId | Group-Object ObjectId -AsHashTable -AsString
+    } else {
+        @{}
+    }
 
-    # Determine if parallel processing is viable for classification aggregation (PowerShell 7+ guaranteed by module prerequisite)
-    $HasSufficientObjects = $UniqueObjects.Count -ge 50
+    # Classification is CPU-only and indexed; a runspace pool costs more than it saves for modest inventories.
+    $HasSufficientObjects = $UniqueObjects.Count -ge 500
     $UseParallelForClassification = $EnableParallelProcessing -and $HasSufficientObjects
     
     if ($UseParallelForClassification) {
         # Convert hashtables to synchronized versions for thread-safe access
         $SyncObjectDetailsCache = [System.Collections.Hashtable]::Synchronized($ObjectDetailsCache)
         $SyncAppRoleByObject = [System.Collections.Hashtable]::Synchronized($AppRoleByObject)
-        $SyncAgentIdObjects = if ($null -ne $AppRoleClassifiedAgentIdObjectsByParentId) { 
-            [System.Collections.Hashtable]::Synchronized(($AppRoleClassifiedAgentIdObjectsByParentId | Group-Object ObjectId -AsHashTable -AsString))
-        } else { @{} }
+        $SyncAgentIdObjects = [System.Collections.Hashtable]::Synchronized($AgentIdObjectsByObject)
         
-        $ClassificationThrottleLimit = [Math]::Min($ParallelThrottleLimit * 2, 100)
+        $ClassificationThrottleLimit = [Math]::Min($ParallelThrottleLimit, 10)
         Write-Host "Using parallel classification processing with $ClassificationThrottleLimit threads for $($UniqueObjects.Count) objects..." -ForegroundColor Yellow
         
         $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object -ThrottleLimit $ClassificationThrottleLimit -Parallel {
@@ -354,7 +390,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                     'RoleSystem'                    = "ResourceApps"
                     'Classification'                = $Classification
-                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
+                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
                     'Sponsors'                      = $ObjectDetails.Sponsors
                     'Owners'                        = $ObjectDetails.Owners
                     'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -395,12 +431,12 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 # Role Assignments
                 $AppRoleAssignments = @()
 
-                if ($ObjectId -in $AppRoleClassifiedAgentIdObjectsByParentId.ObjectId) {
+                if ($AgentIdObjectsByObject.ContainsKey($ObjectId)) {
                     # Merge classifications and role assignments if service principal has inheritable permissions by agent blueprint and assigned app roles
-                    $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
-                    $AppRoleAssignments += $AppRoleClassifiedAgentIdObjectsByParentId | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -ExpandProperty RoleAssignments
+                    $AppRoleAssignments += $AppRoleByObject[$ObjectId] | Select-Object -Unique *
+                    $AppRoleAssignments += $AgentIdObjectsByObject[$ObjectId].RoleAssignments
                 } else {
-                    $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
+                    $AppRoleAssignments += $AppRoleByObject[$ObjectId] | Select-Object -Unique *
                 }
 
                 # Classification - use hashtable for unique aggregation
@@ -444,7 +480,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                     'RoleSystem'                    = "ResourceApps"
                     'Classification'                = $Classification
-                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
+                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
                     'Sponsors'                      = $ObjectDetails.Sponsors
                     'Owners'                        = $ObjectDetails.Owners
                     'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -475,10 +511,8 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     
     Write-Host "Completed processing $($AppRoleClassifiedObjects.Count) privileged objects."
 
-    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages
+    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages -IncludeObjectDetails $IncludeObjectDetails
 
-    $AppRoleClassifiedObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    $AppRoleClassifiedObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Set-EntraOpsEAMClassificationJustification -IncludeJustification:$IncludeJustification | Sort-Object ObjectAdminTierLevel, ObjectDisplayName, ObjectId
 
 }
-
-
