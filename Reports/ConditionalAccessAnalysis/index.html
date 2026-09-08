@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Conditional Access Analysis</title>
+    <meta name="description"
+        content="Conditional Access Analysis: visualize the Conditional Access policy set of an EntraOps Tenant Governance snapshot as a filterable Sankey flow (CA Policy Flow), with heuristic coverage gap checks (CA Coverage Gaps)." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Conditional Access Analysis</span>
+            <span class="sub" id="tenantName">Tenant Governance</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link" href="https://learn.microsoft.com/en-us/graph/utcm-overview" target="_blank"
+            rel="noopener noreferrer">Tenant Configuration Management docs &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration Analyzer</span></a>
+                <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+                <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <div class="nav-item active nav-subitem"><span class="ico">&#8703;</span><span>Conditional Access Analysis</span></div>
+                <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span class="ico">&#9733;</span><span>EIDSCA
+                    Findings</span></a>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span class="ico">&#8523;</span><span>Access
+                    Package Flow</span></a>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span class="ico">&#128477;&#65038;</span><span>PIM Request
+                    Flow</span></a>
+
+            <div class="nav-group-label">Sections</div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secSankey"><span class="ico">&#8703;</span><span>CA
+                    Policy Flow</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secGaps"><span class="ico">&#9888;</span><span>CA
+                    Coverage Gaps</span></div>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; Conditional
+                    Access Analysis</div>
+                <h1>Conditional Access Analysis</h1>
+                <p>Visualize how the Conditional Access policy set of a captured <a
+                        href="../ConfigurationAnalyzer/index.html">Tenant Governance Snapshot</a> is configured as a
+                    filterable Sankey flow (Assignments &rarr; Policy &rarr; Target resources &rarr; Network &rarr;
+                    Conditions &rarr; Grant controls), and review built-in Conditional Access coverage gap checks.
+                </p>
+            </div>
+
+            <div class="card-pad" id="caEmptyState">
+                <p><strong>No Configuration Analyzer dataset found.</strong> This app reuses the same dataset as <a
+                        href="../ConfigurationAnalyzer/index.html">Configuration Analyzer</a> - generate
+                    <code>../ConfigurationAnalyzer/data/configuration-analyzer-data.js</code> from your repository's
+                    git history first:
+                </p>
+                <p><code>Import-Module ./EntraOps -Force; New-EntraOpsTenantGovernanceConfigurationAnalyzerData</code>
+                </p>
+                <p>The Tenant Governance Snapshot feature must be enabled
+                    (<code>EntraOpsConfig.json</code> &rsaquo;
+                    <code>TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot</code>) and at least one snapshot
+                    must have captured <code>microsoft.entra.conditionalAccessPolicy</code> resources with
+                    <code>Save-EntraOpsTenantGovernanceSnapshotJson</code>. Then reload this page.
+                </p>
+            </div>
+
+            <div id="caContent" class="hidden">
+
+                <div class="grid cols-4" style="margin-bottom:16px;">
+                    <button class="stat stat-action" type="button" data-ca-metric="all" aria-pressed="true"><div class="stat-accent"></div><div class="stat-label">Conditional Access policies</div><div class="stat-value" id="caStatPolicies">0</div></button>
+                    <button class="stat stat-action" type="button" data-ca-metric="enabled" aria-pressed="false"><div class="stat-accent"></div><div class="stat-label">Enabled policies</div><div class="stat-value" id="caStatEnabled">0</div></button>
+                    <button class="stat stat-action" type="button" data-ca-metric="reportOnly" aria-pressed="false"><div class="stat-accent"></div><div class="stat-label">Report-only policies</div><div class="stat-value" id="caStatReportOnly">0</div></button>
+                    <button class="stat stat-action" type="button" data-ca-metric="disabled" aria-pressed="false"><div class="stat-accent"></div><div class="stat-label">Disabled policies</div><div class="stat-value" id="caStatDisabled">0</div></button>
+                </div>
+
+                <!-- ============================ CA Policy Flow ============================ -->
+                <section class="card" style="margin-bottom:16px;" id="secSankey">
+                    <div class="card-head">CA Policy Flow
+                        <span class="hint">Assignments &rarr; Policy &rarr; Target resources &rarr; Network &rarr;
+                            Conditions &rarr; Grant controls. Click a node to trace it, click the background to
+                            clear.</span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter">
+                                <label for="caSnapshot">Snapshot</label>
+                                <select id="caSnapshot"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label>Policy state</label>
+                                <div class="ca-toggle-row" id="caStateToggles"></div>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="caFltGrant">Grant control</label>
+                                <select id="caFltGrant"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="caFltClientApp">Client app type</label>
+                                <select id="caFltClientApp"></select>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter">
+                                <label for="caFltAssignment">Assignment</label>
+                                <select id="caFltAssignment"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="caFltAssignmentTier">Assignment access level</label>
+                                <select id="caFltAssignmentTier">
+                                    <option value="">All levels</option>
+                                    <option value="ControlPlane">Control Plane</option>
+                                    <option value="ManagementPlane">Management Plane</option>
+                                    <option value="UserAccess">User Access</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="caFltTarget">Target resource</label>
+                                <select id="caFltTarget"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="caFltNetwork">Network</label>
+                                <select id="caFltNetwork"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="caFltCondition">Condition</label>
+                                <select id="caFltCondition"></select>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter grow">
+                                <label for="caFltSearch">Search</label>
+                                <div class="search">
+                                    <span class="search-ico">&#128269;</span>
+                                    <input type="text" id="caFltSearch"
+                                        placeholder="Policy, user, group, role, app, location&hellip;" />
+                                </div>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:6px;">
+                            <div class="eam-filter grow">
+                                <label>Columns</label>
+                                <div class="ca-toggle-row" id="caColToggles"></div>
+                            </div>
+                            <div class="eam-filter" style="align-self:flex-end;">
+                                <button class="btn small hidden" id="caClearTrace">Clear node trace</button>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;align-items:flex-end;">
+                            <div class="eam-filter grow"><span class="muted" id="caFreshness"></span><span class="muted" id="caFilterSummary"></span></div>
+                            <div class="eam-filter"><button class="btn small" type="button" id="caResetFilters">Reset filters</button></div>
+                            <div class="eam-filter"><button class="btn small" type="button" id="caExportFiltered">Export CSV + JSON</button></div>
+                        </div>
+                        <div class="legend" style="margin-bottom:6px;">
+                            <span class="item"><span class="swatch" style="background:#a4262c;"></span>Block</span>
+                            <span class="item"><span class="swatch" style="background:#0e700e;"></span>Grant with
+                                control (MFA, device, &hellip;)</span>
+                            <span class="item"><span class="swatch" style="background:#0078d4;"></span>Session controls
+                                only</span>
+                            <span class="item"><span class="swatch" style="background:#8a6d00;"></span>Report-only
+                                policy</span>
+                            <span class="item"><span class="swatch" style="background:#a19f9d;"></span>Disabled policy /
+                                no enforced control</span>
+                        </div>
+                        <div class="diagram-wrap">
+                            <svg id="sankey"></svg>
+                            <div id="sankeyEmpty" class="muted hidden" style="padding:24px;"></div>
+                        </div>
+                        <div id="caPolicyDetail" class="hidden" style="margin-top:12px;"></div>
+                    </div>
+                </section>
+
+                <!-- ============================ CA Coverage Gaps =========================== -->
+                <section class="card" style="margin-bottom:16px;" id="secGaps">
+                    <div class="card-head">CA Coverage Gaps
+                        <span class="hint">Heuristic checks on the selected snapshot's policy set - review results
+                            against your own requirements</span>
+                        <button class="btn small" type="button" id="caExportCoverageGaps">Export CSV + JSON</button>
+                    </div>
+                    <div class="card-pad" id="gapsBody"></div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Reuses the Configuration Analyzer's dataset (generated by
+         New-EntraOpsTenantGovernanceConfigurationAnalyzerData) instead of duplicating it. -->
+    <script src="../ConfigurationAnalyzer/data/configuration-analyzer-data.js"></script>
+    <!-- Optional: EAM Dashboard's per-object tier/classification dataset. When absent,
+         privileged-asset cross-referencing is simply disabled. -->
+    <script src="../EamDashboard/data/eam-dashboard-data.js"></script>
+    <!-- Shared snapshot/blob parsing model + Conditional Access policy parsing. -->
+    <script src="../ConfigurationAnalyzer/js/core.js"></script>
+    <script src="../shared/report-utils.js"></script>
+    <!-- d3 + d3-sankey vendored locally so the app is fully self-contained and
+         works offline / behind the strict CSP above. -->
+    <script src="assets/vendor/d3.min.js"></script>
+    <script src="assets/vendor/d3-sankey.min.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="../shared/object-inspector.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

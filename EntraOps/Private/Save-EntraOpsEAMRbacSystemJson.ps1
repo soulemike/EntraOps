@@ -48,7 +48,7 @@ function Save-EntraOpsEAMRbacSystemJson {
     $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)
 
     # Guard against misconfigured paths that could cause destructive deletion outside the workspace
-    if (-not $ResolvedExportFolder.StartsWith($ResolvedBaseFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (-not (Test-EntraOpsPathWithinRoot -Path $ExportFolder -Root $EntraOpsBaseFolder)) {
         throw "Security check failed: ExportFolder '$ResolvedExportFolder' is not under the expected base directory '$ResolvedBaseFolder'. Aborting to prevent accidental data loss."
     }
 
@@ -57,31 +57,23 @@ function Save-EntraOpsEAMRbacSystemJson {
         throw "Security check failed: ExportFolder '$ResolvedExportFolder' resolves to a system-critical path. Aborting."
     }
 
+    # Refuse to touch the previous export when the new collection came back empty (error, throttling,
+    # interrupted run): later pipeline stages depend on these files - IdentityGovernance classifies
+    # catalog groups from the PREVIOUS run's Azure/EntraID exports since Azure is collected last -
+    # so deleting a good previous state on an empty result silently degrades their classification.
+    if ($null -eq $EamData -or @($EamData).Count -eq 0) {
+        Write-Warning "Result for $RbacSystemName is empty because of an issue or empty entries in the RBAC system. Keeping previous export in $ExportFolder untouched."
+        return
+    }
+
     # Clean up and recreate export folder
     if (Test-Path -Path $ExportFolder) {
         Write-Host "Cleaning up old files in $ExportFolder..." -ForegroundColor Gray
-        $FilesToDelete = Get-ChildItem -Path $ExportFolder -Recurse -File -Force -ErrorAction SilentlyContinue
-        $TotalToDelete = $FilesToDelete.Count
-
-        if ($TotalToDelete -gt 0) {
-            $i = 0
-            foreach ($File in $FilesToDelete) {
-                $i++
-                if ($i % 20 -eq 0 -or $i -eq $TotalToDelete) {
-                    Write-Progress -Activity "Cleaning up $RbacSystemName" -Status "Deleting file $i of $TotalToDelete" -PercentComplete (($i / $TotalToDelete) * 100)
-                }
-                Remove-Item $File.FullName -Force -ErrorAction SilentlyContinue
-            }
-        }
-        Remove-Item $ExportFolder -Force -Recurse -ErrorAction SilentlyContinue | Out-Null
-        Write-Progress -Activity "Cleaning up $RbacSystemName" -Completed
+        # Single recursive delete - a per-file Remove-Item loop here previously added several
+        # seconds per RBAC system without any benefit (the folder is removed as a whole anyway).
+        Remove-Item -LiteralPath $ExportFolder -Force -Recurse -ErrorAction SilentlyContinue | Out-Null
     }
     New-Item $ExportFolder -ItemType Directory -Force | Out-Null
-
-    if ($null -eq $EamData -or @($EamData).Count -eq 0) {
-        Write-Warning "Result for $RbacSystemName is empty because of an issue or empty entries in the RBAC system."
-        return
-    }
 
     # Pre-filter
     $OriginalCount = @($EamData).Count
@@ -94,16 +86,16 @@ function Save-EntraOpsEAMRbacSystemJson {
     # Validate ObjectType and ObjectId don't contain path traversal characters
     $PathTraversalPattern = '[/\\:*?"<>|]|\.\.'
     $SafeData = @($EamData | Where-Object {
-        if ($_.ObjectType -match $PathTraversalPattern) {
-            Write-Warning "Skipping object with unsafe ObjectType: $($_.ObjectType)"
-            return $false
-        }
-        if ($_.ObjectId -match $PathTraversalPattern) {
-            Write-Warning "Skipping object with unsafe ObjectId: $($_.ObjectId)"
-            return $false
-        }
-        return $true
-    })
+            if ($_.ObjectType -match $PathTraversalPattern) {
+                Write-Warning "Skipping object with unsafe ObjectType: $($_.ObjectType)"
+                return $false
+            }
+            if ($_.ObjectId -match $PathTraversalPattern) {
+                Write-Warning "Skipping object with unsafe ObjectId: $($_.ObjectId)"
+                return $false
+            }
+            return $true
+        })
     if ($SafeData.Count -ne $EamData.Count) {
         Write-Warning "Filtered out $($EamData.Count - $SafeData.Count) objects with path traversal characters in ObjectType or ObjectId."
     }
@@ -117,9 +109,17 @@ function Save-EntraOpsEAMRbacSystemJson {
             continue
         }
 
+        $SeenRoleAssignments = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        $UniqueRoleAssignments = [System.Collections.Generic.List[object]]::new()
         foreach ($RoleAssignment in @($EamObject.RoleAssignments)) {
             if ($null -eq $RoleAssignment) {
                 continue
+            }
+
+            if (-not $RoleAssignment.PSObject.Properties.Match('RoleAssignmentInstanceId').Count -or [string]::IsNullOrWhiteSpace("$($RoleAssignment.RoleAssignmentInstanceId)")) {
+                $RoleAssignment | Add-Member -NotePropertyName 'RoleAssignmentInstanceId' -NotePropertyValue (
+                    Get-EntraOpsRoleAssignmentInstanceId -RoleSystem $RbacSystemName -RoleAssignment $RoleAssignment
+                ) -Force
             }
 
             if (-not $RoleAssignment.PSObject.Properties.Match('TransitiveByNestingObjectIds').Count) {
@@ -129,28 +129,25 @@ function Save-EntraOpsEAMRbacSystemJson {
             if (-not $RoleAssignment.PSObject.Properties.Match('TransitiveByNestingObjectDisplayNames').Count) {
                 $RoleAssignment | Add-Member -NotePropertyName 'TransitiveByNestingObjectDisplayNames' -NotePropertyValue $null -Force
             }
-        }
-    }
 
-    # Ensure stable RoleAssignments schema so null-only fields are still included in JSON output.
-    foreach ($EamObject in $EamData) {
-        if ($null -eq $EamObject.RoleAssignments) {
-            continue
-        }
-
-        foreach ($RoleAssignment in @($EamObject.RoleAssignments)) {
-            if ($null -eq $RoleAssignment) {
-                continue
-            }
-
-            if (-not $RoleAssignment.PSObject.Properties.Match('TransitiveByNestingObjectIds').Count) {
-                $RoleAssignment | Add-Member -NotePropertyName 'TransitiveByNestingObjectIds' -NotePropertyValue $null -Force
-            }
-
-            if (-not $RoleAssignment.PSObject.Properties.Match('TransitiveByNestingObjectDisplayNames').Count) {
-                $RoleAssignment | Add-Member -NotePropertyName 'TransitiveByNestingObjectDisplayNames' -NotePropertyValue $null -Force
+            # RoleAssignmentInstanceId identifies the normalized source row; the ordered nesting
+            # chain distinguishes separate transitive paths through which that row reaches an object.
+            $NestingObjectIds = @($RoleAssignment.TransitiveByNestingObjectIds | ForEach-Object {
+                    if ($null -eq $_) { '' } else { "$($_)".Trim().ToLowerInvariant() }
+                })
+            $AssignmentKey = @(
+                "$($RoleAssignment.RoleAssignmentInstanceId)".Trim().ToLowerInvariant(),
+                ($NestingObjectIds -join [char]0x1E)
+            ) -join [char]0x1F
+            if ($SeenRoleAssignments.Add($AssignmentKey)) {
+                $UniqueRoleAssignments.Add($RoleAssignment)
             }
         }
+
+        if ($UniqueRoleAssignments.Count -ne @($EamObject.RoleAssignments).Count) {
+            Write-Verbose "Removed $(@($EamObject.RoleAssignments).Count - $UniqueRoleAssignments.Count) exact duplicate role assignment row(s) for object '$($EamObject.ObjectId)' in $RbacSystemName."
+        }
+        $EamObject.RoleAssignments = $UniqueRoleAssignments.ToArray()
     }
 
     # Strip optional detail properties based on export flags
@@ -174,13 +171,15 @@ function Save-EntraOpsEAMRbacSystemJson {
         if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
     }
 
-    # Parallel per-object JSON writes
+    # Parallel per-object JSON writes. The runspaces have no access to module-private functions,
+    # so the containment prefix is precomputed here instead of calling Test-EntraOpsPathWithinRoot.
+    $ExportFolderPrefix = [System.IO.Path]::TrimEndingDirectorySeparator($ResolvedExportFolder) + [System.IO.Path]::DirectorySeparatorChar
     $Results = $EamData | ForEach-Object -Parallel {
         $Obj = $_
         $Path = "$using:ExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
         # Final resolved-path check to guard against path traversal
         $ResolvedPath = [System.IO.Path]::GetFullPath($Path)
-        if (-not $ResolvedPath.StartsWith([System.IO.Path]::GetFullPath($using:ExportFolder), [System.StringComparison]::OrdinalIgnoreCase)) {
+        if (-not $ResolvedPath.StartsWith($using:ExportFolderPrefix, [System.StringComparison]::Ordinal)) {
             Write-Warning "Path traversal detected for ObjectId '$($Obj.ObjectId)', skipping."
             return $false
         }

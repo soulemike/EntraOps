@@ -29,7 +29,7 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
     [cmdletbinding()]
     param (
         [Parameter(Mandatory = $false)]
-        [System.String]$TenantId = (Get-AzContext).Tenant.Id
+        [System.String]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
         ,
         [Parameter(Mandatory = $true)]
         [System.String]$SentinelWorkspaceId
@@ -42,13 +42,15 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
         [System.String]$Source = "MsGraphActivity"
     )
 
-    Set-AzContext -SubscriptionId $SentinelWorkspaceSubscriptionId | Out-Null
-    $TenantId = (Get-AzContext).Tenant.Id
-    $AppRolesClassification = Invoke-RestMethod -Method Get -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzurePrivilegedIAM/main/Classification/Classification_AppRoles.json"
-    $FirstPartyGraphActivitiyQuery = Invoke-RestMethod -Method GET -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzureSentinel/main/Hunting%20Queries/EID-WorkloadIdentities/GraphActivityFromFirstPartyApps.kusto"
-    $FirstPartyGraphActivities = (Invoke-AzOperationalInsightsQuery -WorkspaceId $SentinelWorkspaceId -Query $FirstPartyGraphActivitiyQuery).Results
+    $OriginalAzContext = Get-AzContext
+    try {
+        Set-AzContext -SubscriptionId $SentinelWorkspaceSubscriptionId | Out-Null
+        $TenantId = (Get-AzContext).Tenant.Id
+        $AppRolesClassification = Invoke-RestMethod -Method Get -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzurePrivilegedIAM/main/Classification/Classification_AppRoles.json"
+        $FirstPartyGraphActivitiyQuery = Invoke-RestMethod -Method GET -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzureSentinel/main/Hunting%20Queries/EID-WorkloadIdentities/GraphActivityFromFirstPartyApps.kusto"
+        $FirstPartyGraphActivities = (Invoke-AzOperationalInsightsQuery -WorkspaceId $SentinelWorkspaceId -Query $FirstPartyGraphActivitiyQuery).Results
 
-    switch ($Source) {
+        switch ($Source) {
         MsGraphActivity {
             $FirstPartyApps = foreach ($FirstPartyGraphActivity in $FirstPartyGraphActivities) {
                 $AppRoles = $FirstPartyGraphActivity.AppRoleScope | ConvertFrom-Json
@@ -112,7 +114,7 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                     Write-Warning "Service Principal Object for $($FirstPartyGraphActivity.AppDisplayName) not found!"
                 }
 
-                $AppRoleClassification = $($AppRoleClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+                $AppRoleClassification = $($AppRoleClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service
 
                 # Classification
                 $Classification = @()
@@ -162,6 +164,11 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
             $FirstPartyUnknownIdentityType = 'AuditLogs | where TimeGenerated >ago(365d) | where InitiatedBy == "{}" | summarize make_set( OperationName ) by Identity'
             $FirstPartyUnknownIdentityActivities = (Invoke-AzOperationalInsightsQuery -WorkspaceId $SentinelWorkspaceId -Query $FirstPartyUnknownIdentityType).Results | ConvertTo-Json | ConvertFrom-Json
             $FirstPartyUnknownIdentityActivities
+        }
+        }
+    } finally {
+        if ($null -ne $OriginalAzContext) {
+            Set-AzContext -Context $OriginalAzContext | Out-Null
         }
     }
 }

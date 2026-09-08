@@ -6,7 +6,7 @@
     Get information of service principals and application in Microsoft Entra ID for creating content for the WatchList "WorkloadIdentityInfo".
 
 .PARAMETER CustomSecurityServicePrincipalAttribute
-    Custom Security Attribute to be used for the service principal to get Attributes "adminTier", "adminTierLevelName", "service" and "associatedWorkload" for detailed enrichment to classify the service principal. Default attribute set name is "privilegedWorkloadIdentitiy".
+    Custom Security Attribute to be used for the service principal to get Attributes "adminTier", "adminTierLevelName", "service" and "associatedWorkload" for detailed enrichment to classify the service principal. Default attribute set name is "privilegedWorkloadIdentity".
 
 .EXAMPLE
     Get information of service principals and application in Microsoft Entra ID for creating content for the WatchList "WorkloadIdentityInfo".

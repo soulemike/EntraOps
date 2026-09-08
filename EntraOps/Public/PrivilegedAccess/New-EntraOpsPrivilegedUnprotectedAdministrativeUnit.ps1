@@ -14,6 +14,9 @@
 .PARAMETER RbacSystems
     Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
 
+.PARAMETER IncludeUnprotectedDevices
+    Also ensure AUs exist for devices owned by/associated to privileged users (OwnedDevices, AssociatedPawDevice), not only for unprotected users/groups.
+
 .EXAMPLE
     Create RMAU for privileged users without any protection but privileges in RBAC Systems "IdentityGovernance".
     New-EntraOpsPrivilegedUnprotectedAdministrativeUnit -RbacSystems ("EntraID", "IdentityGovernance")
@@ -31,8 +34,18 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         [Array]$FilterObjectType = ("User", "Group")
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
+        [ValidateSet("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
+        [Array]$RbacSystems = ("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
+        ,
+        [Parameter(Mandatory = $False)]
+        [switch]$IncludeUnprotectedDevices
+        ,
+        [Parameter(Mandatory = $False)]
+        [boolean]$ApplyRmauAssignmentsForUnprotectedObjects = $false
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateRange(0, 1)]
+        [double]$RemovalSafetyThreshold = 0.5
     )
 
     # Get Tier Levels with unprotected privileged EAM objects
@@ -48,17 +61,29 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
     # Get all unique AdminTierLevels which needs to be iterated for creating Administrative Units
     $PrivilegedEamTierLevels = Get-ChildItem -Path "$($DefaultFolderClassification)/Templates" -File -Recurse -Exclude *.Param.json | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
     $SelectedPrivilegedEamTierLevels = $PrivilegedEamTierLevels | where-object { $_.EAMTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique @{Name = 'AdminTierLevel'; Expression = 'EAMTierLevelTagValue' }, @{Name = 'AdminTierLevelName'; Expression = 'EAMTierLevelName' }
-    # Only create AUs for tier levels that actually have unprotected privileged objects
-    $SelectedPrivilegedEamTierLevels = $SelectedPrivilegedEamTierLevels | where-object { $_.AdminTierLevelName -in $UnprotectedPrivilegedEamTierLevels.AdminTierLevelName }
+    $RequiredTierLevelNames = @($UnprotectedPrivilegedEamTierLevels.AdminTierLevelName)
+    if ($IncludeUnprotectedDevices) {
+        $DeviceTierLevelNames = foreach ($RbacSystem in $RbacSystems) {
+            $PrivilegedEamObjects = Get-Content "$DefaultFolderClassifiedEam/$RbacSystem/$($RbacSystem).json" | ConvertFrom-Json
+            $PrivilegedEamObjects | Where-Object {
+                $_.ObjectType -eq "user" -and
+                (@($_.OwnedDevices).Count -gt 0 -or @($_.AssociatedPawDevice).Count -gt 0)
+            } | ForEach-Object { $_.Classification.AdminTierLevelName }
+        }
+        $RequiredTierLevelNames += $DeviceTierLevelNames
+    }
+    $SelectedPrivilegedEamTierLevels = $SelectedPrivilegedEamTierLevels | Where-Object { $_.AdminTierLevelName -in @($RequiredTierLevelNames | Select-Object -Unique) }
     #endregion
 
     # Create Administrative Units for each Tier Level
     foreach ($TierLevel in $SelectedPrivilegedEamTierLevels) {
         $Name = "Tier" + $TierLevel.AdminTierLevel + "-" + $TierLevel.AdminTierLevelName + ".UnprotectedObjects"
-        $AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$Name'" -OutputType PSObject -DisableCache)
+        $AdministrativeUnits = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$(ConvertTo-EntraOpsODataStringLiteral -Value $Name)'" -OutputType PSObject -DisableCache)
+        $AdministrativeUnit = Select-EntraOpsUniqueGraphObject -InputObject $AdministrativeUnits -ObjectDescription "administrative unit '$Name'" -AllowNotFound
 
         if (-not $AdministrativeUnit.id) {
             Write-Host "Creating Administrative Unit $($Name)"
+            $CreatedAuObject = $null
 
             $AuParams = @{
                 DisplayName = $Name
@@ -69,21 +94,27 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
             $Body = $AuParams | ConvertTo-Json -Depth 10
 
             try {
-                $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits"
+                $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits" -ThrowOnFailure
             } catch {
                 Write-Warning "Can not create Administrative Unit $($AuParams.DisplayName)! Error: $_"
             }
 
-            # Check if AU has been created successfully, wait for delay and retry if not available yet
-            Try {
-                Do { Start-Sleep -Seconds 1 }
-                Until ($AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache))
-                Write-Host "$($AdministrativeUnit.displayName) has been created successfully" -f Green
-            } Catch {
-                Write-Warning "$($AuParams.DisplayName) not available yet"
+            # Poll only after Administrative Unit creation returns an object ID.
+            if ($CreatedAuObject.id) {
+                $AdministrativeUnit = $null
+                $MaxPollSeconds = 60
+                for ($i = 0; $i -lt $MaxPollSeconds -and -not $AdministrativeUnit; $i++) {
+                    $AdministrativeUnit = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache -SuppressNotFoundWarning
+                    if (-not $AdministrativeUnit) { Start-Sleep -Seconds 1 }
+                }
+                if ($AdministrativeUnit) {
+                    Write-Host "$($AdministrativeUnit.displayName) has been created successfully" -ForegroundColor Green
+                } else {
+                    Write-Warning "$($AuParams.DisplayName) not available after $MaxPollSeconds second(s)."
+                }
             }
         } else {
-            Write-Host "Administrativer Unit $($AdministrativeUnit.displayName) already exists"
+            Write-Host "Administrative Unit $($AdministrativeUnit.displayName) already exists"
         }
     }
     #endregion

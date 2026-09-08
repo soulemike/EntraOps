@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Configuration Analyzer</title>
+    <meta name="description"
+        content="Configuration Analyzer: compare EntraOps Tenant Governance snapshots over time from git history - change timeline, snapshot changes and two-snapshot comparison with property-level diffs." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Configuration Analyzer</span>
+            <span class="sub" id="tenantName">Tenant Governance</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link" href="https://learn.microsoft.com/en-us/graph/utcm-overview" target="_blank"
+            rel="noopener noreferrer">Tenant Configuration Management docs &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" id="caNavConfiguration" href="index.html"><span
+                    class="ico">&#9878;</span><span>Configuration Analyzer</span></a>
+            <a class="nav-item nav-subitem" id="caNavResources" href="index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+            <a class="nav-item nav-subitem" id="caNavPrivileged" href="index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+            <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span
+                    class="ico">&#9733;</span><span>EIDSCA
+                    Findings</span></a>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span
+                    class="ico">&#8523;</span><span>Access
+                    Package Flow</span></a>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span
+                    class="ico">&#128477;&#65038;</span><span>PIM Request
+                    Flow</span></a>
+
+            <div class="nav-group-label" id="caSectionsLabel">Sections</div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-section-view="configuration"
+                data-target="secTimeline"><span class="ico">&#9632;</span><span>Change
+                    timeline</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-section-view="configuration"
+                data-target="secChanges"><span class="ico">&#916;</span><span>Snapshot
+                    changes</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-section-view="configuration"
+                data-target="secCompare"><span class="ico">&#8644;</span><span>Compare
+                    snapshots</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-section-view="privileged"
+                data-target="secPrivilegedAssets"><span class="ico">&#9638;</span><span>Classified Resource Types</span>
+            </div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-section-view="privileged"
+                data-target="secRelatedAssets"><span class="ico">&#8644;</span><span>Related assets</span></div>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; Configuration
+                    Analyzer</div>
+                <h1 id="caPageTitle">Configuration Analyzer</h1>
+                <p id="caPageDescription">Compare EntraOps Tenant Governance snapshots over time - built entirely from
+                    the git history of
+                    <code>TenantGovernance/Snapshots</code>: a change timeline, a per-snapshot change list and a
+                    two-snapshot comparison with property-level diffs. See <a
+                        href="../ConditionalAccessAnalysis/index.html">Conditional
+                        Access Analysis</a> for the CA policy flow Sankey and coverage gap checks, <a
+                        href="../EidscaCoverage/index.html">EIDSCA Findings</a> for the EIDSCA control evaluation, and
+                    <a href="../AccessPackageFlow/index.html">Access Package Flow</a> for the entitlement management
+                    request/approval/target Sankey.
+                </p>
+            </div>
+
+            <!-- Snapshot health must remain outside the data-dependent content container so
+                 partial-capture diagnostics stay visible even when no snapshots can be rendered. -->
+            <div id="caSnapshotHealth"></div>
+
+            <div class="card-pad" id="caEmptyState">
+                <p><strong>No Configuration Analyzer dataset found.</strong> Generate
+                    <code>data/configuration-analyzer-data.js</code> from your repository's git history first:
+                </p>
+                <p><code>Import-Module ./EntraOps -Force; New-EntraOpsTenantGovernanceConfigurationAnalyzerData</code>
+                </p>
+                <p>The Tenant Governance Snapshot feature must be enabled
+                    (<code>EntraOpsConfig.json</code> &rsaquo;
+                    <code>TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot</code>) and at least one snapshot
+                    must have been captured with <code>Save-EntraOpsTenantGovernanceSnapshotJson</code>. Then reload
+                    this page.
+                </p>
+            </div>
+
+            <div id="caContent" class="hidden">
+
+                <!-- ============================ Change timeline ============================ -->
+                <div id="secTimeline">
+                    <div class="grid cols-4" style="margin-bottom:16px;">
+                        <div class="stat">
+                            <div class="stat-accent"></div>
+                            <div class="stat-label">Snapshots</div>
+                            <div class="stat-value" id="statSnapshots">0</div>
+                            <div class="stat-sub" id="statRange"></div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-accent"></div>
+                            <div class="stat-label">Resources (latest)</div>
+                            <div class="stat-value" id="statResources">0</div>
+                            <div class="stat-sub" id="statResourceTypes"></div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-accent"></div>
+                            <div class="stat-label">Changes in latest snapshot</div>
+                            <div class="stat-value" id="statLatestChanges">0</div>
+                            <div class="stat-sub">added + modified + removed vs. previous</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-accent"></div>
+                            <div class="stat-label">Conditional Access policies</div>
+                            <div class="stat-value" id="statCaPolicies">0</div>
+                            <div class="stat-sub" id="statCaStates"></div>
+                        </div>
+                    </div>
+
+                    <section class="card" style="margin-bottom:16px;">
+                        <div class="card-head">Configuration changes over time
+                            <span class="hint" id="timelineHint">Click a bar to inspect that snapshot's changes</span>
+                            <button class="btn small" id="timelineExport" type="button">Export CSV + JSON</button>
+                        </div>
+                        <div class="card-pad">
+                            <div class="eam-filter-row" style="margin-bottom:10px;">
+                                <div class="eam-filter">
+                                    <label for="timelineView">Time scale</label>
+                                    <select id="timelineView">
+                                        <option value="recent">Last 12 snapshots</option>
+                                        <option value="week">Weekly totals (last 12)</option>
+                                        <option value="month">Monthly totals (last 12)</option>
+                                        <option value="all">All snapshots</option>
+                                    </select>
+                                </div>
+                                <div class="eam-filter">
+                                    <label for="fltResourceType">Resource type</label>
+                                    <select id="fltResourceType"></select>
+                                </div>
+                                <div class="eam-filter grow" style="align-self:flex-end;">
+                                    <div class="legend">
+                                        <span class="item"><span class="swatch"
+                                                style="background:#0e700e;"></span>Added</span>
+                                        <span class="item"><span class="swatch"
+                                                style="background:#c07807;"></span>Modified</span>
+                                        <span class="item"><span class="swatch"
+                                                style="background:#a4262c;"></span>Removed</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tm-chart-wrap" id="timelineChart"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- ============================ Snapshot changes =========================== -->
+                <section class="card" style="margin-bottom:16px;" id="secChanges">
+                    <div class="card-head">Snapshot changes
+                        <span class="chip brand hidden" id="changesChip"></span>
+                        <button class="btn small" id="changesExport" type="button">Export CSV + JSON</button>
+                    </div>
+                    <div class="card-pad" id="changesBody">
+                        <div class="muted">Click a bar in the timeline above to inspect the changes of that
+                            snapshot compared to the previous one.</div>
+                    </div>
+                </section>
+
+                <!-- ============================ Compare two snapshots ====================== -->
+                <section class="card" style="margin-bottom:16px;" id="secCompare">
+                    <div class="card-head">Compare two snapshots
+                        <span class="hint">Property-level diffs are available for snapshots with embedded content</span>
+                        <button class="btn small" id="compareExport" type="button">Export CSV + JSON</button>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row">
+                            <div class="eam-filter">
+                                <label for="cmpBaseline">Baseline</label>
+                                <select id="cmpBaseline"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="cmpCurrent">Current</label>
+                                <select id="cmpCurrent"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label>&nbsp;</label>
+                                <button class="btn small primary" id="cmpRun">Compare</button>
+                            </div>
+                        </div>
+                        <div id="cmpResult" style="margin-top:12px;"></div>
+                    </div>
+                </section>
+
+                <!-- ============================ Snapshot Resources ========================== -->
+                <section class="card" style="margin-bottom:16px;" id="secAllSnapshotResources">
+                    <div class="card-head">Snapshot Resources
+                        <span class="hint">Navigate captured resources by type, inspect embedded properties and compare
+                            snapshots</span>
+                        <button class="btn small" id="asrExport" type="button">Export CSV + JSON</button>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row" style="margin-bottom:12px;">
+                            <div class="eam-filter">
+                                <label for="asrSnapshot">Snapshot</label>
+                                <select id="asrSnapshot"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="asrType">Resource type</label>
+                                <select id="asrType"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="asrCategory">Category</label>
+                                <select id="asrCategory"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="asrChangeMode">Resource state</label>
+                                <select id="asrChangeMode">
+                                    <option value="all">All current resources</option>
+                                    <option value="changed">Changed from baseline</option>
+                                    <option value="added">Added since baseline</option>
+                                    <option value="modified">Modified since baseline</option>
+                                    <option value="removed">Removed since baseline</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter grow">
+                                <label for="asrSearch">Search resources</label>
+                                <input id="asrSearch" placeholder="Name, category or resource type" />
+                            </div>
+                        </div>
+                        <div class="eam-filter-row asr-asset-filters" style="margin-bottom:12px;">
+                            <div class="eam-filter" id="asrPrivilegedToggle"></div>
+                            <div class="eam-filter" id="asrTierFilter"></div>
+                            <div class="eam-filter" id="asrClassificationFilter"></div>
+                            <div class="eam-filter" style="align-self:flex-end;"><button class="btn small"
+                                    id="asrClearFilters" type="button">Clear filters</button></div>
+                        </div>
+                        <div class="asr-layout">
+                            <div class="asr-list" id="asrList" aria-label="Snapshot resources"></div>
+                            <div class="asr-detail" id="asrDetail"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================ Configuration Assets ============================ -->
+                <section class="card" style="margin-bottom:16px;" id="secPrivilegedAssets">
+                    <div class="card-head">Classified Resource Types
+                        <span class="hint">Which captured resource types involve a Control Plane / Management Plane
+                            / User Access identity, directly or via a resolved group membership</span>
+                        <button class="btn small" id="paExport" type="button">Export CSV + JSON</button>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row" style="margin-bottom:10px;">
+                            <div class="eam-filter">
+                                <label for="paSnapshot">Snapshot</label>
+                                <select id="paSnapshot"></select>
+                            </div>
+                            <div class="eam-filter">
+                                <label for="paTierFilter">Access tier</label>
+                                <select id="paTierFilter">
+                                    <option value="">All tiers</option>
+                                    <option value="ControlPlane">Control Plane</option>
+                                    <option value="ManagementPlane">Management Plane</option>
+                                    <option value="UserAccess">User Access</option>
+                                </select>
+                            </div>
+                            <div class="eam-filter grow">
+                                <label for="paSearch">Search resource types and assets</label>
+                                <input id="paSearch" type="search"
+                                    placeholder="Resource type, resource, identity, UPN or service" />
+                            </div>
+                            <div class="eam-filter" style="align-self:flex-end;">
+                                <label class="check-label"><input type="checkbox" id="paIncludeAllTypes" /> Show types
+                                    without identity references</label>
+                            </div>
+                        </div>
+                        <div class="legend" style="margin-bottom:10px;">
+                            <span class="item"><span class="swatch" style="background:#a4262c;"></span>Control
+                                Plane</span>
+                            <span class="item"><span class="swatch" style="background:#c07807;"></span>Management
+                                Plane</span>
+                            <span class="item"><span class="swatch" style="background:#0e700e;"></span>User
+                                Access</span>
+                        </div>
+                        <div id="privilegedAssetsBody"></div>
+                        <p class="muted" style="font-size:12px;margin-top:10px;">Only resources with embedded content
+                            in the selected snapshot are scanned, and only for the specific fields documented to
+                            carry a user/group id (e.g. Administrative Unit members, Conditional Access
+                            IncludeUsers/IncludeGroups and Authentication Method policy IncludeTargets, access
+                            package requestors/approvers, role schedule request principals, group owners/members and
+                            Intune assignment targets). Exclusions are not evaluated. An id
+                            not classified by EntraOps is treated as <b>User Access</b>. Included group targets are
+                            resolved through their transitive membership by default; set
+                            <code>ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets</code> to
+                            <code>false</code> in <code>EntraOpsConfig.json</code> to skip that resolution.
+                        </p>
+                    </div>
+                </section>
+
+                <section class="card" style="margin-bottom:16px;" id="secRelatedAssets">
+                    <div class="card-head">Related assets
+                        <span class="hint">Expand a snapshot resource to inspect every EntraOps-classified asset
+                            referenced by it</span>
+                    </div>
+                    <div class="card-pad" id="paRelatedAssetsBody">
+                        <div class="muted">Select a resource type from Classified Resource Types above.</div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Embedded dataset (generated by New-EntraOpsTenantGovernanceConfigurationAnalyzerData).
+         Optional at load time: when absent the app shows instructions instead of failing. -->
+    <script src="data/configuration-analyzer-data.js"></script>
+    <!-- Optional: EAM Dashboard's per-object tier/classification dataset (generated by
+         New-EntraOpsPrivilegedEamDashboardData into Reports/EamDashboard/data). When absent,
+         the privileged-asset filter/indicators in this app are simply disabled. -->
+    <script src="../EamDashboard/data/eam-dashboard-data.js"></script>
+    <!-- d3 kept for the change timeline bar chart. -->
+    <script src="assets/vendor/d3.min.js"></script>
+    <!-- Shared snapshot/blob parsing model, reused by the Conditional Access Analysis,
+         EIDSCA Findings and Access Package Flow apps (loaded via a relative path there). -->
+    <script src="js/core.js"></script>
+    <script src="../shared/report-utils.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="../shared/object-inspector.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

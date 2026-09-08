@@ -14,6 +14,10 @@
 .PARAMETER StaticDataCacheTTL
     Cache TTL (in seconds) for static data like role definitions during this execution. If not specified, uses current session value.
 
+.PARAMETER IncludeJustification
+    Include the Justification property (documenting a manual classification overwrite) on all Classification
+    entries of the returned objects. Default is $false, so the property is not present in the output at all.
+
 .EXAMPLE
     Store EntraOps data of Entra-related RBAC systems in a variable
     $EntraOpsData = Get-EntraOpsPrivilegedEAM -RbacSystem ("EntraID", "IdentityGovernance","ResourceApps")
@@ -28,8 +32,8 @@ function Get-EntraOpsPrivilegedEAM {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "Defender")
+        [ValidateSet("Azure", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [Array]$RbacSystems = ("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "Defender")
         ,
         [Parameter(Mandatory = $False)]
         [System.Boolean]$ClearCache = $false
@@ -42,6 +46,9 @@ function Get-EntraOpsPrivilegedEAM {
         ,
         [Parameter(Mandatory = $False)]
         [switch]$IncludeActivatedPIMAssignments
+        ,
+        [Parameter(Mandatory = $False)]
+        [switch]$IncludeJustification
     )
 
     # Store original TTL values to restore after execution
@@ -84,36 +91,44 @@ function Get-EntraOpsPrivilegedEAM {
             if ($IncludeActivatedPIMAssignments) {
                 $EntraIdParams['IncludeActivatedPIMAssignments'] = $true
             }
-            $EamAzureAD = Get-EntraOpsPrivilegedEamEntraId @EntraIdParams
+            $EamAzureAD = Get-EntraOpsPrivilegedEamEntraId @EntraIdParams -IncludeJustification:$IncludeJustification
             $EamAzureAD | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
         }
         #endregion
 
         #region Entra Resource Apps
         if ($RbacSystems -contains "ResourceApps") {
-            $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps
+            $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps -IncludeJustification:$IncludeJustification
             $EamAzureAdResourceApps | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
         }
         #endregion
 
         #region Device Management
         if ($RbacSystems -contains "DeviceManagement") {
-            $EamDeviceMgmt = Get-EntraOpsPrivilegedEAMIntune
+            $EamDeviceMgmt = Get-EntraOpsPrivilegedEAMIntune -IncludeJustification:$IncludeJustification
             $EamDeviceMgmt | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
         }
         #endregion
 
         #region Identity Governance
         if ($RbacSystems -contains "IdentityGovernance") {
-            $EamIdGov = Get-EntraOpsPrivilegedEAMIdGov
+            $EamIdGov = Get-EntraOpsPrivilegedEAMIdGov -IncludeJustification:$IncludeJustification
             $EamIdGov | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
         }
         #endregion
 
         #region Defender
         if ($RbacSystems -contains "Defender") {
-            $EamDefender = Get-EntraOpsPrivilegedEamDefender
+            $EamDefender = Get-EntraOpsPrivilegedEamDefender -IncludeJustification:$IncludeJustification
             $EamDefender | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
+        }
+        #endregion
+
+        #region Azure
+        # Azure RBAC is evaluated last and uses the Azure (Get-AzContext) tenant context.
+        if ($RbacSystems -contains "Azure") {
+            $EamAzure = Get-EntraOpsPrivilegedEAMAzure -IncludeJustification:$IncludeJustification
+            $EamAzure | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
         }
         #endregion
     } finally {

@@ -28,7 +28,8 @@
           "AgentIdentityBlueprintPrincipal.ReadWrite.All",
           "AgentIdUser.ReadWrite.All",
           "AgentInstance.ReadWrite.All",
-          "AgentRegistration.ReadWrite.All"
+          "AgentRegistration.ReadWrite.All",
+          "LifecyclePolicies-AgentId.ReadWrite.All"
         ]
       },
       {
@@ -43,7 +44,20 @@
           "AgentCard.ReadWrite.ManagedBy",
           "AgentCardManifest.ReadWrite.ManagedBy",
           "AgentCollection.ReadWrite.ManagedBy",
+          "AgentCommunicationConfiguration.ReadWrite.All",
           "AgentInstance.ReadWrite.ManagedBy"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Agent Identity",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "AgentCommunicationConfiguration.ReadWrite"
         ]
       },
       {
@@ -135,18 +149,32 @@
           "Policy.ReadWrite.AuthenticationFlows",
           "Policy.ReadWrite.AuthenticationMethod",
           "Policy.ReadWrite.Authorization",
+          "UserAuthenticationMethod.Delete.All",
           "UserAuthenticationMethod.ReadWrite.All",
+          "UserAuthMethod-Email.Delete.All",
           "UserAuthMethod-Email.ReadWrite.All",
+          "UserAuthMethod-External.Delete.All",
           "UserAuthMethod-External.ReadWrite.All",
+          "UserAuthMethod-HardwareOATH.Delete.All",
           "UserAuthMethod-HardwareOATH.ReadWrite.All",
+          "UserAuthMethod-MicrosoftAuthApp.Delete.All",
           "UserAuthMethod-MicrosoftAuthApp.ReadWrite.All",
+          "UserAuthMethod-Passkey.Delete.All",
           "UserAuthMethod-Passkey.ReadWrite.All",
           "UserAuthMethod-Password.ReadWrite.All",
+          "UserAuthMethod-Phone.Delete.All",
           "UserAuthMethod-Phone.ReadWrite.All",
+          "UserAuthMethod-PlatformCred.Delete.All",
           "UserAuthMethod-PlatformCred.ReadWrite.All",
+          "UserAuthMethod-QR.Delete.All",
           "UserAuthMethod-QR.ReadWrite.All",
+          "UserAuthMethod-ResourceKey.Delete.All",
+          "UserAuthMethod-ResourceKey.ReadWrite.All",
+          "UserAuthMethod-SoftwareOATH.Delete.All",
           "UserAuthMethod-SoftwareOATH.ReadWrite.All",
+          "UserAuthMethod-TAP.Delete.All",
           "UserAuthMethod-TAP.ReadWrite.All",
+          "UserAuthMethod-WindowsHello.Delete.All",
           "UserAuthMethod-WindowsHello.ReadWrite.All"
         ]
       },
@@ -342,38 +370,6 @@
         ]
       },
       {
-        "Category": "Microsoft.ExchangeOnline",
-        "Service": "Exchange Administration",
-        "ResourceAppId": "00000002-0000-0ff1-ce00-000000000000",
-        "ResourceScope": "Application",
-        "RoleAssignmentScopeName": [
-          "/"
-        ],
-        "RoleDefinitionActions": [
-          "Exchange.AdminAPI.ManageAsApp",
-          "Exchange.ManageAsApp",
-          "Exchange.ManageAsAppV2",
-          "full_access_as_app",
-          "Mailbox.Migration"
-        ]
-      },
-      {
-        "Category": "Microsoft.ExchangeOnline",
-        "Service": "Exchange Administration",
-        "ResourceAppId": "00000002-0000-0ff1-ce00-000000000000",
-        "ResourceScope": "Delegation",
-        "RoleAssignmentScopeName": [
-          "/"
-        ],
-        "RoleDefinitionActions": [
-          "EAS.AccessAsUser.All",
-          "EWS.AccessAsUser.All",
-          "Exchange.AdminAPI.Manage",
-          "Exchange.Manage",
-          "Exchange.ManageV2"
-        ]
-      },
-      {
         "Category": "Microsoft.Graph",
         "Service": "External Identities",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
@@ -385,12 +381,23 @@
           "APIConnectors.ReadWrite.All",
           "ExternalUserProfile.ReadWrite.All",
           "IdentityUserFlow.ReadWrite.All",
-          "LifecyclePolicies-Guests.ReadWrite.All",
           "PendingExternalUserProfile.ReadWrite.All",
           "Policy.ReadWrite.ExternalIdentities",
           "Policy.ReadWrite.TrustFramework",
           "TrustFrameworkKeySet.Read.All",
           "TrustFrameworkKeySet.ReadWrite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "External Identities",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "LifecyclePolicies-Guests.ReadWrite.All"
         ]
       },
       {
@@ -430,6 +437,7 @@
           "CloudPC.ReadWrite.All",
           "DeviceManagementApps.ReadWrite.All",
           "DeviceManagementConfiguration.ReadWrite.All",
+          "DeviceManagementDeploymentPlans.ReadWrite.All",
           "DeviceManagementManagedDevices.PrivilegedOperations.All",
           "DeviceManagementManagedDevices.ReadWrite.All",
           "DeviceManagementScripts.ReadWrite.All",
@@ -491,6 +499,7 @@
         "RoleDefinitionActions": [
           "AttackSimulation.ReadWrite.All",
           "AuditActivity.Write",
+          "CaseManagement.ReadWrite.All",
           "ContentActivity.Write",
           "CustomDetection.ReadWrite.All",
           "PartnerSecurity.ReadWrite.All",
@@ -787,7 +796,6 @@
           "DirectoryRecommendations.ReadWrite.All",
           "Domain-InternalFederation.ReadWrite.All",
           "Domain.ReadWrite.All",
-          "EduRoster.ReadWrite.All",
           "IdentityNotifications.ReadWrite.All",
           "IdentityProvider.ReadWrite.All",
           "OnPremDirectorySynchronization.ReadWrite.All",
@@ -801,6 +809,18 @@
           "OrgSettings-Todo.ReadWrite.All",
           "Policy.ReadWrite.FeatureRollout",
           "SignInIdentifier.ReadWrite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Tenant Management",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "EduRoster.ReadWrite.All"
         ]
       },
       {
@@ -832,6 +852,7 @@
         "RoleDefinitionActions": [
           "Policy.ReadWrite.FedTokenValidation",
           "Policy.ReadWrite.IdentityProtection",
+          "Policy.ReadWrite.Recovery",
           "Policy.ReadWrite.SecurityDefaults"
         ]
       },
@@ -1340,6 +1361,38 @@
         ]
       },
       {
+        "Category": "Microsoft.ExchangeOnline",
+        "Service": "Exchange Administration",
+        "ResourceAppId": "00000002-0000-0ff1-ce00-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "Exchange.AdminAPI.ManageAsApp",
+          "Exchange.ManageAsApp",
+          "Exchange.ManageAsAppV2",
+          "full_access_as_app",
+          "Mailbox.Migration"
+        ]
+      },
+      {
+        "Category": "Microsoft.ExchangeOnline",
+        "Service": "Exchange Administration",
+        "ResourceAppId": "00000002-0000-0ff1-ce00-000000000000",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "EAS.AccessAsUser.All",
+          "EWS.AccessAsUser.All",
+          "Exchange.AdminAPI.Manage",
+          "Exchange.Manage",
+          "Exchange.ManageV2"
+        ]
+      },
+      {
         "Category": "Microsoft.Graph",
         "Service": "Exchange Online",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
@@ -1348,6 +1401,8 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "Calendars.Read.All",
+          "Calendars.ReadWrite.All",
           "Calendars.Read",
           "Calendars.ReadWrite",
           "Contacts-OnPremisesSyncBehavior.ReadWrite.All",
@@ -1379,6 +1434,7 @@
           "MailboxFolder.ReadWrite.All",
           "MailboxItem.ImportExport.All",
           "MailboxItem.Read.All",
+          "MailboxItem.ReadWrite.All",
           "MailTips.ReadBasic.All",
           "Schedule-WorkingTime.ReadWrite.All"
         ]
@@ -1442,7 +1498,11 @@
           "HealthMonitoringAlert.Read.All",
           "HealthMonitoringAlert.ReadWrite.All",
           "HealthMonitoringAlertConfig.Read.All",
-          "HealthMonitoringAlertConfig.ReadWrite.All"
+          "HealthMonitoringAlertConfig.ReadWrite.All",
+          "IdentityDiagnostic.Read",
+          "IdentityDiagnostic.Read.All",
+          "IdentityDiagnostic.StartDiagnosis",
+          "IdentityDiagnostic.StartDiagnosis.All"
         ]
       },
       {
@@ -1598,6 +1658,7 @@
           "DeviceLocalCredential.ReadBasic.All",
           "DeviceManagementApps.Read.All",
           "DeviceManagementConfiguration.Read.All",
+          "DeviceManagementDeploymentPlans.Read.All",
           "DeviceManagementManagedDevices.Read.All",
           "DeviceManagementRBAC.Read.All",
           "DeviceManagementScripts.Read.All",
@@ -1689,6 +1750,7 @@
         "RoleDefinitionActions": [
           "Content.Process.All",
           "Content.Process.User",
+          "Group.ManageProtection.All",
           "ProtectionScopes.Compute.All",
           "ProtectionScopes.Compute.User",
           "RealTimeActivityFeed.Read.All",
@@ -1770,6 +1832,8 @@
         ],
         "RoleDefinitionActions": [
           "OneDrive.Provision.All",
+          "SharePointTenantSettings.Read.All",
+          "SharePointTenantSettings.ReadWrite.All",
           "Sites.FullControl.All"
         ]
       },
@@ -1815,7 +1879,9 @@
         ],
         "RoleDefinitionActions": [
           "AllSites.FullControl",
-          "ProjectWebApp.FullControl"
+          "ProjectWebApp.FullControl",
+          "SharePointTenantSettings.Read.All",
+          "SharePointTenantSettings.ReadWrite.All"
         ]
       },
       {
@@ -1899,6 +1965,7 @@
           "Calls.InitiateGroupCall.All",
           "Calls.JoinGroupCall.All",
           "Calls.JoinGroupCallAsGuest.All",
+          "Calls.ReportSyntheticMedia.All",
           "ChannelMessage.UpdatePolicyViolation.All",
           "Chat.Read.All",
           "Chat.Read.WhereInstalled",
@@ -1952,6 +2019,8 @@
           "TeamsTab.ReadWriteSelfForUser.All",
           "TeamTemplates.Read.All",
           "Teamwork.Migrate.All",
+          "TeamworkCustomEmoji.Create.All",
+          "TeamworkCustomEmoji.Read.All",
           "TeamworkSection.Read.All",
           "TeamworkSection.ReadWrite.All",
           "TeamworkTag.Read.All",
@@ -2010,6 +2079,8 @@
           "TeamsTab.ReadWriteSelfForTeam",
           "TeamsTab.ReadWriteSelfForUser",
           "TeamTemplates.Read",
+          "TeamworkCustomEmoji.Create",
+          "TeamworkCustomEmoji.Read",
           "TeamworkSection.Read",
           "TeamworkSection.ReadWrite",
           "TeamworkTag.Read",
@@ -2146,12 +2217,24 @@
         "RoleDefinitionActions": [
           "Printer.Read.All",
           "Printer.ReadWrite.All",
-          "PrintJob.Manage.All",
           "PrintJob.Read.All",
           "PrintJob.ReadBasic.All",
           "PrintJob.ReadWrite.All",
           "PrintJob.ReadWriteBasic.All",
           "PrintSettings.Read.All",
+          "PullPrintPrinter.Read.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Printer Management",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "PrintJob.Manage.All",
           "PrintTaskDefinition.ReadWrite.All"
         ]
       },
@@ -2169,7 +2252,9 @@
           "Printer.Create",
           "Printer.FullControl.All",
           "PrinterShare.ReadWrite.All",
-          "PrintSettings.ReadWrite.All"
+          "PrintSettings.ReadWrite.All",
+          "PullPrintPrinter.FullControl.All",
+          "PullPrintPrinter.ReadWrite.All"
         ]
       },
       {
@@ -2191,6 +2276,7 @@
           "AuditLogsQuery-OneDrive.Read.All",
           "AuditLogsQuery-SharePoint.Read.All",
           "AuditLogsQuery.Read.All",
+          "CaseManagement.Read.All",
           "ChangeManagement.Read.All",
           "CloudApp-Discovery.Read.All",
           "ContentActivity.Read",
@@ -2411,6 +2497,8 @@
           "AdminAppCatalog.Read.All",
           "Region.Read.All",
           "Region.ReadWrite.All",
+          "Team.ReadWrite.All",
+          "TeamMember.ReadWrite.All",
           "UserLicense.Read.All"
         ]
       },
@@ -2467,7 +2555,7 @@
           "Group-XTenantIdentitySync.Read.All",
           "IdentityUserFlow.Read.All",
           "IdentityNotifications.Read.All",
-          "LifecyclePolicies-Guests.Read.All",
+          "LifecyclePolicies-AgentId.Read.All",
           "LifecycleWorkflows-CustomExt.Read.All",
           "LifecycleWorkflows-Reports.Read.All",
           "LifecycleWorkflows-Workflow.Read.All",
@@ -2487,9 +2575,12 @@
           "Policy.Read.AuthenticationMethod",
           "Policy.Read.B2BManagementPolicy",
           "Policy.Read.ConditionalAccess",
+          "Policy.Read.CrossTenantAccess",
           "Policy.Read.DeviceConfiguration",
           "Policy.Read.IdentityProtection",
           "Policy.Read.PermissionGrant",
+          "Policy.Read.Recovery",
+          "PreAuthorizationGrant.Read.All",
           "PrivilegedAccess-CustomExt.Read.All",
           "PrivilegedAccess.Read.AzureAD",
           "PrivilegedAccess.Read.AzureADGroup",
@@ -2497,6 +2588,7 @@
           "PrivilegedAssignmentSchedule.Read.AzureADGroup",
           "PrivilegedEligibilitySchedule.Read.AzureADGroup",
           "PrivilegedEligibilitySchedule.Read.EntraAppRole",
+          "RemoteTenantGroups.Read.All",
           "RoleAssignmentSchedule.Read.Directory",
           "RoleEligibilitySchedule.Read.Directory",
           "RoleManagement.Read.Defender",
@@ -2528,6 +2620,7 @@
           "AppCertTrustConfiguration.Read.All",
           "ConsentRequest.Read",
           "CrossTenantUserProfileSharing.Read",
+          "LifecyclePolicies-Guests.Read.All",
           "ManagedTenants.Read.All",
           "Subscription.Read.All"
         ]
@@ -2578,6 +2671,34 @@
           "EngagementRole.Read.All",
           "EngagementRole.ReadWrite.All",
           "Notification.Send.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.EntraVerifiedId",
+        "Service": "Verified ID",
+        "ResourceAppId": "3db474b9-6a0c-4840-96ac-1fceb342124f",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "VerifiableCredential.Create.All",
+          "VerifiableCredential.Create.IssueRequest",
+          "VerifiableCredential.Create.PresentRequest"
+        ]
+      },
+      {
+        "Category": "Microsoft.EntraVerifiedId",
+        "Service": "Verified ID",
+        "ResourceAppId": "3db474b9-6a0c-4840-96ac-1fceb342124f",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "VerifiableCredential.Create.IssueRequest",
+          "VerifiableCredential.Create.IssueRequest.User",
+          "VerifiedId.MyAccountEligibility.Read"
         ]
       }
     ]
@@ -2862,6 +2983,7 @@
           "AgentCard.Read.All",
           "AgentCardManifest.Read.All",
           "AgentCollection.Read.All",
+          "AgentCommunicationConfiguration.Read.All",
           "AgentIdentity.Read.All",
           "AgentIdentityBlueprint.Read.All",
           "AgentIdentityBlueprintPrincipal.Read.All",
@@ -2893,6 +3015,7 @@
           "UserAuthMethod-Phone.Read.All",
           "UserAuthMethod-PlatformCred.Read.All",
           "UserAuthMethod-QR.Read.All",
+          "UserAuthMethod-ResourceKey.Read.All",
           "UserAuthMethod-SoftwareOATH.Read.All",
           "UserAuthMethod-TAP.Read.All",
           "UserAuthMethod-WindowsHello.Read.All",
@@ -2908,6 +3031,7 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "AgentCommunicationConfiguration.Read",
           "Analytics.Read",
           "Calendars.Read.Shared",
           "Calendars.ReadBasic",
@@ -3199,9 +3323,11 @@
           "MailboxItem.Export",
           "MailboxItem.ImportExport",
           "MailboxItem.Read",
+          "MailboxItem.ReadWrite",
           "MailTips.ReadBasic.Shared",
           "POP.AccessAsUser.All",
-          "SMTP.Send"
+          "SMTP.Send",
+          "SubjectNameRegistration.ReadWrite"
         ]
       },
       {

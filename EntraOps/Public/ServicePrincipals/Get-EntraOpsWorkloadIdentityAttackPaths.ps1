@@ -26,7 +26,9 @@ function Get-EntraOpsWorkloadIdentityAttackPaths {
     | where EntityType == "serviceprincipal" or EntityType == "managedidentity"
     | project id, AttackPathDisplayName, EntityId, EntityType, Description = tostring(properties["description"]), RiskFactors = tostring(properties["riskFactors"]), MitreTtp = tostring(properties["mITRETacticsAndTechniques"]), AttackStory = tostring(properties["attackStory"]), RiskLevel = tostring(properties["riskLevel"]), Target = tostring(properties["target"])'
 
-    $AttackPathResults = Invoke-EntraOpsAzGraphQuery -KqlQuery $Query
+    # Fail rather than truncate: a partial result silently drops workload identity attack paths
+    # from the watchlist, which reads as "no attack paths" downstream.
+    $AttackPathResults = Invoke-EntraOpsAzGraphQuery -KqlQuery $Query -ThrowOnFailure
     $WorkloadIdentityAttackPaths = foreach ($AttackPath in $AttackPathResults) {
 
         if ($OutputType -eq "WatchList") {

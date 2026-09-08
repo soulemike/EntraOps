@@ -1,0 +1,44 @@
+{
+  "SchemaVersion": 1,
+  "Product": "EntraOps",
+  "DistributionRepositories": {
+    "Cloud-Architekt/EntraOps": {
+      "Channel": "Release",
+      "Visibility": "Public",
+      "RequiresPersonalAccessToken": false
+    },
+    "Cloud-Architekt/EntraOps-Insiders": {
+      "Channel": "Insiders",
+      "Visibility": "Private",
+      "RequiresPersonalAccessToken": true
+    }
+  },
+  "SupportedUpdateTargets": [
+    "./.github/actions",
+    "./.github/agents",
+    "./.github/scripts",
+    "./.github/workflows",
+    "./Docs",
+    "./EntraOps",
+    "./Parsers",
+    "./Queries",
+    "./Reports",
+    "./Samples",
+    "./Tests",
+    "./Workbooks",
+    "./package.json",
+    "./package-lock.json",
+    "./playwright.config.mjs",
+    "./CHANGELOG.md",
+    "./EntraOpsUpdateContract.json"
+  ],
+  "RequiredValidationPaths": [
+    "./EntraOps/EntraOps.psd1",
+    "./.github/scripts/Test-GitHubActionReferences.ps1",
+    "./Docs/Update-EntraOpsDocsContent.ps1",
+    "./Tests",
+    "./package.json",
+    "./package-lock.json",
+    "./playwright.config.mjs"
+  ]
+}

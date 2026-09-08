@@ -37,20 +37,23 @@ function Clear-EntraOpsCache {
         [string]$Pattern = "*"
     )
     
-    # SAFETY CHECK: Ensure we are operating on the expected EntraOps cache directory
-    if ([string]::IsNullOrEmpty($__EntraOpsSession.PersistentCachePath)) {
-        Write-Error "Persistent cache path is not defined. Aborting to prevent accidental data loss."
-        return
-    }
+    $UsesPersistentCache = $CacheType -in @('All', 'Persistent')
+    $IsSuspiciousPath = $false
+    if ($UsesPersistentCache) {
+        # SAFETY CHECK: Ensure we are operating on the expected EntraOps cache directory
+        if ([string]::IsNullOrEmpty($__EntraOpsSession.PersistentCachePath)) {
+            Write-Error "Persistent cache path is not defined. Aborting to prevent accidental data loss."
+            return
+        }
 
-    # Normalize path separators for comparison
-    $NormalizedPath = $__EntraOpsSession.PersistentCachePath.Replace('\', '/').TrimEnd('/')
-    $IsSuspiciousPath = -not ($NormalizedPath.EndsWith("EntraOps") -or $NormalizedPath.EndsWith(".cache/EntraOps"))
+        # Normalize path separators for comparison
+        $NormalizedPath = $__EntraOpsSession.PersistentCachePath.Replace('\', '/').TrimEnd('/')
+        $IsSuspiciousPath = -not ($NormalizedPath.EndsWith("EntraOps") -or $NormalizedPath.EndsWith(".cache/EntraOps"))
 
-    if ($IsSuspiciousPath) {
-        Write-Warning "Cache path '$($__EntraOpsSession.PersistentCachePath)' does not end with 'EntraOps'. Executing extra safety checks..."
-        # If the folder doesn't match our expectation, we strictly require files to look like cache files (Base64 + .json)
-        # This prevents cleaning generic folders if configuration is messed up
+        if ($IsSuspiciousPath) {
+            Write-Warning "Cache path '$($__EntraOpsSession.PersistentCachePath)' does not end with 'EntraOps'. Executing extra safety checks..."
+            # This prevents cleaning generic folders if configuration is wrong.
+        }
     }
     
     $ClearedCount = 0
@@ -60,8 +63,10 @@ function Clear-EntraOpsCache {
             Write-Verbose "Clearing expired cache entries matching pattern: $Pattern"
             $CurrentTime = [DateTime]::UtcNow
             $KeysToRemove = @()
-            
-            foreach ($Key in @($__EntraOpsSession.GraphCache.Keys)) {
+
+            [System.Threading.Monitor]::Enter($__EntraOpsSession.GraphCache.SyncRoot)
+            try { $GraphCacheKeys = @($__EntraOpsSession.GraphCache.Keys) } finally { [System.Threading.Monitor]::Exit($__EntraOpsSession.GraphCache.SyncRoot) }
+            foreach ($Key in $GraphCacheKeys) {
                 if ($Key -like $Pattern -and $__EntraOpsSession.CacheMetadata.ContainsKey($Key)) {
                     $ExpiryTime = $__EntraOpsSession.CacheMetadata[$Key].ExpiryTime
                     if ($CurrentTime -gt $ExpiryTime) {
@@ -80,7 +85,9 @@ function Clear-EntraOpsCache {
         
         "Memory" {
             Write-Verbose "Clearing memory cache matching pattern: $Pattern"
-            $KeysToRemove = @($__EntraOpsSession.GraphCache.Keys | Where-Object { $_ -like $Pattern })
+            [System.Threading.Monitor]::Enter($__EntraOpsSession.GraphCache.SyncRoot)
+            try { $GraphCacheKeys = @($__EntraOpsSession.GraphCache.Keys) } finally { [System.Threading.Monitor]::Exit($__EntraOpsSession.GraphCache.SyncRoot) }
+            $KeysToRemove = @($GraphCacheKeys | Where-Object { $_ -like $Pattern })
             
             foreach ($Key in $KeysToRemove) {
                 $__EntraOpsSession.GraphCache.Remove($Key)
@@ -113,7 +120,9 @@ function Clear-EntraOpsCache {
             Write-Verbose "Clearing all cache (memory and persistent) matching pattern: $Pattern"
             
             # Clear memory cache
-            $KeysToRemove = @($__EntraOpsSession.GraphCache.Keys | Where-Object { $_ -like $Pattern })
+            [System.Threading.Monitor]::Enter($__EntraOpsSession.GraphCache.SyncRoot)
+            try { $GraphCacheKeys = @($__EntraOpsSession.GraphCache.Keys) } finally { [System.Threading.Monitor]::Exit($__EntraOpsSession.GraphCache.SyncRoot) }
+            $KeysToRemove = @($GraphCacheKeys | Where-Object { $_ -like $Pattern })
             foreach ($Key in $KeysToRemove) {
                 $__EntraOpsSession.GraphCache.Remove($Key)
                 $__EntraOpsSession.CacheMetadata.Remove($Key)

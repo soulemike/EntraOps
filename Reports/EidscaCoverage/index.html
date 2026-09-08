@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps EIDSCA Findings</title>
+    <meta name="description"
+        content="EIDSCA Findings: evaluate Entra ID Security Config Analyzer (EIDSCA) checks against the properties already captured by an EntraOps Tenant Governance snapshot." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <!-- Top app bar -->
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps EIDSCA Findings</span>
+            <span class="sub" id="tenantName">Tenant Governance</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/AzureAD-Attack-Defense" target="_blank"
+            rel="noopener noreferrer">EIDSCA on GitHub &#8599;</a>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <!-- Left navigation rail -->
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration Analyzer</span></a>
+                <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+                <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+            <div class="nav-item active nav-subitem"><span class="ico">&#9733;</span><span>EIDSCA Findings</span></div>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span class="ico">&#8523;</span><span>Access
+                    Package Flow</span></a>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span class="ico">&#128477;&#65038;</span><span>PIM Request
+                    Flow</span></a>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo; EIDSCA
+                    Findings</div>
+                <h1>EIDSCA Findings</h1>
+                <p>Checks from <a href="https://github.com/Cloud-Architekt/AzureAD-Attack-Defense" target="_blank"
+                        rel="noopener noreferrer">Entra ID Security Config Analyzer (EIDSCA)</a> evaluated against the
+                    properties already captured by a <a href="../ConfigurationAnalyzer/index.html">Tenant Governance
+                        Snapshot</a>.
+                </p>
+            </div>
+
+            <div class="card-pad" id="eidscaEmptyState">
+                <p><strong>No Configuration Analyzer dataset found.</strong> This app reuses the same dataset as <a
+                        href="../ConfigurationAnalyzer/index.html">Configuration Analyzer</a> - generate
+                    <code>../ConfigurationAnalyzer/data/configuration-analyzer-data.js</code> from your repository's
+                    git history first:
+                </p>
+                <p><code>Import-Module ./EntraOps -Force; New-EntraOpsTenantGovernanceConfigurationAnalyzerData</code>
+                </p>
+                <p>The Tenant Governance Snapshot feature must be enabled
+                    (<code>EntraOpsConfig.json</code> &rsaquo;
+                    <code>TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot</code>) and at least one snapshot
+                    must have been captured with <code>Save-EntraOpsTenantGovernanceSnapshotJson</code>. Then reload
+                    this page.
+                </p>
+            </div>
+
+            <div id="eidscaContent" class="hidden">
+                <section class="card" style="margin-bottom:16px;">
+                    <div class="card-head">EIDSCA Findings
+                        <span class="hint">Checks are evaluated against the resource content embedded in the selected
+                            snapshot</span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row" style="margin-bottom:10px;align-items:center;">
+                            <div class="tm-modes">
+                                <button type="button" class="tm-mode eidsca-view-mode on" data-view="checks">Checks</button>
+                                <button type="button" class="tm-mode eidsca-view-mode" data-view="trend">Trend</button>
+                                <button type="button" class="tm-mode eidsca-view-mode" data-view="compare">Compare</button>
+                            </div>
+                            <div class="eam-filter" id="eidscaSnapshotFilter">
+                                <label for="eidscaSnapshot">Snapshot</label>
+                                <select id="eidscaSnapshot"></select>
+                            </div>
+                            <div class="eam-filter hidden" id="eidscaCompareFilterA">
+                                <label for="eidscaCompareA">Snapshot A</label>
+                                <select id="eidscaCompareA"></select>
+                            </div>
+                            <div class="eam-filter hidden" id="eidscaCompareFilterB">
+                                <label for="eidscaCompareB">Snapshot B</label>
+                                <select id="eidscaCompareB"></select>
+                            </div>
+                        </div>
+                        <div class="eam-filter-row" style="margin-bottom:10px;align-items:flex-end;">
+                            <div class="eam-filter grow"><span class="muted" id="eidscaFreshness"></span><span class="muted" id="eidscaFilterSummary"></span></div>
+                            <div class="eam-filter"><button class="btn small" type="button" id="eidscaResetFilters">Reset filters</button></div>
+                            <div class="eam-filter"><button class="btn small" type="button" id="eidscaExportFiltered">Export filtered</button></div>
+                        </div>
+                        <div id="eidscaDashboard" class="hidden"></div>
+                        <div id="eidscaChecksView">
+                            <div id="eidscaBody"></div>
+                        </div>
+                        <div id="eidscaTrendView" class="hidden">
+                            <div id="eidscaTrendBody"></div>
+                        </div>
+                        <div id="eidscaCompareView" class="hidden">
+                            <div id="eidscaCompareBody"></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Reuses the Configuration Analyzer's dataset (generated by
+         New-EntraOpsTenantGovernanceConfigurationAnalyzerData) instead of duplicating it. -->
+    <script src="../ConfigurationAnalyzer/data/configuration-analyzer-data.js"></script>
+    <!-- eam-dashboard-data.js intentionally NOT loaded: this app renders the EIDSCA control
+         catalog only and has no reference to ENTRAOPS_EAM_DATA (verified) - loading it cost a
+         5-7 MB synchronous parse for zero rendered output. Re-add only if #object= deep links
+         into this page need the classified-object card. -->
+    <!-- Shared snapshot/blob parsing model. -->
+    <script src="../ConfigurationAnalyzer/js/core.js"></script>
+    <script src="../shared/report-utils.js"></script>
+    <!-- Curated subset of EIDSCA (github.com/Cloud-Architekt/AzureAD-Attack-Defense) control
+         definitions - the ones whose Graph endpoint is already captured by the Tenant
+         Governance Snapshot. A fixed reference dataset, not a generated build artifact. -->
+    <script src="js/eidsca-controls.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="../shared/object-inspector.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

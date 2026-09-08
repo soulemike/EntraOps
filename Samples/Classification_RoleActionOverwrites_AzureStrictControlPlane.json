@@ -1,0 +1,139 @@
+[
+  {
+    "RbacSystem": "Azure",
+    "Service": "Authorization",
+    "RoleDefinitionActions": [
+      "Microsoft.Authorization/*/write",
+      "Microsoft.Authorization/*/delete",
+      "Microsoft.Authorization/elevateAccess/action",
+      "Microsoft.Authorization/classicAdministrators/write",
+      "Microsoft.Authorization/classicAdministrators/delete",
+      "Microsoft.Authorization/roleAssignments/write",
+      "Microsoft.Authorization/roleAssignments/delete",
+      "Microsoft.Authorization/roleDefinitions/write",
+      "Microsoft.Authorization/roleDefinitions/delete",
+      "Microsoft.Authorization/denyAssignments/write",
+      "Microsoft.Authorization/denyAssignments/delete",
+      "Microsoft.Authorization/roleAssignmentScheduleRequests/write",
+      "Microsoft.Authorization/roleAssignmentScheduleRequests/cancel/action",
+      "Microsoft.Authorization/roleEligibilityScheduleRequests/write",
+      "Microsoft.Authorization/roleEligibilityScheduleRequests/cancel/action",
+      "Microsoft.Authorization/roleManagementPolicies/write",
+      "Microsoft.Authorization/roleManagementPolicyAssignments/write",
+      "Microsoft.Authorization/roleManagementPolicyAssignments/delete"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ControlPlane",
+    "EAMTierLevelTagValue": "0",
+    "Justification": "Strict constrained-delegation model: Azure RBAC/deny-assignment authoring actions must never be delegated on Management Plane (landing zone) scope, even via constrained ABAC delegations. Every assignment granting these actions is always classified as Control Plane, independent of the assigned scope."
+  },
+  {
+    "RbacSystem": "Azure",
+    "Service": "Management Groups",
+    "RoleDefinitionActions": [
+      "Microsoft.Management/managementGroups/write",
+      "Microsoft.Management/managementGroups/delete",
+      "Microsoft.Management/managementGroups/subscriptions/write",
+      "Microsoft.Management/managementGroups/subscriptions/delete",
+      "Microsoft.Management/managementGroups/settings/write",
+      "Microsoft.Management/managementGroups/settings/delete"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ControlPlane",
+    "EAMTierLevelTagValue": "0",
+    "Justification": "Strict constrained-delegation model: management group hierarchy changes are only performed through the AzOps deployment pipeline, never delegated on Management Plane scope. Every assignment granting these actions is always classified as Control Plane, independent of the assigned scope."
+  },
+  {
+    "RbacSystem": "Azure",
+    "Service": "Subscription Management",
+    "RoleDefinitionActions": [
+      "Microsoft.Subscription/*/write",
+      "Microsoft.Subscription/*/delete",
+      "Microsoft.Subscription/aliases/write",
+      "Microsoft.Subscription/aliases/delete",
+      "Microsoft.Subscription/rename/action",
+      "Microsoft.Subscription/cancel/action",
+      "Microsoft.Subscription/enable/action",
+      "Microsoft.Subscription/changeTenant/action",
+      "Microsoft.Subscription/acceptOwnership/action",
+      "Microsoft.Resources/subscriptions/providers/write",
+      "Microsoft.Resources/tenants/register/action"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ControlPlane",
+    "EAMTierLevelTagValue": "0",
+    "Justification": "Strict constrained-delegation model: subscription lifecycle/tenant-transfer actions are only performed through the AzOps deployment pipeline, never delegated on Management Plane scope. Every assignment granting these actions is always classified as Control Plane, independent of the assigned scope."
+  },
+  {
+    "RbacSystem": "Azure",
+    "Service": "Billing",
+    "RoleDefinitionActions": [
+      "Microsoft.Billing/*/write",
+      "Microsoft.Billing/*/delete",
+      "Microsoft.Billing/billingAccounts/write",
+      "Microsoft.Billing/billingAccounts/billingProfiles/write",
+      "Microsoft.Billing/billingAccounts/createBillingRoleAssignment/action",
+      "Microsoft.Billing/billingAccounts/billingRoleAssignments/write",
+      "Microsoft.Billing/billingAccounts/billingRoleAssignments/delete"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ControlPlane",
+    "EAMTierLevelTagValue": "0",
+    "Justification": "Strict constrained-delegation model: billing account/profile role assignments are only performed through Identity Governance-managed access packages, never delegated on Management Plane scope. Every assignment granting these actions is always classified as Control Plane, independent of the assigned scope."
+  },
+  {
+    "RbacSystem": "Azure",
+    "Service": "Reservations and Capacity",
+    "RoleDefinitionActions": [
+      "Microsoft.Capacity/*/write",
+      "Microsoft.Capacity/*/delete",
+      "Microsoft.Capacity/reservationorders/write",
+      "Microsoft.Capacity/reservationorders/reservations/write"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ControlPlane",
+    "EAMTierLevelTagValue": "0",
+    "Justification": "Strict constrained-delegation model: reservation/capacity purchases affect billing and workload placement tenant-wide and are only performed through the AzOps deployment pipeline, never delegated on Management Plane scope. Every assignment granting these actions is always classified as Control Plane, independent of the assigned scope."
+  },
+  {
+    "RbacSystem": "Azure",
+    "Service": "Azure Lighthouse",
+    "RoleDefinitionActions": [
+      "Microsoft.ManagedServices/*/write",
+      "Microsoft.ManagedServices/*/delete",
+      "Microsoft.ManagedServices/registrationDefinitions/write",
+      "Microsoft.ManagedServices/registrationAssignments/write",
+      "Microsoft.ManagedServices/registrationAssignments/delete"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ControlPlane",
+    "EAMTierLevelTagValue": "0",
+    "Justification": "Strict constrained-delegation model: cross-tenant delegation via Azure Lighthouse can grant external principals access to any Management Plane scope and is only performed through the AzOps deployment pipeline, never delegated directly. Every assignment granting these actions is always classified as Control Plane, independent of the assigned scope."
+  },
+  {
+    "RbacSystem": "Azure",
+    "Service": "Blueprints",
+    "RoleDefinitionActions": [
+      "Microsoft.Blueprint/blueprints/write",
+      "Microsoft.Blueprint/blueprints/delete",
+      "Microsoft.Blueprint/blueprintAssignments/write",
+      "Microsoft.Blueprint/blueprintAssignments/delete"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ControlPlane",
+    "EAMTierLevelTagValue": "0",
+    "Justification": "Strict constrained-delegation model: Blueprint definitions/assignments can provision role assignments across landing zones and are only performed through the AzOps deployment pipeline, never delegated on Management Plane scope. Every assignment granting these actions is always classified as Control Plane, independent of the assigned scope."
+  },
+  {
+    "RbacSystem": "Azure",
+    "Service": "Custom Providers",
+    "RoleDefinitionActions": [
+      "Microsoft.CustomProviders/resourceProviders/write",
+      "Microsoft.CustomProviders/resourceProviders/delete"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ControlPlane",
+    "EAMTierLevelTagValue": "0",
+    "Justification": "Strict constrained-delegation model: custom resource providers can implement arbitrary control logic and are only registered through the AzOps deployment pipeline, never delegated on Management Plane scope. Every assignment granting these actions is always classified as Control Plane, independent of the assigned scope."
+  }
+]

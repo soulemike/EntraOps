@@ -17,15 +17,11 @@ function Install-EntraOpsAllRequiredModules {
     $RequiredModules = @(
         @{
             ModuleName    = 'Az.Accounts'
-            ModuleVersion = '2.19.0'
+            ModuleVersion = '5.1.1'
         }
         @{
             ModuleName    = 'Az.Resources'
-            ModuleVersion = '6.16.2'
-        }
-        @{
-            ModuleName    = 'Az.ResourceGraph'
-            ModuleVersion = '0.13.1'
+            ModuleVersion = '10.2.0'
         }
         @{
             ModuleName    = 'Microsoft.Graph.Authentication'

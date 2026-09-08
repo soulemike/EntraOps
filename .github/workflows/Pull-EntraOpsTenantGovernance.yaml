@@ -1,0 +1,73 @@
+name: Pull-EntraOpsTenantGovernance
+env:
+  ClientId: YourClientId
+  TenantId: YourTenantId
+  TenantName: YourTenantName
+  ConfigFile: ./EntraOpsConfig.json
+  EnableTenantGovernanceSnapshot: false
+  AuthenticationType: FederatedCredentials
+  SnapshotStartCron: 0 6 * * *
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Start creates a job, Collect checks once, Run and wait polls in this workflow run."
+        required: true
+        type: choice
+        options:
+          - start
+          - collect
+          - run-and-wait
+        default: start
+      timeoutInSeconds:
+        description: "Maximum wait for Run and wait. Ignored by Start and Collect."
+        required: false
+        type: string
+        default: "3300"
+  # The start/collect schedule is added by Update-EntraOpsRequiredWorkflowParameters only when
+  # Tenant Governance and its schedule switch are enabled. Shipping live crons would run this
+  # workflow in a repository created from the template before it is configured.
+permissions:
+  id-token: write
+  contents: write
+concurrency:
+  group: entraops-main-writer
+  cancel-in-progress: false
+jobs:
+  Pull-EntraOpsTenantGovernance:
+    runs-on: ubuntu-latest
+    # Scheduled Start/Collect runs are short. The larger bound is only for manual RunAndWait.
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        if: env.EnableTenantGovernanceSnapshot == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Connect Azure OIDC
+        if: env.EnableTenantGovernanceSnapshot == 'true'
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3
+        with:
+          client-id: ${{env.ClientId}}
+          tenant-id: ${{env.TenantId}}
+          allow-no-subscriptions: true
+          enable-AzPSSession: true
+      - name: Run Tenant Governance snapshot operation
+        id: snapshot
+        if: env.EnableTenantGovernanceSnapshot == 'true'
+        uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
+        env:
+          SnapshotOperation: ${{ github.event_name == 'workflow_dispatch' && (inputs.operation == 'run-and-wait' && 'RunAndWait' || inputs.operation) || (github.event.schedule == env.SnapshotStartCron && 'Start' || 'Collect') }}
+          StepTimeoutInSeconds: ${{ github.event_name == 'workflow_dispatch' && inputs.timeoutInSeconds || '3300' }}
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -Operation ${env:SnapshotOperation} -TimeoutInSeconds ${env:StepTimeoutInSeconds} -Force | Out-Host
+          azPSVersion: latest
+      - name: Git - Commit and Push to repository
+        if: env.EnableTenantGovernanceSnapshot == 'true' && steps.snapshot.outcome == 'success'
+        uses: ./.github/actions/Git-Push
+        with:
+          paths: TenantGovernance
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

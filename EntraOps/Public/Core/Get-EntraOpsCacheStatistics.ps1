@@ -33,6 +33,9 @@ function Get-EntraOpsCacheStatistics {
     # Count entries with metadata
     $EntriesWithMetadata = $__EntraOpsSession.CacheMetadata.Count
     $LegacyEntries = $TotalEntries - $EntriesWithMetadata
+
+    [System.Threading.Monitor]::Enter($__EntraOpsSession.CacheMetadata.SyncRoot)
+    try { $MetadataSnapshot = $__EntraOpsSession.CacheMetadata.Clone() } finally { [System.Threading.Monitor]::Exit($__EntraOpsSession.CacheMetadata.SyncRoot) }
     
     # Analyze TTL and expiry
     $ExpiredEntries = 0
@@ -42,8 +45,8 @@ function Get-EntraOpsCacheStatistics {
     $TotalResultCount = 0
     $NextExpiry = $null
     
-    foreach ($Key in $__EntraOpsSession.CacheMetadata.Keys) {
-        $Metadata = $__EntraOpsSession.CacheMetadata[$Key]
+    foreach ($Key in $MetadataSnapshot.Keys) {
+        $Metadata = $MetadataSnapshot[$Key]
         
         if ($CurrentTime -gt $Metadata.ExpiryTime) {
             $ExpiredEntries++
@@ -106,8 +109,8 @@ function Get-EntraOpsCacheStatistics {
     if ($Detailed) {
         Write-Host "`n=== Detailed Cache Entries ===" -ForegroundColor Cyan
         
-        $DetailedEntries = foreach ($Key in $__EntraOpsSession.CacheMetadata.Keys) {
-            $Metadata = $__EntraOpsSession.CacheMetadata[$Key]
+        $DetailedEntries = foreach ($Key in $MetadataSnapshot.Keys) {
+            $Metadata = $MetadataSnapshot[$Key]
             $TimeUntilExpiry = ($Metadata.ExpiryTime - $CurrentTime).TotalSeconds
             
             [PSCustomObject]@{

@@ -1,0 +1,173 @@
+name: Push-EntraOpsPrivilegedReporting
+env:
+  ClientId: YourClientId
+  TenantId: YourTenantId
+  TenantName: YourTenantName
+  ConfigFile: ./EntraOpsConfig.json
+  ApplyAutomatedReportingGeneration: false
+  GenerateClassificationExplorer: true
+  GenerateTierBreachAnalyzer: true
+  GenerateEamDashboard: true
+  GenerateAccessPathMap: true
+  AccessPathMapResolveObjectIdsOutsidePrivilegedEAM: true
+  GeneratePrivilegeHistory: true
+  EnablePrivilegeHistory: true
+  PrivilegeHistoryTimeRangeInDays: ""
+  PrivilegeHistorySnapshotInterval: P2W
+  GenerateConfigurationAnalyzer: true
+  GenerateAccessPackageFlow: true
+  AllowPartialTenantGovernanceSnapshot: true
+  PublishReportsAsRelease: false
+  # Number of reporting-* releases to keep. Each release contains a full tenant snapshot
+  # (object IDs, UPNs, role assignments), so unpruned releases accumulate tenant data
+  # indefinitely with only repository visibility as a control. Set to '' to disable pruning.
+  ReportingReleasesToKeep: "10"
+  ClassificationExplorerRepository: Cloud-Architekt/AzurePrivilegedIAM
+  ClassificationExplorerGenerateChangeHistory: false
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      allowStaleTenantGovernance:
+        description: "Generate Configuration Analyzer from a successful Tenant Governance snapshot older than 30 hours"
+        required: false
+        type: boolean
+        default: false
+      allowPartialTenantGovernance:
+        description: "Generate Configuration Analyzer from a mixed partial snapshot with stale resource types"
+        required: false
+        type: boolean
+        default: true
+  # Allows to run this workflow automatically after the completion of pull pipeline
+  workflow_run:
+    workflows: [Pull-EntraOpsPrivilegedEAM]
+    types:
+      - completed
+  # The schedule trigger is added by Update-EntraOpsRequiredWorkflowParameters from
+  # WorkflowTrigger.PushReportingScheduledCron. Shipping a placeholder cron would make
+  # GitHub reject this workflow file before the repository is configured.
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: entraops-reporting
+  cancel-in-progress: false
+
+jobs:
+  Push-EntraOpsPrivilegedReporting:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history (not the default shallow clone) so the Privilege History feature can
+          # walk every commit that changed PrivilegedEAM/ via New-EntraOpsPrivilegedEamPrivilegeHistoryData.
+          fetch-depth: 0
+
+      # Also checked out for the EAM Dashboard and Access Path Map generators: they resolve the
+      # classified role catalogs (Classification/Classification_*.json) from this path
+      # (<workspace>/.reporting/AzurePrivilegedIAM) when the files are not present in the
+      # EntraOps repository itself.
+      - name: Checkout AzurePrivilegedIAM Classification folder (temporary, sparse)
+        if: env.ApplyAutomatedReportingGeneration == 'true' && (env.GenerateClassificationExplorer == 'true' || env.GenerateEamDashboard == 'true' || env.GenerateAccessPathMap == 'true')
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.ClassificationExplorerRepository }}
+          path: .reporting/AzurePrivilegedIAM
+          sparse-checkout: |
+            Classification
+          sparse-checkout-cone-mode: true
+          # Only the optional Classification Explorer change history needs the complete git log.
+          fetch-depth: ${{ env.ClassificationExplorerGenerateChangeHistory == 'true' && '0' || '1' }}
+
+      # Needed by the reporting generators that enrich their local export data through Microsoft Graph.
+      - name: Connect Azure OIDC
+        if: env.ApplyAutomatedReportingGeneration == 'true' && (env.GenerateEamDashboard == 'true' || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3
+        with:
+          client-id: ${{env.ClientId}}
+          tenant-id: ${{env.TenantId}}
+          allow-no-subscriptions: true
+          enable-AzPSSession: true
+
+      - name: Generate configured local EntraOps reporting data
+        if: env.ApplyAutomatedReportingGeneration == 'true' && !(env.GenerateEamDashboard == 'true' || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
+        shell: pwsh
+        env:
+          AllowStaleTenantGovernance: ${{ inputs.allowStaleTenantGovernance || 'false' }}
+          AllowPartialTenantGovernance: ${{ env.AllowPartialTenantGovernanceSnapshot }}
+          ManualAllowPartialTenantGovernance: ${{ inputs.allowPartialTenantGovernance }}
+        run: |
+          Import-Module ./EntraOps
+          $AllowPartial = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:ManualAllowPartialTenantGovernance -eq 'true' } else { $env:AllowPartialTenantGovernance -eq 'true' }
+          Invoke-EntraOpsReportingGeneration -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -AllowStaleTenantGovernanceSnapshot:($env:AllowStaleTenantGovernance -eq 'true') -AllowPartialTenantGovernanceSnapshot:$AllowPartial -RemoveClassificationRepositoryAfterRun | Out-Host
+
+      # azure/powershell imports the Az context established by azure/login. Keep that provider
+      # bootstrap outside the module; the same module command can run in GitLab CI or Azure Pipelines
+      # after those platforms establish an Az PowerShell context by their own supported mechanism.
+      - name: Generate configured Graph-backed EntraOps reporting data
+        if: env.ApplyAutomatedReportingGeneration == 'true' && (env.GenerateEamDashboard == 'true' || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
+        uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
+        env:
+          AllowStaleTenantGovernance: ${{ inputs.allowStaleTenantGovernance || 'false' }}
+          AllowPartialTenantGovernance: ${{ env.AllowPartialTenantGovernanceSnapshot }}
+          ManualAllowPartialTenantGovernance: ${{ inputs.allowPartialTenantGovernance }}
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            $AllowPartial = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:ManualAllowPartialTenantGovernance -eq 'true' } else { $env:AllowPartialTenantGovernance -eq 'true' }
+            Invoke-EntraOpsReportingGeneration -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -AllowStaleTenantGovernanceSnapshot:($env:AllowStaleTenantGovernance -eq 'true') -AllowPartialTenantGovernanceSnapshot:$AllowPartial -RemoveClassificationRepositoryAfterRun | Out-Host
+          azPSVersion: latest
+
+      - name: Set up Node for generated report tests
+        if: env.ApplyAutomatedReportingGeneration == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install report test dependencies
+        if: env.ApplyAutomatedReportingGeneration == 'true'
+        run: npm ci
+      - name: Install Chromium for generated report tests
+        if: env.ApplyAutomatedReportingGeneration == 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Test generated reports before publication
+        if: env.ApplyAutomatedReportingGeneration == 'true'
+        run: npm run test:reports
+
+      # Artifacts and releases on a public repository are downloadable by anyone, and the generated
+      # reports contain tenant data (object IDs, UPNs, role assignments). Publishing is therefore
+      # gated on the repository being private. Checked via API instead of github.event.repository
+      # because the schedule trigger has no repository payload.
+      - name: Check repository visibility
+        id: repo-visibility
+        if: env.ApplyAutomatedReportingGeneration == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/scripts/Get-EntraOpsGitHubRepositoryVisibility.ps1 | Out-Host
+
+      - name: Upload EntraOps Reporting artifact
+        if: env.ApplyAutomatedReportingGeneration == 'true' && steps.repo-visibility.outputs.private == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: EntraOps-Reporting
+          path: |
+            Reports/**
+            !Reports/**/*.spec.mjs
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Publish and prune EntraOps Reporting releases
+        if: env.ApplyAutomatedReportingGeneration == 'true' && env.PublishReportsAsRelease == 'true' && steps.repo-visibility.outputs.private == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/scripts/Publish-EntraOpsGitHubReportingRelease.ps1 -ReleasesToKeep ${env:ReportingReleasesToKeep}

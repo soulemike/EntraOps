@@ -10,7 +10,7 @@
     RootModule           = 'EntraOps.psm1'
 
     # Version number of this module.
-    ModuleVersion        = '0.8.0'
+    ModuleVersion        = '1.0.0'
 
     # Supported PSEditions
     CompatiblePSEditions = 'Core'
@@ -25,13 +25,13 @@
     CompanyName          = 'Thomas Naunheim'
 
     # Copyright statement for this module
-    Copyright            = '(c) Thomas Naunheim. All rights reserved.'
+    Copyright            = '(c) 2024-2026 Thomas Naunheim. All rights reserved.'
 
     # Description of the functionality provided by this module
     Description          = 'PowerShell module for EntraOps'
 
     # Minimum version of the PowerShell engine required by this module
-    PowerShellVersion    = '7.1'
+    PowerShellVersion    = '7.4'
 
     # Name of the PowerShell host required by this module
     # PowerShellHostName = ''
@@ -59,10 +59,6 @@
         @{
             ModuleName    = 'Az.Resources'
             ModuleVersion = '6.16.2'
-        }
-        @{
-            ModuleName    = 'Az.ResourceGraph'
-            ModuleVersion = '0.13.1'
         }
         @{
             ModuleName    = 'Microsoft.Graph.Authentication'
@@ -94,14 +90,23 @@
         'Expand-EntraOpsPrivilegedEamJsonFile'
         'Export-EntraOpsClassificationApiPermissions'
         'Export-EntraOpsClassificationAppRoles'
+        'Export-EntraOpsClassificationAzureRoles'
         'Export-EntraOpsClassificationDeviceManagementRoles'
         'Export-EntraOpsClassificationDirectoryRoles'
+        'Export-EntraOpsClassificationDirectoryRolesFromMsftDocs'
+        'Export-EntraOpsClassificationIdentityGovernanceRoles'
         'Export-EntraOpsClassificationScopes'
+        'Export-EntraOpsPrivilegedEAMBloodHound'
         'Get-EntraOpsCacheStatistics'
         'Get-EntraOpsClassificationControlPlaneObjects'
+        'Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs'
         'Get-EntraOpsEntraObject'
         'Get-EntraOpsManagedIdentityAssignments'
+        'Get-EntraOpsUpdateCandidate'
+        'Get-EntraOpsUpdatePlan'
         'Get-EntraOpsPrivilegedAppRoles'
+        'Get-EntraOpsPrivilegedAzureRoles'
+        'Get-EntraOpsPrivilegedEAMAzure'
         'Get-EntraOpsPrivilegedDefenderRoles'
         'Get-EntraOpsPrivilegedDeviceRoles'
         'Get-EntraOpsPrivilegedEAM'
@@ -115,32 +120,58 @@
         'Get-EntraOpsPrivilegedEntraObject'
         'Get-EntraOpsPrivilegedIdGovRoles'
         'Get-EntraOpsPrivilegedTransitiveGroupMember'
+        'Get-EntraOpsTenantGovernanceSnapshot'
+        'Get-EntraOpsTenantGovernanceSnapshotReport'
         'Get-EntraOpsWorkloadIdentityAttackPaths'
         'Get-EntraOpsWorkloadIdentityInfo'
         'Get-EntraOpsWorkloadIdentityRecommendations'
         'Install-EntraOpsAllRequiredModules'
         'Install-EntraOpsRequiredModule'
         'Invoke-EntraOpsAzGraphQuery'
+        'Invoke-EntraOpsAzQuery'
         'Invoke-EntraOpsGraphSecurityQuery'
         'Invoke-EntraOpsMsGraphQuery'
+        'Invoke-EntraOpsPrivilegedEAM'
+        'Invoke-EntraOpsReportingGeneration'
+        'Invoke-EntraOpsTenantGovernanceSnapshot'
+        'Install-EntraOpsUpdateCandidate'
+        'New-EntraOpsAccessPackageFlowData'
+        'New-EntraOpsAccessPathMapData'
+        'New-EntraOpsClassificationExplorerData'
         'New-EntraOpsConfigFile'
         'New-EntraOpsPrivilegedAdministrativeUnit'
         'New-EntraOpsPrivilegedConditionalAccessGroup'
+        'New-EntraOpsPrivilegedEamDashboardData'
+        'New-EntraOpsPrivilegedEamPrivilegeHistoryData'
         'New-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
+        'New-EntraOpsReportingData'
+        'New-EntraOpsTenantGovernanceConfigurationAnalyzerData'
+        'New-EntraOpsTierBreachAnalyzerData'
         'New-EntraOpsWorkloadIdentity'
+        'Convert-EntraOpsExportToSampleData'
         'Push-EntraOpsLogsIngestionAPI'
+        'Register-EntraOpsTenantGovernanceServicePrincipal'
+        'Resolve-EntraOpsUpdateSource'
+        'Remove-EntraOpsReportingData'
         'Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists'
         'Save-EntraOpsPrivilegedEAMInsightsCustomTable'
         'Save-EntraOpsPrivilegedEAMJson'
         'Save-EntraOpsPrivilegedEAMWatchLists'
+        'Save-EntraOpsTenantGovernanceSnapshotJson'
         'Save-EntraOpsWorkloadIdentityEnrichmentWatchLists'
         'Save-EntraOpsWorkloadIdentityInfo'
+        'Test-EntraOpsTenantGovernancePrerequisite'
+        'Test-EntraOpsGeneratedArtifacts'
+        'Test-EntraOpsUpdateContract'
         'Update-EntraOps'
         'Update-EntraOpsClassificationControlPlaneScope'
+        'Update-EntraOpsClassificationExplorerData'
         'Update-EntraOpsClassificationFiles'
+        'Update-EntraOpsClassificationModels'
         'Update-EntraOpsPrivilegedAdministrativeUnit'
         'Update-EntraOpsPrivilegedConditionalAccessGroup'
         'Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
+        'Update-EntraOpsPrivilegedUnprotectedElmCatalog'
         'Update-EntraOpsRequiredWorkflowParameters'
     )
 
@@ -169,18 +200,30 @@
             Tags         = @(
                 'AzureAD',
                 'Entra',
-                'Azure'
+                'EntraID',
+                'Azure',
+                'Security',
+                'PrivilegedAccess',
+                'EnterpriseAccessModel',
+                'PIM',
+                'RBAC',
+                'IdentityGovernance',
+                'Intune',
+                'Defender'
             )
 
 
             # A URL to the main website for this project.
             ProjectUri   = 'https://github.com/cloud-architekt/EntraOps'
 
+            # A URL to the license for this project.
+            LicenseUri   = 'https://github.com/Cloud-Architekt/EntraOps/blob/main/LICENSE'
+
             # A URL to an icon representing this module.
             # IconUri = ''
 
             # ReleaseNotes of this module
-            ReleaseNotes = 'No release notes'
+            ReleaseNotes = 'First stable release. Classifies and exports privileged access across Entra ID, Azure RBAC, Identity Governance, Intune, Defender and Microsoft Graph app roles against the Enterprise Access Model, including Azure ABAC constrained delegation, Tenant Governance snapshots, offline reporting apps and a browser-based configuration wizard. Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
 
         } # End of PSData hashtable
 

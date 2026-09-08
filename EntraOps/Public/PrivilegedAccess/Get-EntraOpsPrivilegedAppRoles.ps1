@@ -16,7 +16,7 @@
 function Get-EntraOpsPrivilegedAppRoles {
     param (
         [Parameter(Mandatory = $False)]
-        [System.String]$TenantId = (Get-AzContext).Tenant.id
+        [System.String]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
         ,
         [Parameter(Mandatory = $False)]
         [System.Collections.Generic.List[psobject]]$WarningMessages

@@ -14,7 +14,9 @@
                     "microsoft.xdr/configuration/security/*/manage",
                     "microsoft.xdr/configuration/security/core/manage",
                     "microsoft.xdr/configuration/system/manage",
-                    "microsoft.xdr/secops/*/manage"
+                    "microsoft.xdr/secops/*/manage",
+                    "microsoft.xdr/dataops/*/manage",
+                    "microsoft.xdr/dataops/datamanagement/data/manage"
                 ]
             },
             {
@@ -29,6 +31,7 @@
                     "microsoft.xdr/securityposture/posturemanagement/applicationhandling/manage",
                     "microsoft.xdr/securityposture/posturemanagement/baselineassessmentprofiles/manage",
                     "microsoft.xdr/securityposture/posturemanagement/exceptionhandling/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/remediationhandling/manage",
                     "microsoft.xdr/securityposture/posturemanagement/securescore/manage"
                 ]
             },
@@ -55,8 +58,10 @@
                     "microsoft.xdr/secops/securitydata/*/read",
                     "microsoft.xdr/secops/securitydata/alerts/manage",
                     "microsoft.xdr/secops/securitydata/copilot/read",
+                    "microsoft.xdr/secops/securitydata/basics/read",
                     "microsoft.xdr/securityposture/*/read",
-                    "microsoft.xdr/securityposture/posturemanagement/*/read"
+                    "microsoft.xdr/securityposture/posturemanagement/*/read",
+                    "microsoft.xdr/securityposture/posturemanagement/vulnerabilitymanagement/read"
                 ]
             },
             {
@@ -67,54 +72,6 @@
                 ],
                 "RoleDefinitionActions": [
                     "microsoft.xdr/configuration/authorization/manage"
-                ]
-            },
-            {
-                "Category": "Microsoft.Defender",
-                "Service": "Privileged Security Analytics",
-                "RoleAssignmentScopeName": [
-                    "<Tier0PrivilegedDeviceGroupId>",
-                    "<Tier1PrivilegedDeviceGroupId>"
-                ],
-                "RoleDefinitionActions": [
-                    "microsoft.xdr/configuration/security/*/read",
-                    "microsoft.xdr/secops/securitydata/*/read",
-                    "microsoft.xdr/secops/securitydata/alerts/manage",
-                    "microsoft.xdr/secops/securitydata/copilot/read",
-                    "microsoft.xdr/securityposture/*/read",
-                    "microsoft.xdr/securityposture/posturemanagement/*/read"
-                ]
-            },
-            {
-                "Category": "Microsoft.Defender",
-                "Service": "Privileged Security Response",
-                "RoleAssignmentScopeName": [
-                    "<Tier0PrivilegedDeviceGroupId>",
-                    "<Tier1PrivilegedDeviceGroupId>"
-                ],
-                "RoleDefinitionActions": [
-                    "microsoft.xdr/secops/securitydata/filecollection/manage",
-                    "microsoft.xdr/secops/securitydata/liveresponse-advanced/manage",
-                    "microsoft.xdr/secops/securitydata/liveresponse-basic/manage"
-                ]
-            },
-            {
-                "Category": "Microsoft.Defender",
-                "Service": "Privileged Security and Compliance Management",
-                "RoleAssignmentScopeName": [
-                    "<Tier0PrivilegedDeviceGroupId>",
-                    "<Tier1PrivilegedDeviceGroupId>"
-                ],
-                "RoleDefinitionActions": [
-                    "microsoft.xdr/configuration/*/manage",
-                    "microsoft.xdr/configuration/security/core/manage",
-                    "microsoft.xdr/configuration/system/manage",
-                    "microsoft.xdr/secops/*/manage",
-                    "microsoft.xdr/securityposture/*/manage",
-                    "microsoft.xdr/securityposture/posturemanagement/applicationhandling/manage",
-                    "microsoft.xdr/securityposture/posturemanagement/baselineassessmentprofiles/manage",
-                    "microsoft.xdr/securityposture/posturemanagement/exceptionhandling/manage",
-                    "microsoft.xdr/securityposture/posturemanagement/securescore/manage"
                 ]
             }
         ]
@@ -134,7 +91,9 @@
                     "microsoft.xdr/configuration/*/read",
                     "microsoft.xdr/configuration/authorization/read",
                     "microsoft.xdr/securityposture/*/read",
-                    "microsoft.xdr/secops/*/read"
+                    "microsoft.xdr/securityposture/posturemanagement/vulnerabilitymanagement/read",
+                    "microsoft.xdr/secops/*/read",
+                    "microsoft.xdr/secops/securitydata/basics/read"
                 ]
             },
             {
@@ -148,52 +107,8 @@
                     "microsoft.xdr/secops/securitydata/emailadvancedactions/manage",
                     "microsoft.xdr/secops/securitydata/emailquarantine/manage",
                     "microsoft.xdr/secops/securitydata/response/manage",
-                    "microsoft.xdr/secops/rawdata/emailcontent/read"
-                ]
-            },
-            {
-                "Category": "Microsoft.Defender",
-                "Service": "User Security Analytics",
-                "RoleAssignmentScopeName": [
-                    "<Tier2EnterpriseDeviceGroupId>"
-                ],
-                "RoleDefinitionActions": [
-                    "microsoft.xdr/configuration/security/*/read",
-                    "microsoft.xdr/secops/securitydata/*/read",
-                    "microsoft.xdr/secops/securitydata/alerts/manage",
-                    "microsoft.xdr/secops/securitydata/copilot/read",
-                    "microsoft.xdr/securityposture/*/read",
-                    "microsoft.xdr/securityposture/posturemanagement/*/read"
-                ]
-            },
-            {
-                "Category": "Microsoft.Defender",
-                "Service": "User Security Response",
-                "RoleAssignmentScopeName": [
-                    "<Tier2EnterpriseDeviceGroupId>"
-                ],
-                "RoleDefinitionActions": [
-                    "microsoft.xdr/secops/securitydata/filecollection/manage",
-                    "microsoft.xdr/secops/securitydata/liveresponse-advanced/manage",
-                    "microsoft.xdr/secops/securitydata/liveresponse-basic/manage"
-                ]
-            },
-            {
-                "Category": "Microsoft.Defender",
-                "Service": "User Security and Compliance Management",
-                "RoleAssignmentScopeName": [
-                    "<Tier2EnterpriseDeviceGroupId>"
-                ],
-                "RoleDefinitionActions": [
-                    "microsoft.xdr/configuration/*/manage",
-                    "microsoft.xdr/configuration/security/core/manage",
-                    "microsoft.xdr/configuration/system/manage",
-                    "microsoft.xdr/secops/*/manage",
-                    "microsoft.xdr/securityposture/*/manage",
-                    "microsoft.xdr/securityposture/posturemanagement/applicationhandling/manage",
-                    "microsoft.xdr/securityposture/posturemanagement/baselineassessmentprofiles/manage",
-                    "microsoft.xdr/securityposture/posturemanagement/exceptionhandling/manage",
-                    "microsoft.xdr/securityposture/posturemanagement/securescore/manage"
+                    "microsoft.xdr/secops/rawdata/emailcontent/read",
+                    "microsoft.xdr/secops/rawdata/quarantineemailcontent/read"
                 ]
             }
         ]

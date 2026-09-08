@@ -53,10 +53,10 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         [System.String]$DataCollectionResourceGroupName
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$DataCollectionRuleSubscriptionId = (Get-AzContext).Subscription.Id
+        [System.String]$DataCollectionRuleSubscriptionId = (Get-EntraOpsAzContextValue -Property SubscriptionId)
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$TenantId = (Get-AzContext).Tenant.Id
+        [System.String]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
         ,
         [Parameter(Mandatory = $False)]
         [System.String]$TableName = "PrivilegedEAM_CL"
@@ -69,32 +69,37 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
     )
 
-    Set-AzContext -SubscriptionId $DataCollectionRuleSubscriptionId
+    $OriginalAzContext = Get-AzContext
+    try {
+        Set-AzContext -SubscriptionId $DataCollectionRuleSubscriptionId | Out-Null
 
-    foreach ($RbacSystem in $RbacSystems) {
+        foreach ($RbacSystem in $RbacSystems) {
         Write-Host "Upload data for $($RbacSystem)"
         foreach ($ObjectType in $PrincipalTypeFilter) {
+            $EamFiles = @()
+            $ObjectTypePath = Join-Path -Path $ImportPath -ChildPath "$RbacSystem/$ObjectType"
 
-            try {
-                $EamFiles = (Get-ChildItem -Path "$($ImportPath)\$($RbacSystem)\$($ObjectType)" -Filter "*.json").FullName
-            } catch {
-                Write-Warning "No $($RbacSystem).json found!"
+            if (-not (Test-Path -LiteralPath $ObjectTypePath -PathType Container)) {
+                Write-Verbose "No classification files found for $RbacSystem/$ObjectType."
+                continue
             }
+
+            $EamFiles = @(Get-ChildItem -LiteralPath $ObjectTypePath -Filter "*.json" -File | Select-Object -ExpandProperty FullName)
 
             if ($EamFiles.Count -gt 0) {
                 Write-Host "Upload classification data for object type: $($ObjectType)"
                 $TotalBatches = [Math]::Ceiling($EamFiles.Count / 50)
-            
+
                 # Loop through files in batches of 50 to avoid errors hitting the 1Mb file limit for DCRs
                 for ($i = 0; $i -lt $EamFiles.Count; $i += 50) {
                     $CurrentBatch = [Math]::Floor($i / 50) + 1
                     $PercentComplete = [math]::Round(($CurrentBatch / $TotalBatches) * 100, 0)
                     Write-Progress -Activity "Uploading to Custom Table" -Status "Processing batch $CurrentBatch of $TotalBatches for $ObjectType ($PercentComplete%)" -PercentComplete $PercentComplete
-                    
+
                     # Select the current batch of 50 files (array slicing is inclusive, so i+49 gives 50 items)
                     $EndIndex = [Math]::Min($i + 49, $EamFiles.Count - 1)
                     $Batch = $EamFiles[$i..$EndIndex]
-                
+
                     # Process the batch
                     $EamSummary = @()
                     $EamSummary += $Batch | ForEach-Object {
@@ -107,15 +112,20 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
                     }
 
                     if ($EamSummary.Count -ne 0) {
-                        $Json = $EamSummary | ConvertTo-Json -Depth 10
-                
+                        $Json = $EamSummary | ConvertTo-Json -Depth 10 -AsArray
+
                         # Send the batch to the API
-                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId                
+                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId
                     }
-                    
+
                     Write-Host "Processed batch ${CurrentBatch}/${TotalBatches}: $($EamSummary.Count) files (starting at index $i)"
                 }
             }
+        }
+        }
+    } finally {
+        if ($null -ne $OriginalAzContext) {
+            Set-AzContext -Context $OriginalAzContext | Out-Null
         }
     }
 }

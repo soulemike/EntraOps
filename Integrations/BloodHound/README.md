@@ -19,13 +19,13 @@ Read the BloodHound documentation about [AzureHound Community Edition: Collectin
 
 ### 2. Generate EntraOps Privileged EAM JSON
 
-Follow the repository-level [EntraOps README](../README.md#executing-entraops-interactively) to connect to the tenant and generate classified Privileged EAM JSON with `Save-EntraOpsPrivilegedEAMJson`. The BloodHound exporter does not calculate EntraOps classification itself; it expects the JSON output to already contain classification data.
+Follow the repository-level [EntraOps README](../../README.md#executing-entraops-interactively) to connect to the tenant and generate classified Privileged EAM JSON with `Save-EntraOpsPrivilegedEAMJson`. The BloodHound exporter does not calculate EntraOps classification itself; it expects the JSON output to already contain classification data.
 
 By default, the BloodHound exporter's `-ImportPath` parameter uses the EntraOps Privileged EAM output folder, typically `.\PrivilegedEAM`. The exporter reads per-RBAC-system files from that folder, for example `.\PrivilegedEAM\<RbacSystem>\<RbacSystem>.json`. If current classified JSON files already exist there, you can skip this collection step and export OpenGraph data from the existing files.
 
 ### 3. Export EntraOps OpenGraph data
 
-Dot-source [Export-EntraOpsPrivilegedEAMBloodHound](/EntraOps/Public/PrivilegedAccess/Export-EntraOpsPrivilegedEAMBloodHound.ps1):
+Dot-source [Export-EntraOpsPrivilegedEAMBloodHound](../../EntraOps/Public/PrivilegedAccess/Export-EntraOpsPrivilegedEAMBloodHound.ps1):
 
 ```powershell
 . .\EntraOps\Public\PrivilegedAccess\Export-EntraOpsPrivilegedEAMBloodHound.ps1
@@ -52,7 +52,9 @@ Before or after uploading the exported JSON, deploy the OpenGraph extension sche
 
 ## Graph Model
 
-The OpenGraph schema is described in [schema.md](schema.md) which references node/edge documentation in the [descriptions](descriptions) directory.
+The nodes and edges are summarized in [schema.md](schema.md). The deployable
+[OpenGraph extension schema](OpenGraph_EntraOps_Extension_Schema.json) is the authoritative schema
+definition.
 
 ### RBAC model
 
@@ -131,7 +133,8 @@ flowchart LR
 
 EntraOps-specific Cypher queries can be used to enhance visibility.
 
-The [EntraOps-queries.json](EntraOps-queries.json) can be [imported in queries.specterops.io](https://queries.specterops.io/?source=https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Frefs%2Fheads%2Fmain%2FIntegrations%2FBloodHound%2FEntraOps-queries.json&sourceLabel=EntraOps) or in the BloodHound UI.
+The [EntraOps-queries.json](EntraOps-queries.json) can be [imported in queries.specterops.io](https://queries.specterops.io/?source=https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Frefs%2Fheads%main%2FBloodHound%2FEntraOps-queries.json&sourceLabel=EntraOps) or in the BloodHound UI.
+
 
 ### Administrative Units with assigned Tier Zero principals
 
@@ -243,4 +246,4 @@ WHERE 2 IN n.classification_tierlevels
 RETURN n
 ```
 
-![](example_selector.png)
+Save either query in BloodHound if you want it to appear as a reusable search in the query selector.

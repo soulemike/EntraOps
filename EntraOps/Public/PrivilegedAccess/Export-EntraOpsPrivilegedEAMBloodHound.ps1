@@ -43,6 +43,8 @@
         EO_PAWFor                       - PAW/SAW device is assigned to a privileged account
         EO_OwnsDevice                   - principal owns / has registered a device
         EO_DeviceOwner                  - registered device is owned by a principal
+        EO_OwnerOf                      - principal owns another privileged object (group, application/service principal, ...)
+        EO_OwnedBy                      - privileged object is owned by another principal (inverse of EO_OwnerOf)
         EO_IsSponsoredBy                - guest or external identity is sponsored by another principal
         EO_HasIdentityParent            - identity was derived from / linked to a parent identity
         EO_IntuneRolePermission         - Intune role assignment/principal has matched actions scoped to a device
@@ -92,6 +94,12 @@
     When $true (default), emit EO_OwnsDevice edges from a principal to each device it has registered
     or owns (OwnedDevices), plus inverse EO_DeviceOwner edges from the device to the principal.
     Set to $false to omit these edges.
+
+.PARAMETER IncludeObjectOwnershipEdges
+    When $true (default), emit EO_OwnerOf edges from a principal to each privileged object it owns
+    (OwnedObjects - typically groups, applications/service principals it manages) and from each
+    owner listed on a privileged object (Owners - e.g. a role-assignable group's owners), plus
+    inverse EO_OwnedBy edges. Set to $false to omit these edges.
 
 .PARAMETER IncludeSponsorEdges
     When $true (default), emit EO_IsSponsoredBy edges from a guest or external identity to each of
@@ -148,6 +156,9 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$IncludeDeviceOwnershipEdges = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$IncludeObjectOwnershipEdges = $true
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$IncludeSponsorEdges = $true
@@ -226,18 +237,20 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
 
     # Edge kinds
     $EdgeKind = @{
-        MemberOf            = 'AZMemberOf'
-        ScopedTo            = 'EO_ScopedTo'
-        AssignedToAU        = 'EO_AssignedToAdministrativeUnit'
-        ClassifiedViaObject = 'EO_ClassifiedViaObject'
-        HasWorkAccount      = 'EO_HasWorkAccount'
-        UsesPAW             = 'EO_UsesPAW'
-        PAWFor              = 'EO_PAWFor'
-        OwnsDevice          = 'EO_OwnsDevice'
-        DeviceOwner         = 'EO_DeviceOwner'
-        IsSponsoredBy       = 'EO_IsSponsoredBy'
-        HasIdentityParent   = 'EO_HasIdentityParent'
-        IntuneRolePermission    = 'EO_IntuneRolePermission'
+        MemberOf             = 'AZMemberOf'
+        ScopedTo             = 'EO_ScopedTo'
+        AssignedToAU         = 'EO_AssignedToAdministrativeUnit'
+        ClassifiedViaObject  = 'EO_ClassifiedViaObject'
+        HasWorkAccount       = 'EO_HasWorkAccount'
+        UsesPAW              = 'EO_UsesPAW'
+        PAWFor               = 'EO_PAWFor'
+        OwnsDevice           = 'EO_OwnsDevice'
+        DeviceOwner          = 'EO_DeviceOwner'
+        OwnerOf              = 'EO_OwnerOf'
+        OwnedBy              = 'EO_OwnedBy'
+        IsSponsoredBy        = 'EO_IsSponsoredBy'
+        HasIdentityParent    = 'EO_HasIdentityParent'
+        IntuneRolePermission = 'EO_IntuneRolePermission'
     }
 
     # ObjectType → primary node kind
@@ -257,10 +270,10 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
     $EdgesList = [System.Collections.Generic.List[object]]::new()
 
     # ── Precomputed edge kind unions for Cypher queries in node properties ──────
-    $AllActiveRoleEdgeKinds   = ($HasRoleEdgeKindMap.Values)              -join '|'
-    $AllEligibleRoleEdgeKinds = ($EligibleEdgeKindMap.Values)             -join '|'
-    $AllRoleAssignmentEdges   = ($HasRoleAssignmentEdgeKindMap.Values)    -join '|'
-    $AllRoleAssignedEdges     = ($RoleAssignedEdgeKindMap.Values)         -join '|'
+    $AllActiveRoleEdgeKinds = ($HasRoleEdgeKindMap.Values) -join '|'
+    $AllEligibleRoleEdgeKinds = ($EligibleEdgeKindMap.Values) -join '|'
+    $AllRoleAssignmentEdges = ($HasRoleAssignmentEdgeKindMap.Values) -join '|'
+    $AllRoleAssignedEdges = ($RoleAssignedEdgeKindMap.Values) -join '|'
 
     # ── Helper: upsert a node  ─────────────────────────────────────────────────
     # Keeps the first-seen properties; later calls can update only if the existing
@@ -284,9 +297,9 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
             #  - existing is EO_Base only and new data has a more specific kind, OR
             #  - existing lacks admintierlevel and new data provides it
             $existingIsBaseOnly = ($existing.kinds.Count -eq 1 -and $existing.kinds[0] -eq $NodeKind.Base)
-            $newIsMoreSpecific  = ($Kinds.Count -gt 0 -and $Kinds[0] -ne $NodeKind.Base)
-            $upgradeByTier      = ($null -eq $existing.properties['admintierlevel']) -and
-                                  ($null -ne $Properties['admintierlevel'])
+            $newIsMoreSpecific = ($Kinds.Count -gt 0 -and $Kinds[0] -ne $NodeKind.Base)
+            $upgradeByTier = ($null -eq $existing.properties['admintierlevel']) -and
+            ($null -ne $Properties['admintierlevel'])
             if (($existingIsBaseOnly -and $newIsMoreSpecific) -or $upgradeByTier) {
                 $NodesIndex[$Id] = @{
                     id         = $Id
@@ -330,6 +343,20 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
         }
     }
 
+    function Get-EndpointDedupeKey {
+        # Build a deterministic key from an endpoint dictionary (sorted by key name)
+        # to avoid duplicate edges caused by non-deterministic hashtable enumeration order in ConvertTo-Json
+        param([System.Collections.IDictionary]$Endpoint)
+        $pairs = foreach ($key in ($Endpoint.Keys | Sort-Object)) {
+            $value = $Endpoint[$key]
+            if ($value -is [System.Collections.IDictionary] -or ($value -is [System.Collections.IEnumerable] -and $value -isnot [string])) {
+                $value = $value | ConvertTo-Json -Compress -Depth 5
+            }
+            "$key=$value"
+        }
+        return ($pairs -join ';')
+    }
+
     function Add-EdgeByEndpoint {
         param(
             [System.Collections.IDictionary]$StartEndpoint,
@@ -339,8 +366,8 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
         )
         if ($null -eq $StartEndpoint -or $null -eq $EndEndpoint) { return }
 
-        $startKey = $StartEndpoint | ConvertTo-Json -Compress -Depth 5
-        $endKey = $EndEndpoint | ConvertTo-Json -Compress -Depth 5
+        $startKey = Get-EndpointDedupeKey -Endpoint $StartEndpoint
+        $endKey = Get-EndpointDedupeKey -Endpoint $EndEndpoint
         $dedupeKey = "${startKey}|${endKey}|${Kind}"
         if (-not $EdgesIndex.ContainsKey($dedupeKey)) {
             $EdgesIndex[$dedupeKey] = $true
@@ -368,6 +395,7 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
             roleassignmentsubtype   = [string]($RoleAssignment.RoleAssignmentSubType ?? '')
             pimassignmenttype       = [string]($RoleAssignment.PIMAssignmentType ?? '')
             roleassignmentid        = [string]($RoleAssignment.RoleAssignmentId ?? '')
+            roleassignmentinstanceid = [string]($RoleAssignment.RoleAssignmentInstanceId ?? '')
             roleassignmentscopeid   = [string]($RoleAssignment.RoleAssignmentScopeId ?? '')
             roleassignmentscopename = [string]($RoleAssignment.RoleAssignmentScopeName ?? '')
         }
@@ -651,6 +679,36 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                 }
             }
 
+            # ── 1c2. Owned object edges (groups/apps/service principals - not devices) ──
+            # OwnedObjects lists what this principal owns (e.g. a user/service principal
+            # that owns groups or app registrations); Owners lists who owns this object
+            # (e.g. a role-assignable group's owners). Both are emitted as EO_OwnerOf /
+            # EO_OwnedBy so either direction of collection produces the same edge - Add-Edge
+            # dedupes by (start, end, kind), so overlap between the two is harmless. Targets
+            # that aren't privileged objects in this export are resolved to stub nodes by
+            # New-EntraOpsAccessPathMapData (same pattern as other cross-object edges here).
+            if ($IncludeObjectOwnershipEdges) {
+                $ownedObjectIds = @($Privilege.OwnedObjects | Where-Object { $null -ne $_ -and $_ -ne '' } | ForEach-Object { [string]$_ })
+                foreach ($ownedId in $ownedObjectIds) {
+                    $ownershipEdgeProps = @{
+                        rbacsystem = [string]$RbacSystem
+                    }
+                    Add-Edge -StartId $principalId -EndId $ownedId -Kind $EdgeKind.OwnerOf -Properties $ownershipEdgeProps
+                    Add-Edge -StartId $ownedId -EndId $principalId -Kind $EdgeKind.OwnedBy -Properties $ownershipEdgeProps
+
+                }
+
+                $ownerIds = @($Privilege.Owners | Where-Object { $null -ne $_ -and $_ -ne '' } | ForEach-Object { [string]$_ })
+                foreach ($ownerId in $ownerIds) {
+                    $ownershipEdgeProps = @{
+                        rbacsystem = [string]$RbacSystem
+                    }
+                    Add-Edge -StartId $ownerId -EndId $principalId -Kind $EdgeKind.OwnerOf -Properties $ownershipEdgeProps
+                    Add-Edge -StartId $principalId -EndId $ownerId -Kind $EdgeKind.OwnedBy -Properties $ownershipEdgeProps
+
+                }
+            }
+
             # ── 1d. Sponsor edges ─────────────────────────────────────────────
             if ($IncludeSponsorEdges) {
                 $sponsorIds = @($Privilege.Sponsors | Where-Object { $null -ne $_ -and $_ -ne '' } | ForEach-Object { [string]$_ })
@@ -679,18 +737,24 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                 ######################################
                 $roleAssignmentId = [string]($RoleAssignment.RoleAssignmentId ?? '')
                 if ([string]::IsNullOrEmpty($roleAssignmentId)) { continue }
+                $roleAssignmentInstanceId = [string]($RoleAssignment.RoleAssignmentInstanceId ?? '')
+                if ([string]::IsNullOrEmpty($roleAssignmentInstanceId)) {
+                    $roleAssignmentInstanceId = Get-EntraOpsRoleAssignmentInstanceId -RoleSystem $RbacSystem -RoleAssignment $RoleAssignment
+                }
 
                 #$roleAssignmentName = [string]($RoleAssignment.RoleDefinitionName ?? $roleAssignmentId)
                 $roleAssignmentName = $roleAssignmentId
 
                 $roleAssignmentProps = @{
-                    name        = $roleAssignmentName
-                    displayname = $roleAssignmentName
-                    rbacsystem = [string]$RbacSystem
-                    roleassignmentscopeid = [string]($RoleAssignment.RoleAssignmentScopeId ?? '')
+                    name                    = $roleAssignmentName
+                    displayname             = $roleAssignmentName
+                    roleassignmentid         = $roleAssignmentId
+                    roleassignmentinstanceid = $roleAssignmentInstanceId
+                    rbacsystem              = [string]$RbacSystem
+                    roleassignmentscopeid   = [string]($RoleAssignment.RoleAssignmentScopeId ?? '')
                     roleassignmentscopename = [string]($RoleAssignment.RoleAssignmentScopeName ?? '')
-                    roleassignmenttype = [string]($RoleAssignment.RoleAssignmentType ?? '')
-                    roleassignmentsubtype = [string]($RoleAssignment.RoleAssignmentSubType ?? '')
+                    roleassignmenttype      = [string]($RoleAssignment.RoleAssignmentType ?? '')
+                    roleassignmentsubtype   = [string]($RoleAssignment.RoleAssignmentSubType ?? '')
                 }
 
                 $matchedRoleAssignmentActions = @(
@@ -706,7 +770,7 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                 }
 
                 # Role assignment node (stub – first occurrence wins full properties)
-                Upsert-Node -Id $roleAssignmentId -Kinds $RoleAssignmentNodeKinds -Properties $roleAssignmentProps
+                Upsert-Node -Id $roleAssignmentInstanceId -Kinds $RoleAssignmentNodeKinds -Properties $roleAssignmentProps
 
                 # Best classification for this specific assignment
                 $bestClass = Get-BestClassification -Classifications $RoleAssignment.Classification
@@ -715,7 +779,7 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                 Add-PimEligibleMemberOfEdges -PrincipalId $principalId -RoleAssignment $RoleAssignment -RbacSystem $RbacSystem
 
                 # Direct or transitive assignment → role edge from principal
-                Add-Edge -StartId $principalId -EndId $roleAssignmentId -Kind $HasRoleAssignmentEdgeKind -Properties $edgeProps
+                Add-Edge -StartId $principalId -EndId $roleAssignmentInstanceId -Kind $HasRoleAssignmentEdgeKind -Properties $edgeProps
                 
 
                 # Start Role node creation
@@ -752,7 +816,7 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                 Add-Edge -StartId $principalId -EndId $roleNodeId -Kind $effectiveEdgeKind -Properties $edgeProps
 
                 # Link Role to RoleAssignment
-                Add-Edge -StartId $roleNodeId -EndId $roleAssignmentId -Kind $RoleAssignedEdgeKind -Properties $edgeProps
+                Add-Edge -StartId $roleNodeId -EndId $roleAssignmentInstanceId -Kind $RoleAssignedEdgeKind -Properties $edgeProps
 
                 # ── Role assignment scope edge ────────────────────────────────
                 if ($IncludeAdministrativeUnitEdges) {
@@ -775,30 +839,30 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                         Upsert-Node -Id $auNodeId -Kinds $NodeKind.AdministrativeUnit -Properties @{
                             name        = $auName
                             displayname = $auName
-                            rbacsystem = [string]$RbacSystem
+                            rbacsystem  = [string]$RbacSystem
                         }
 
-                        Add-Edge -StartId $roleAssignmentId -EndId $auNodeId -Kind $EdgeKind.ScopedTo -Properties @{
-                            rbacsystem           = [string]$RbacSystem
-                            roleassignmenttype    = [string]($RoleAssignment.RoleAssignmentType ?? '')
-                            roleassignmentsubtype = $roleAssignmentSubType
-                            roleassignmentscopeid = $scopeId
+                        Add-Edge -StartId $roleAssignmentInstanceId -EndId $auNodeId -Kind $EdgeKind.ScopedTo -Properties @{
+                            rbacsystem              = [string]$RbacSystem
+                            roleassignmenttype      = [string]($RoleAssignment.RoleAssignmentType ?? '')
+                            roleassignmentsubtype   = $roleAssignmentSubType
+                            roleassignmentscopeid   = $scopeId
                             roleassignmentscopename = $auName
-                            pimassignmenttype     = [string]($RoleAssignment.PIMAssignmentType ?? '')
-                            roledefinitionid      = $roleNodeId
-                            roledefinitionname    = $roleDefName
+                            pimassignmenttype       = [string]($RoleAssignment.PIMAssignmentType ?? '')
+                            roledefinitionid        = $roleNodeId
+                            roledefinitionname      = $roleDefName
                         }
 
                     } elseif ([string]::IsNullOrWhiteSpace($scopeId) -or $scopeId -eq '/') {
-                        Add-Edge -StartId $roleAssignmentId -EndId $TenantId -Kind $EdgeKind.ScopedTo -Properties @{
-                            rbacsystem           = [string]$RbacSystem
-                            roleassignmenttype    = [string]($RoleAssignment.RoleAssignmentType ?? '')
-                            roleassignmentsubtype = $roleAssignmentSubType
-                            roleassignmentscopeid = $scopeId
+                        Add-Edge -StartId $roleAssignmentInstanceId -EndId $TenantId -Kind $EdgeKind.ScopedTo -Properties @{
+                            rbacsystem              = [string]$RbacSystem
+                            roleassignmenttype      = [string]($RoleAssignment.RoleAssignmentType ?? '')
+                            roleassignmentsubtype   = $roleAssignmentSubType
+                            roleassignmentscopeid   = $scopeId
                             roleassignmentscopename = $scopeName
-                            pimassignmenttype     = [string]($RoleAssignment.PIMAssignmentType ?? '')
-                            roledefinitionid      = $roleNodeId
-                            roledefinitionname    = $roleDefName
+                            pimassignmenttype       = [string]($RoleAssignment.PIMAssignmentType ?? '')
+                            roledefinitionid        = $roleNodeId
+                            roledefinitionname      = $roleDefName
                         }
 
                     }
@@ -809,7 +873,7 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                     foreach ($ClassItem in $RoleAssignment.Classification) {
                         # Only emit when there are actual object IDs to point to
                         $taggedBy = [string]($ClassItem.TaggedBy ?? '')
-                        if ($taggedBy -in @('ControlPlaneWithoutRoleActions', '')) { continue }
+                        if ($taggedBy -in @('ControlPlaneWithoutRoleActions', 'RoleDefinitionOverwrites', 'RoleActionOverwrites', '')) { continue }
 
                         $taggedIds = @($ClassItem.TaggedByObjectIds          | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
                         if ($taggedIds.Count -eq 0) { continue }
@@ -834,17 +898,17 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                                 admintierlevel     = [string]($ClassItem.AdminTierLevel ?? '')
                                 admintierlevelname = [string]($ClassItem.AdminTierLevelName ?? '')
                                 service            = [string]($ClassItem.Service ?? '')
-                                rbacsystem        = [string]$RbacSystem
+                                rbacsystem         = [string]$RbacSystem
                             }
 
                             # RoleAssignment -[ClassifiedViaObject] -> (object)
-                            Add-Edge -StartId $roleAssignmentId -EndId $resolvedTaggedId -Kind $EdgeKind.ClassifiedViaObject -Properties @{
+                            Add-Edge -StartId $roleAssignmentInstanceId -EndId $resolvedTaggedId -Kind $EdgeKind.ClassifiedViaObject -Properties @{
                                 taggedby           = $taggedBy
                                 taggedbyrolesystem = $taggedRoleSystem
                                 admintierlevel     = [string]($ClassItem.AdminTierLevel ?? '')
                                 admintierlevelname = [string]($ClassItem.AdminTierLevelName ?? '')
                                 service            = [string]($ClassItem.Service ?? '')
-                                rbacsystem        = [string]$RbacSystem
+                                rbacsystem         = [string]$RbacSystem
                             }
 
                         }
@@ -890,7 +954,7 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                         Ensure-AZDeviceNode -Id $deviceId
 
                         # RoleAssignment → Device
-                        Add-Edge -StartId $roleAssignmentId -EndId $deviceId -Kind $EdgeKind.IntuneRolePermission -Properties @{
+                        Add-Edge -StartId $roleAssignmentInstanceId -EndId $deviceId -Kind $EdgeKind.IntuneRolePermission -Properties @{
                             actions            = $edgeActions
                             admintierlevel     = $entry.Value.tierLevel
                             admintierlevelname = $entry.Value.tierName
@@ -908,12 +972,12 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
                         #     "RETURN p1,p2"
                         # ) -join [Environment]::NewLine
                         $principalDeviceComposition = @(
-                            "MATCH p1=(principal)-[:AZMemberOf*1..]->(group:AZGroup)-[r:EO_HasIntuneRoleAssignment]->(ra:EO_IntuneRoleAssignment)-[:EO_IntuneRolePermission]->(device)"
+                            "MATCH p1=(principal)-[:EO_HasIntuneRoleAssignment]->(ra:EO_IntuneRoleAssignment)-[:EO_IntuneRolePermission]->(device)"
                             "WHERE device.objectid = '$($queryDeviceId)' AND principal.objectid = '$($queryPrincipalId)'"
-                            "AND NOT r.roleassignmentsubtype IN ['Nested Eligible group member', 'Eligible member']"
                             "OPTIONAL MATCH p2=(ra)<-[:EO_IntuneRoleAssigned]-(:EO_IntuneRole)"
-                            "OPTIONAL MATCH p3 = (principal)-[:AZMemberOf*1..]->(group)"
-                            "RETURN p1,p2,p3"
+                            "OPTIONAL MATCH p3 = (group:AZGroup)-[r:EO_HasIntuneRoleAssignment]->(ra) WHERE NOT r.roleassignmentsubtype IN ['Nested Eligible group member', 'Eligible member']"
+                            "OPTIONAL MATCH p4 = (principal)-[:AZMemberOf*1..]->(group)"
+                            "RETURN p1,p2,p3,p4"
                         ) -join [Environment]::NewLine
                         Add-Edge -StartId $principalId -EndId $deviceId -Kind $EdgeKind.IntuneRolePermission -Properties @{
                             actions            = $edgeActions
@@ -940,23 +1004,23 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
     )
 
     # All-system edge kind strings for node query shortcuts.
-    $AllActiveEdgeKindsQ   = $AllActiveRoleEdgeKinds
+    $AllActiveEdgeKindsQ = $AllActiveRoleEdgeKinds
     $AllEligibleEdgeKindsQ = $AllEligibleRoleEdgeKinds
-    $AllRaEdgesQ           = $AllRoleAssignmentEdges
-    $AllRaAssignedQ        = $AllRoleAssignedEdges
-    $MemberOfEdgeQ         = $EdgeKind.MemberOf
-    $UsesPAWEdgeQ          = $EdgeKind.UsesPAW
-    $PAWForEdgeQ           = $EdgeKind.PAWFor
-    $OwnsDeviceEdgeQ       = $EdgeKind.OwnsDevice
-    $DeviceOwnerEdgeQ      = $EdgeKind.DeviceOwner
+    $AllRaEdgesQ = $AllRoleAssignmentEdges
+    $AllRaAssignedQ = $AllRoleAssignedEdges
+    $MemberOfEdgeQ = $EdgeKind.MemberOf
+    $UsesPAWEdgeQ = $EdgeKind.UsesPAW
+    $PAWForEdgeQ = $EdgeKind.PAWFor
+    $OwnsDeviceEdgeQ = $EdgeKind.OwnsDevice
+    $DeviceOwnerEdgeQ = $EdgeKind.DeviceOwner
     $IntunePermissionEdgeQ = $EdgeKind.IntuneRolePermission
-    $AssignedToAUEdgeQ     = $EdgeKind.AssignedToAU
-    $ScopedToEdgeQ         = $EdgeKind.ScopedTo
+    $AssignedToAUEdgeQ = $EdgeKind.AssignedToAU
+    $ScopedToEdgeQ = $EdgeKind.ScopedTo
 
     foreach ($nodeId in @($NodesIndex.Keys)) {
-        $node       = $NodesIndex[$nodeId]
-        $props      = $node.properties
-        $nodeKinds  = $node.kinds
+        $node = $NodesIndex[$nodeId]
+        $props = $node.properties
+        $nodeKinds = $node.kinds
         $rbacSystem = [string]($props['rbacsystem'] ?? '')
         if (-not $rbacSystem) {
             foreach ($candidateRbacSystem in $RoleAssignmentNodeKindMap.Keys) {
@@ -970,30 +1034,30 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
         $queryNodeId = ([string]$nodeId).ToUpperInvariant()
 
         # Universal: every node gets inbound + outbound traversal queries
-        $props['InboundRelationships']  = "MATCH p=(n)<-[r]-(m) WHERE n.objectid = '$queryNodeId' RETURN p"
+        $props['InboundRelationships'] = "MATCH p=(n)<-[r]-(m) WHERE n.objectid = '$queryNodeId' RETURN p"
         $props['OutboundRelationships'] = "MATCH p=(n)-[r]->(m) WHERE n.objectid = '$queryNodeId' RETURN p"
 
         # Resolve per-system or all-system edge kind strings
         if ($rbacSystem -and $HasRoleEdgeKindMap.ContainsKey($rbacSystem)) {
-            $activeEdgeQ   = $HasRoleEdgeKindMap[$rbacSystem]
+            $activeEdgeQ = $HasRoleEdgeKindMap[$rbacSystem]
             $eligibleEdgeQ = $EligibleEdgeKindMap[$rbacSystem]
-            $raEdgeQ       = $HasRoleAssignmentEdgeKindMap[$rbacSystem]
-            $raAssignedQ   = $RoleAssignedEdgeKindMap[$rbacSystem]
-            $roleNodeQ     = @($RoleNodeKindMap[$rbacSystem])[0]
-            $raNodeQ       = @($RoleAssignmentNodeKindMap[$rbacSystem])[0]
+            $raEdgeQ = $HasRoleAssignmentEdgeKindMap[$rbacSystem]
+            $raAssignedQ = $RoleAssignedEdgeKindMap[$rbacSystem]
+            $roleNodeQ = @($RoleNodeKindMap[$rbacSystem])[0]
+            $raNodeQ = @($RoleAssignmentNodeKindMap[$rbacSystem])[0]
         } else {
-            $activeEdgeQ   = $AllActiveEdgeKindsQ
+            $activeEdgeQ = $AllActiveEdgeKindsQ
             $eligibleEdgeQ = $AllEligibleEdgeKindsQ
-            $raEdgeQ       = $AllRaEdgesQ
-            $raAssignedQ   = $AllRaAssignedQ
-            $roleNodeQ     = ($RoleNodeKindMap.Values | ForEach-Object { $_ }) -join '|'
-            $raNodeQ       = ($RoleAssignmentNodeKindMap.Values | ForEach-Object { $_ }) -join '|'
+            $raEdgeQ = $AllRaEdgesQ
+            $raAssignedQ = $AllRaAssignedQ
+            $roleNodeQ = ($RoleNodeKindMap.Values | ForEach-Object { $_ }) -join '|'
+            $raNodeQ = ($RoleAssignmentNodeKindMap.Values | ForEach-Object { $_ }) -join '|'
         }
 
         # Kind-specific queries
         # Role definition nodes  (AZRole, EO_DefenderRole, EO_IntuneRole, etc.)
         if ($nodeKinds | Where-Object { $RoleNodeKindSet.Contains($_) }) {
-            $props['ActiveAssignments']   = "MATCH p=()-[:$activeEdgeQ|$MemberOfEdgeQ*1..]->(role) WHERE role.objectid = '$queryNodeId' RETURN p"
+            $props['ActiveAssignments'] = "MATCH p=()-[:$activeEdgeQ|$MemberOfEdgeQ*1..]->(role) WHERE role.objectid = '$queryNodeId' RETURN p"
             $props['EligibleAssignments'] = "MATCH p=()-[:$eligibleEdgeQ|$MemberOfEdgeQ*1..]->(role) WHERE role.objectid = '$queryNodeId' RETURN p"
         }
         # Role assignment nodes  (EO_EntraRoleAssignment, EO_DefenderRoleAssignment, etc.)
@@ -1008,20 +1072,20 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
         }
         # Group nodes
         elseif ($nodeKinds -contains 'AZGroup') {
-            $props['Roles']   = "MATCH p=(principal)-[:$activeEdgeQ|$eligibleEdgeQ]->(role) WHERE principal.objectid = '$queryNodeId' RETURN p"
+            $props['Roles'] = "MATCH p=(principal)-[:$activeEdgeQ|$eligibleEdgeQ]->(role) WHERE principal.objectid = '$queryNodeId' RETURN p"
         }
         # Service principal nodes
         elseif ($nodeKinds -contains 'AZServicePrincipal') {
-            $props['Roles']   = "MATCH p=(principal)-[:$MemberOfEdgeQ*1..]->(:AZGroup)-[:$activeEdgeQ|$eligibleEdgeQ]->(role) WHERE principal.objectid = '$queryNodeId' RETURN p"
+            $props['Roles'] = "MATCH p=(principal)-[:$MemberOfEdgeQ*1..]->(:AZGroup)-[:$activeEdgeQ|$eligibleEdgeQ]->(role) WHERE principal.objectid = '$queryNodeId' RETURN p"
         }
         # Device nodes
         elseif ($nodeKinds -contains 'AZDevice') {
             $props['AssociatedPrincipals'] = "MATCH p=(device)-[:$PAWForEdgeQ|$DeviceOwnerEdgeQ]->(principal) WHERE device.objectid = '$queryNodeId' RETURN p"
-            $props['InboundIntunePermissions']  = "MATCH p=(principal)-[:$IntunePermissionEdgeQ]->(device) WHERE device.objectid = '$queryNodeId' RETURN p"
+            $props['InboundIntunePermissions'] = "MATCH p=(principal)-[:$IntunePermissionEdgeQ]->(device) WHERE device.objectid = '$queryNodeId' RETURN p"
         }
         # Administrative unit nodes
         elseif ($nodeKinds -contains 'EO_AdministrativeUnit') {
-            $props['Members']           = "MATCH p=(n)-[:$AssignedToAUEdgeQ]->(au) WHERE au.objectid = '$queryNodeId' RETURN p"
+            $props['Members'] = "MATCH p=(n)-[:$AssignedToAUEdgeQ]->(au) WHERE au.objectid = '$queryNodeId' RETURN p"
             $props['ScopedByRoleAssignments'] = "MATCH p=(ra)-[:$ScopedToEdgeQ]->(au) WHERE au.objectid = '$queryNodeId' RETURN p"
         }
         # EO_Base stub nodes: no type-specific queries beyond the universal pair
@@ -1037,7 +1101,7 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
 
     # ── Write output ──────────────────────────────────────────────────────────
     Write-Host ""
-    Write-Host "Writing BloodHound OpenGraph payload..." -ForegroundColor Cyan
+    Write-Host "Writing OpenGraph payload..." -ForegroundColor Cyan
     $Json = $Payload | ConvertTo-Json -Depth 10 -Compress:$false
     $Json | Out-File -FilePath $OutputPath -Encoding utf8 -Force
 
@@ -1047,7 +1111,7 @@ function Export-EntraOpsPrivilegedEAMBloodHound {
 
     Write-Host ""
     Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Green
-    Write-Host "  ✓ BloodHound OpenGraph export complete" -ForegroundColor Green
+    Write-Host "  ✓ OpenGraph export complete" -ForegroundColor Green
     Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Green
     Write-Host "  Nodes : $NodeCount" -ForegroundColor Gray
     Write-Host "  Edges : $EdgeCount" -ForegroundColor Gray

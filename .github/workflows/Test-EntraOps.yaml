@@ -1,0 +1,123 @@
+name: Test-EntraOps
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  push:
+    paths:
+      - "EntraOps/**"
+      - "Tests/**"
+      - "Docs/**"
+      - "Reports/**"
+      - "Classification/Templates/**"
+      - "Samples/**"
+      - ".github/**"
+      - "package*.json"
+      - "playwright.config.mjs"
+  pull_request:
+    paths:
+      - "EntraOps/**"
+      - "Tests/**"
+      - "Docs/**"
+      - "Reports/**"
+      - "Classification/Templates/**"
+      - "Samples/**"
+      - ".github/**"
+      - "package*.json"
+      - "playwright.config.mjs"
+permissions:
+  contents: read
+jobs:
+  Repository:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate module manifest
+        shell: pwsh
+        run: Test-ModuleManifest ./EntraOps/EntraOps.psd1 -ErrorAction Stop | Out-Null
+      - name: Validate GitHub Action references
+        shell: pwsh
+        run: ./.github/scripts/Test-GitHubActionReferences.ps1
+      - name: Validate deployment file boundaries
+        if: hashFiles('EntraOpsConfig.json') != ''
+        shell: pwsh
+        run: ./.github/scripts/Test-EntraOpsDeploymentLayout.ps1
+      - name: Check generated documentation is in sync with its Markdown sources
+        shell: pwsh
+        run: |
+          ./Docs/Update-EntraOpsDocsContent.ps1
+          git diff --exit-code -- Docs/data/content.js
+
+  # Checks that the published template is clean. They are meaningless or actively wrong in a
+  # deployment repository: Docs/ and .github/ arrive there as synced copies that can lag behind this
+  # workflow, and a deployment repository is expected to hold the tenant data these steps reject.
+  Template:
+    if: github.repository == 'Cloud-Architekt/EntraOps-Insiders' || github.repository == 'Cloud-Architekt/EntraOps'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check shipped content for tenant-specific or personal data
+        shell: pwsh
+        run: ./.github/scripts/Test-EntraOpsReleaseContent.ps1
+
+  Pester:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Operator-generated Tenant Governance snapshot names can contain characters (such as
+          # colons) that Windows cannot materialize. They are not inputs to the regression suite.
+          sparse-checkout: |
+            .github
+            Classification
+            Docs
+            EntraOps
+            Parsers
+            Queries
+            Reports
+            Samples
+            Tests
+            Workbooks
+      - name: Import EntraOps module (syntax smoke test)
+        shell: pwsh
+        run: Import-Module ./EntraOps -ErrorAction Stop
+      - name: Install workflow test dependency
+        shell: pwsh
+        run: Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Force -Repository PSGallery
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $Result = Invoke-Pester -Path ./Tests -Output Detailed -PassThru
+          if ($null -eq $Result -or $Result.FailedCount -gt 0 -or $Result.TotalCount -eq 0) {
+              throw "Pester failed: $($Result.FailedCount) failed of $($Result.TotalCount) tests"
+          }
+
+  Browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install browser test dependencies
+        run: npm ci
+      # Browser binaries are keyed on the lockfile, so a Playwright upgrade downloads them again.
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run documentation and report browser tests
+        run: npm run test:browser

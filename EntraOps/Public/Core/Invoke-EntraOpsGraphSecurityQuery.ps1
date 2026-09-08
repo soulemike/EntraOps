@@ -23,7 +23,12 @@ function Invoke-EntraOpsGraphSecurityQuery {
             try { [System.Xml.XmlConvert]::ToTimeSpan($_) | Out-Null; $true }
             catch { throw "Timespan must be ISO 8601 duration (e.g., P14D, PT6H, P2DT3H)." }
         })]
-        [string] $Timespan = "P14D"
+        [string] $Timespan = "P14D",
+        # Use Invoke-RestMethod instead of the Microsoft Graph SDK for the underlying request
+        # (passed through to Invoke-EntraOpsMsGraphQuery; the module-wide setting from
+        # Connect-EntraOps -UseInvokeRestMethodOnly applies when not set explicitly)
+        [Parameter(Mandatory = $false)]
+        [switch] $UseInvokeRestMethodOnly
     )
 
     process {
@@ -37,10 +42,23 @@ function Invoke-EntraOpsGraphSecurityQuery {
         $retryCount = 0
         $maxRetries = 3
 
+        # Only pass the switch through when it was set explicitly, so the module-wide
+        # fallback inside Invoke-EntraOpsMsGraphQuery still applies otherwise
+        $GraphQueryParams = @{
+            Uri           = "https://graph.microsoft.com/beta/security/runHuntingQuery"
+            Method        = 'POST'
+            Body          = $Body
+            OutputType    = 'PSObject'
+            ErrorVariable = 'QueryError'
+        }
+        if ($PSBoundParameters.ContainsKey('UseInvokeRestMethodOnly')) {
+            $GraphQueryParams.UseInvokeRestMethodOnly = $UseInvokeRestMethodOnly
+        }
+
         do {
             try {
                 $retry = $false
-                $QueryResponse = (Invoke-EntraOpsMsGraphQuery -Uri "https://graph.microsoft.com/beta/security/runHuntingQuery" -Method POST -Body $Body -OutputType PSObject -ErrorVariable QueryError)
+                $QueryResponse = (Invoke-EntraOpsMsGraphQuery @GraphQueryParams)
                 $QueryResults = $QueryResponse.Results
             }
             catch {

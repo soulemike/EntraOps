@@ -8,14 +8,17 @@
 .PARAMETER ImportPath
     Folder where the classification files should be stored. Default is ./PrivilegedEAM.
 
+.PARAMETER ExportFolder
+    Folder where the local WatchList CSV files should be written. Default is the current working directory.
+
 .PARAMETER SentinelSubscriptionId
-    Subscription ID of the Microsoft Sentinel workspace.
+    Subscription ID of the Microsoft Sentinel workspace. Required unless SkipUploadSaveLocal is set.
 
 .PARAMETER SentinelResourceGroupName
-    Resource group name of the Microsoft Sentinel workspace.
+    Resource group name of the Microsoft Sentinel workspace. Required unless SkipUploadSaveLocal is set.
 
 .PARAMETER SentinelWorkspaceName
-    Name of the Microsoft Sentinel workspace.
+    Name of the Microsoft Sentinel workspace. Required unless SkipUploadSaveLocal is set.
 
 .PARAMETER WatchListPrefix
     Prefix for all WatchLists wihich will be created by this cmldet. Default is EntraOps_.
@@ -27,7 +30,8 @@
     Type of WatchLists to be created. Default is None. Possible values are All, ManagedIdentityAssignedResourceId, WorkloadIdentityAttackPaths, WorkloadIdentityInfo, WorkloadIdentityRecommendations.
 
 .PARAMETER RbacSystems
-    Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
+    Array of RBAC systems to be processed. Default is Azure, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
+    AzureBilling and Defender remain available as explicit opt-in values.
 
 .PARAMETER SkipUploadSaveLocal
     Skip upload to Sentinel and save WatchList locally. Default is false.
@@ -50,13 +54,16 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         [Parameter(Mandatory = $false)]
         [System.String]$ImportPath = $DefaultFolderClassifiedEam
         ,
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
+        [System.String]$ExportFolder = $PWD
+        ,
+        [Parameter(Mandatory = $false)]
         [System.String]$SentinelSubscriptionId
         ,
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [System.String]$SentinelResourceGroupName
         ,
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [System.String]$SentinelWorkspaceName
         ,
         [Parameter(Mandatory = $false)]
@@ -64,7 +71,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         ,
         [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
-        [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
+        [object]$RbacSystems = ("Azure", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
@@ -81,11 +88,24 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
     # --- Path safety: ensure ImportPath is under the expected base directory ---
     $ResolvedImportPath = [System.IO.Path]::GetFullPath($ImportPath)
     $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)
-    if (-not $ResolvedImportPath.StartsWith($ResolvedBaseFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (-not (Test-EntraOpsPathWithinRoot -Path $ImportPath -Root $EntraOpsBaseFolder -AllowRoot)) {
         throw "Security check failed: ImportPath '$ResolvedImportPath' is not under the expected base directory '$ResolvedBaseFolder'."
     }
 
+    # --- Ensure ExportFolder exists so local WatchList CSVs have somewhere to land ---
+    $ResolvedExportFolder = [System.IO.Path]::GetFullPath($ExportFolder)
+    if (-not (Test-Path -LiteralPath $ResolvedExportFolder)) {
+        try {
+            New-Item -ItemType Directory -Path $ResolvedExportFolder -Force -ErrorAction Stop | Out-Null
+        } catch {
+            throw "Failed to create ExportFolder '$ResolvedExportFolder': $($_.Exception.Message)"
+        }
+    }
+
     if ( -not $SkipUploadSaveLocal ) {
+        if ([string]::IsNullOrEmpty($SentinelSubscriptionId) -or [string]::IsNullOrEmpty($SentinelResourceGroupName) -or [string]::IsNullOrEmpty($SentinelWorkspaceName)) {
+            throw "SentinelSubscriptionId, SentinelResourceGroupName and SentinelWorkspaceName are required when SkipUploadSaveLocal is not set."
+        }
         Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment        
     }
     $NewPrincipalsWatchlistItems = New-Object System.Collections.ArrayList
@@ -117,7 +137,9 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     "RestrictedManagementByAadRole" = $Privilege.RestrictedManagementByAadRole -eq $true
                     "RestrictedManagementByRMAU"    = $Privilege.RestrictedManagementByRMAU -eq $True
                     "RoleSystem"                    = $Rbac
-                    "Classification"                = $Privilege.Classification | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    # Principal-level KQL filters consume only this unique tier and service summary.
+                    # Classification evidence is represented separately at role-assignment granularity below.
+                    "Classification"                = $Privilege.Classification | Select-Object AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service -Unique | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "Owners"                        = $Privilege.Owners | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "Sponsors"                      = $Privilege.Sponsors | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "OwnedObjects"                  = $Privilege.OwnedObjects | ConvertTo-Json -Depth 10 -Compress -AsArray
@@ -182,11 +204,11 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         }
     }
 
-    if ( $null -ne $NewPrincipalsWatchlistItems ) {
+    if ( $NewPrincipalsWatchlistItems.Count -gt 0 ) {
         $WatchListName = "$($WatchListPrefix)Principals"
         Write-Output "Write information to watchlist: $WatchListName"
 
-        $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
+        $WatchListPath = Join-Path $ResolvedExportFolder "$($WatchListName).csv"
         $NewPrincipalsWatchlistItems | Sort-Object ObjectDisplayName | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
         $Parameters = @{
             WatchListFilePath        = $WatchListPath
@@ -200,14 +222,15 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         }
         if ( -not $SkipUploadSaveLocal ) {
             New-GkSeAzSentinelWatchlist @Parameters -Verbose
-            Remove-Item -Path $WatchListPath -Force            
+            $null = Test-EntraOpsSentinelWatchlistDeployment -SubscriptionId $SentinelSubscriptionId -ResourceGroupName $SentinelResourceGroupName -WorkspaceName $SentinelWorkspaceName -WatchListName $WatchListName -ExpectedItemCount $NewPrincipalsWatchlistItems.Count -WatchListFilePath $WatchListPath
+            Remove-Item -Path $WatchListPath -Force
         }
     }
 
-    if ( ![string]::IsNullOrEmpty($NewRoleAssignmentsWatchlistItems) ) {
+    if ( $NewRoleAssignmentsWatchlistItems.Count -gt 0 ) {
         $WatchListName = "$($WatchListPrefix)RoleAssignments"
         Write-Output "Write information to watchlist: $WatchListName"
-        $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
+        $WatchListPath = Join-Path $ResolvedExportFolder "$($WatchListName).csv"
         $NewRoleAssignmentsWatchlistItems | Sort-Object AdminTierLevel, RoleSystem, ObjectDisplayName | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
         $Parameters = @{
             WatchListFilePath        = $WatchListPath
@@ -221,14 +244,15 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         }
         if ( -not $SkipUploadSaveLocal ) {
             New-GkSeAzSentinelWatchlist @Parameters -Verbose
-            Remove-Item -Path $WatchListPath -Force      
+            $null = Test-EntraOpsSentinelWatchlistDeployment -SubscriptionId $SentinelSubscriptionId -ResourceGroupName $SentinelResourceGroupName -WorkspaceName $SentinelWorkspaceName -WatchListName $WatchListName -ExpectedItemCount $NewRoleAssignmentsWatchlistItems.Count -WatchListFilePath $WatchListPath
+            Remove-Item -Path $WatchListPath -Force
         }
     }
 
-    if ( ![string]::IsNullOrEmpty($NewRoleAssignmentClassificationsWatchlistItems) ) {
+    if ( $NewRoleAssignmentClassificationsWatchlistItems.Count -gt 0 ) {
         $WatchListName = "$($WatchListPrefix)RoleClassifications"
         Write-Output "Write information to watchlist: $WatchListName"
-        $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
+        $WatchListPath = Join-Path $ResolvedExportFolder "$($WatchListName).csv"
         $NewRoleAssignmentClassificationsWatchlistItems | Sort-Object AdminTierLevel, Service | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
         $Parameters = @{
             WatchListFilePath        = $WatchListPath
@@ -242,6 +266,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         }
         if ( -not $SkipUploadSaveLocal ) {
             New-GkSeAzSentinelWatchlist @Parameters -Verbose
+            $null = Test-EntraOpsSentinelWatchlistDeployment -SubscriptionId $SentinelSubscriptionId -ResourceGroupName $SentinelResourceGroupName -WorkspaceName $SentinelWorkspaceName -WatchListName $WatchListName -ExpectedItemCount $NewRoleAssignmentClassificationsWatchlistItems.Count -WatchListFilePath $WatchListPath
             Remove-Item -Path $WatchListPath -Force
         }
     }

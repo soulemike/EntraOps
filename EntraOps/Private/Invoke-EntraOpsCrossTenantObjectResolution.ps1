@@ -75,6 +75,11 @@ function Invoke-EntraOpsCrossTenantObjectResolution {
 
     $AuthType = $__EntraOpsSession.AuthenticationType
     $IsInteractiveAuth = $AuthType -in @('UserInteractive', 'DeviceAuthentication')
+    # In REST-only mode (Connect-EntraOps -UseInvokeRestMethodOnly), the Graph SDK is not installed
+    # by design - a Graph tenant "context switch" must not go through Connect-MgGraph at all.
+    # Invoke-EntraOpsMsGraphQuery's REST path instead reads CurrentGraphTenantId from the session
+    # to pick the right cached token and cache-scoping key for the duration of this call.
+    $IsRestOnlyMode = [bool]$__EntraOpsSession['UseInvokeRestMethodOnly']
 
     # Managing tenant: always use Get-AzAccessToken regardless of auth type.
     # Connect-EntraOps already pre-authenticates to the managing tenant via Get-AzAccessToken for
@@ -90,8 +95,9 @@ function Invoke-EntraOpsCrossTenantObjectResolution {
 
     # Home token needed only for non-interactive restore (Connect-MgGraph -AccessToken).
     # For interactive, home restore uses Connect-MgGraph -TenantId (MSAL cache, see finally).
+    # Not needed at all in REST-only mode, where restore is just clearing CurrentGraphTenantId.
     $HomeToken = $null
-    if (-not $IsInteractiveAuth) {
+    if (-not $IsRestOnlyMode -and -not $IsInteractiveAuth) {
         try {
             $HomeToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $Global:TenantIdContext -AsSecureString -ErrorAction Stop).Token
         } catch {
@@ -117,12 +123,20 @@ function Invoke-EntraOpsCrossTenantObjectResolution {
     )
 
     try {
-        #region Switch MgGraph context to managing tenant (silent — Az session token)
-        Connect-MgGraph -AccessToken $ManagingToken -NoWelcome -ErrorAction Stop
+        #region Switch Graph tenant context to managing tenant (silent — Az session token)
+        if ($IsRestOnlyMode) {
+            $__EntraOpsSession['CurrentGraphTenantId'] = $Global:ManagingTenantIdContext
+        } else {
+            Connect-MgGraph -AccessToken $ManagingToken -NoWelcome -ErrorAction Stop
+        }
         Write-Host "Connected to managing tenant '$Global:ManagingTenantIdContext'." -ForegroundColor Cyan
         #endregion
 
         #region Resolve unresolved objects in managing tenant context
+        # REST-only mode is parallel-capable here too: CurrentGraphTenantId was switched to the
+        # managing tenant above, so Initialize-EntraOpsRestOnlyParallelToken (called inside
+        # Invoke-EntraOpsParallelObjectResolution) pre-warms the managing-tenant token cache key,
+        # and runspaces read the same shared session (CurrentGraphTenantId + token cache) by reference.
         $ManagingTenantCache = Invoke-EntraOpsParallelObjectResolution `
             -UniqueObjects $UnresolvedObjects `
             -TenantId $Global:ManagingTenantIdContext `
@@ -133,10 +147,18 @@ function Invoke-EntraOpsCrossTenantObjectResolution {
         #region Merge results back into shared cache
         $MergedCount = 0
         foreach ($ObjectId in $ManagingTenantCache.Keys) {
-            if ($null -ne $ManagingTenantCache[$ObjectId]) {
-                $ObjectDetailsCache[$ObjectId] = $ManagingTenantCache[$ObjectId]
-                $MergedCount++
+            $ResolvedDetails = $ManagingTenantCache[$ObjectId]
+            if ($null -eq $ResolvedDetails) { continue }
+            # Keep the existing (home tenant) entry when the managing tenant also returned an
+            # 'unknown' not-found placeholder: the home-tenant placeholder carries the correct
+            # foreign ObjectTenantId (e.g. a non-managing TG governing tenant), whereas the
+            # managing-tenant placeholder would overwrite it with the managing tenant id.
+            if ($ResolvedDetails.ObjectType -eq 'unknown' -and $null -ne $ObjectDetailsCache[$ObjectId]) {
+                Write-Verbose "Keeping home-tenant entry for $ObjectId (managing tenant returned 'unknown')."
+                continue
             }
+            $ObjectDetailsCache[$ObjectId] = $ResolvedDetails
+            $MergedCount++
         }
         Write-Host "Cross-tenant resolution complete: $MergedCount of $($UnresolvedObjects.Count) object(s) resolved in managing tenant." -ForegroundColor Cyan
         #endregion
@@ -150,7 +172,9 @@ function Invoke-EntraOpsCrossTenantObjectResolution {
         # Non-interactive: Connect-MgGraph -AccessToken uses the Az app token which carries
         #              full application permissions.
         try {
-            if ($IsInteractiveAuth) {
+            if ($IsRestOnlyMode) {
+                $__EntraOpsSession.Remove('CurrentGraphTenantId')
+            } elseif ($IsInteractiveAuth) {
                 Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop
             } else {
                 Connect-MgGraph -AccessToken $HomeToken -NoWelcome -ErrorAction Stop

@@ -23,7 +23,7 @@
 
 .EXAMPLE
     Create all watchlists for Workload Identity Enrichment
-    Save-EntaOpsWorkloadIdentityEnrichmentWatchLists -SentinelResourceGroupName "SentinelRG" -SentinelSubscriptionId "SentinelSubId" -SentinelWorkspaceName "SentinelWorkspace"
+    Save-EntraOpsWorkloadIdentityEnrichmentWatchLists -SentinelResourceGroupName "SentinelRG" -SentinelSubscriptionId "SentinelSubId" -SentinelWorkspaceName "SentinelWorkspace"
 #>
 
 function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {

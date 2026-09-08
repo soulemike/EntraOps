@@ -28,6 +28,8 @@ function Get-EntraOpsManagedIdentityAssignments {
     | summarize AssociatedWorkloadId=make_set(AssociatedWorkloadId) by ObjectId, ResourceId, ResourceType, ResourceTenantId, IdentityType
     "
     
-    $AssignedManagedIdentities = Invoke-EntraOpsAzGraphQuery -KqlQuery $Query
+    # Fail rather than truncate: this mapping decides which Azure resources inherit a managed
+    # identity's tier, so a partial result silently narrows Control Plane scope.
+    $AssignedManagedIdentities = Invoke-EntraOpsAzGraphQuery -KqlQuery $Query -ThrowOnFailure
     return $AssignedManagedIdentities
 }

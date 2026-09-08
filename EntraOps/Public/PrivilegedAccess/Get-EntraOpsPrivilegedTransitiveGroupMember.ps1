@@ -28,8 +28,23 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         [string[]]$AncestorObjectIds = @(),
 
         [Parameter(Mandatory = $False, DontShow)]
-        [string[]]$AncestorObjectDisplayNames = @()
+        [string[]]$AncestorObjectDisplayNames = @(),
+
+        [Parameter(Mandatory = $False)]
+        [System.Collections.Generic.List[psobject]]$WarningMessages
     )
+
+    # Guard against a genuine Entra ID nested-group cycle (e.g. Group A eligible-nests Group B,
+    # Group B eligible-nests Group A back) - without this, the recursive expansion below would
+    # recurse forever since each group keeps discovering the other as a "new" nested group.
+    if ($GroupObjectId -in $AncestorObjectIds) {
+        $CycleWarningMessage = "Cycle detected in nested group membership: $GroupObjectId is already an ancestor in the current nesting path ($($AncestorObjectIds -join ' -> ')). Skipping to avoid infinite recursion."
+        if ($null -ne $WarningMessages) {
+            $WarningMessages.Add([pscustomobject]@{ Timestamp = (Get-Date); Type = "GroupNestingCycle"; ObjectId = $GroupObjectId; Message = $CycleWarningMessage })
+        }
+        Write-Warning $CycleWarningMessage
+        return @()
+    }
 
     # Check details for security group to identify synchronized groups
     try {
@@ -47,13 +62,35 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
 
     # Check if group is synchronized from on-premises AD and otherwise check if group has member assignments in PIM for Groups
     if ($GroupDetails.onPremisesSyncEnabled -ne $true) {
-        try {
-            Write-Verbose "Try to get identify if $($GroupDetails.displayName) has eligible or active users in PIM for Groups"
-            $PimForGroupMembersUri = "/beta/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq `'$($GroupObjectId)`'&`$expand=principal"
-            $PimForGroupMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $PimForGroupMembersUri -OutputType PSObject)
-        } catch {
-            Write-Error $_
-            throw "Validation of Group object with ID $($GroupObjectId) on eligible or active assignment has been failed"
+        if ($__EntraOpsSession.NonPimGroupIds.ContainsKey($GroupObjectId)) {
+            # Already confirmed (earlier in this session, possibly via a different nesting/catalog
+            # path) that this group has no PIM for Groups eligibility/assignment data - skip the
+            # repeat (and, for structurally PIM-incapable groups, always-failing) Graph probe.
+            Write-Verbose "Group $($GroupDetails.displayName) previously confirmed to have no PIM for Groups assignments - skipping re-probe"
+            $PimForGroupMembers = $null
+        } else {
+            try {
+                Write-Verbose "Try to get identify if $($GroupDetails.displayName) has eligible or active users in PIM for Groups"
+                $PimForGroupMembersUri = "/beta/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq `'$($GroupObjectId)`'&`$expand=principal"
+                $PimForGroupMembers = @(Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $PimForGroupMembersUri -OutputType PSObject -SuppressBadRequestWarning -ThrowOnFailure)
+            } catch {
+                # 400 (BadRequest) is Graph's normal answer for this query against a group that is
+                # not PIM-capable (not onboarded to PIM for Groups) - not a genuine failure. The
+                # response's error message text isn't a stable contract to match against, so treat
+                # any 400 from this specific probe URI as "not PIM-capable" rather than pattern-matching it.
+                $StatusCode = $_.Exception.Data['StatusCode']
+                if ($StatusCode -eq 400) {
+                    Write-Verbose "Group $($GroupDetails.displayName) is not PIM-capable - caching the capability result"
+                    $__EntraOpsSession.NonPimGroupIds[$GroupObjectId] = $true
+                    $PimForGroupMembers = $null
+                } else {
+                    Write-Error $_
+                    throw "Validation of Group object with ID $($GroupObjectId) on eligible or active assignment has been failed"
+                }
+            }
+            if ($null -ne $PimForGroupMembers -and -not $PimForGroupMembers) {
+                $__EntraOpsSession.NonPimGroupIds[$GroupObjectId] = $true
+            }
         }
     } else {
         Write-Verbose "Group $($GroupDetails.displayName) is synchronized from on-premises AD and can not be managed by PIM for Groups"
@@ -109,20 +146,17 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         $NestedMemberGroups = $AllGroupMembers | Where-Object { $_.'@odata.type' -eq "#microsoft.graph.group" }
         $TransitiveNestedEligibleMembers = @()
         foreach ($NestedMemberGroup in $NestedMemberGroups) {
-            do {
-                Write-Verbose "- Expand nesting for $($NestedMemberGroup.id)"
-                $NestedEligibleMembers = $($NestedMemberGroup) | foreach-object {
-                    $NestedEligibleMember = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $_.id -TenantId $TenantId -AncestorObjectIds $CurrentObjectIds -AncestorObjectDisplayNames $CurrentObjectDisplayNames
-                    $NestedEligibleMember | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Nested Eligible group member" -Force
+            # A single recursive call is sufficient - Get-EntraOpsPrivilegedTransitiveGroupMember
+            # already walks its own nested eligible groups internally (via this same recursive
+            # call), so wrapping it in an additional loop here would just re-expand the same
+            # group repeatedly without ever progressing to a deeper level.
+            Write-Verbose "- Expand nesting for $($NestedMemberGroup.id)"
+            $NestedEligibleMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $NestedMemberGroup.id -TenantId $TenantId -AncestorObjectIds $CurrentObjectIds -AncestorObjectDisplayNames $CurrentObjectDisplayNames -WarningMessages $WarningMessages
+            $NestedEligibleMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Nested Eligible group member" -Force
 
-                    #Check if nested group is not already in the list
-                    $NestedEligibleMember = $NestedEligibleMember | Where-Object { $_.Id -notin $TransitiveNestedEligibleMembers.Id }
-                    return $NestedEligibleMember
-                }
-
-                $TransitiveNestedEligibleMembers += $NestedEligibleMembers
-                $EligibleNestedMemberGroup = $NestedEligibleMembers | Where-Object { $_.'@odata.type' -eq "#microsoft.graph.group" }
-            } until ($EligibleNestedMemberGroup.'@odata.type' -notcontains "#microsoft.graph.group" -or $null -eq $EligibleNestedMemberGroup)
+            # Check if nested group is not already in the list
+            $NestedEligibleMembers = $NestedEligibleMembers | Where-Object { $_.Id -notin $TransitiveNestedEligibleMembers.Id }
+            $TransitiveNestedEligibleMembers += $NestedEligibleMembers
         }
         #endregion
 

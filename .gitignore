@@ -1,0 +1,18 @@
+# macOS metadata
+.DS_Store
+
+# Generated report data - produced by New-EntraOpsReportingData and published as
+# workflow artifact/release (may contain tenant data), never committed.
+Reports/*/data/*
+Reports/ClassificationExplorer/data-manifest.json
+Review/*
+
+# Local documentation browser-test dependencies and output.
+node_modules/
+playwright-report/
+test-results/
+TmpUpdate/
+.reporting/
+
+# Exception: embeds only this repository's own git history of classification templates.
+!Reports/ClassificationExplorer/data/history-data.js

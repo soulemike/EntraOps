@@ -1,20 +1,17 @@
 name: "Git - Push"
+description: "Commit and push all pending changes to the repository, refusing to push generated tenant data on public repositories."
 
-on:
-  workflow_call:
+inputs:
+  paths:
+    description: "Space-separated pathspecs to stage. Defaults to the whole working tree."
+    required: false
+    default: "."
 
 runs:
   using: "composite"
   steps:
-    - name: Push output to repository
-      shell: bash
-      run: |
-        git config --global user.email "EntraOpsGHActions@ghActions.com"
-        git config --global user.name "$GITHUB_ACTOR"      
-        git config pull.rebase false
-        git add --all
-        git add -A
-        git diff-index --quiet HEAD || git commit -m "$GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER"
-        git push
+    - name: Publish output to private GitHub repository
+      shell: pwsh
       env:
-        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+        ENTRAOPS_PUBLISH_PATHS: ${{ inputs.paths }}
+      run: ./.github/scripts/Publish-EntraOpsGitHubChanges.ps1 -Paths (@($env:ENTRAOPS_PUBLISH_PATHS -split '\s+') | Where-Object { $_ }) -AccessToken $env:GITHUB_TOKEN

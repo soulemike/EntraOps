@@ -28,10 +28,10 @@ function Get-EntraOpsWorkloadIdentityRecommendations {
     $RecommendationItems = New-Object System.Collections.ArrayList
 
     Write-Verbose "Collecting data for Entra Recommendations"
-    $Recommendations = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/directory/recommendations?`$filter=impactType eq 'apps'" -OutputType PSObject).value | select-object id, displayName, priority, insights, benefits
+    $Recommendations = (Invoke-EntraOpsMsGraphQuery -Uri "https://graph.microsoft.com/beta/directory/recommendations?`$filter=impactType eq 'apps'" -OutputType PSObject -ThrowOnFailure).value | select-object id, displayName, priority, insights, benefits
 
     $RecommendationItems = foreach ($Recommendation in $Recommendations) {
-        $Resources = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/directory/recommendations/$($Recommendation.id)/impactedResources" -OutputType PSObject).value
+        $Resources = (Invoke-EntraOpsMsGraphQuery -Uri "https://graph.microsoft.com/beta/directory/recommendations/$($Recommendation.id)/impactedResources" -OutputType PSObject -ThrowOnFailure).value
         $Resources | ForEach-Object {
             $CurrentItem = [pscustomobject]@{
                 'RecommendationId'           = $_.recommendationId

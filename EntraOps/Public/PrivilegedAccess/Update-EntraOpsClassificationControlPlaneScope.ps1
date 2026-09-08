@@ -15,8 +15,41 @@
     Possible values are "All", "EntraOps", "PrivilegedObjectIds", "PrivilegedRolesFromAzGraph" and "PrivilegedEdgesFromExposureManagement".
 
 .PARAMETER ClassificationParameterScope
-    Array of RBAC systems whose classification parameter files should be parameterized. Default is ("EntraID").
-    Possible values are "EntraID" and "DeviceManagement".
+    Array of RBAC systems whose classification files should be processed. Default is all supported RBAC systems.
+    Possible values are "EntraID", "DeviceManagement", "Azure", "Defender", "IdentityGovernance" and "ResourceApps".
+    EntraID, DeviceManagement, Azure and Defender are generated from their *.Param.json parameter files
+    (placeholder substitution). EntraID resolves Administrative Unit (and directory-level fallback) scopes
+    separately for privileged Users, Devices, Groups and Service Principals/Applications; WHY each resolved
+    scope was added is persisted as ScopeReasoning_EntraID.json (ScopeCategory/ScopeId/ScopeName/Reason), same
+    structure/intent as ScopeReasoning_DeviceManagement.json. Azure's <Tier0IncludedResourceScope>/<Tier1IncludedResourceScope> placeholders
+    are resolved strictly by the hosted managed identity's own effective tier (ControlPlane-tier MI host ->
+    Tier0, ManagementPlane-tier MI host -> Tier1). Defender supports only <Tier0IncludedResourceScope> and
+    <Tier1IncludedResourceScope> placeholders, which are populated with the same Azure resource/subscription
+    scope discovery, and only apply to RoleDefinitionActions that can genuinely be scoped in Defender Unified
+    RBAC via Defender for Cloud (microsoft.xdr/securityposture/* actions). Defender for Identity (MDI) scope
+    parameterization is not supported. IdentityGovernance is generated from
+    Classification_IdentityGovernance.Param.json: every access package catalog and access package is classified
+    by the most privileged resource assigned to it (groups by their EntraOps classification, directory roles by
+    EntraID/default classification, API permissions from access package resource role scopes, Azure resources by
+    the shared Tier0/Tier1 resource scope buckets). Scopes affirmatively classified as Tier1 (ManagementPlane) or
+    Tier2 (UserAccess) are excluded from the ControlPlane wildcard via <Tier0ExcludedIdGovScope> and served by
+    their own tier entries (<Tier1IncludedIdGovScope>/<Tier2IncludedIdGovScope>); everything else - including
+    unclassifiable scopes and catalogs created between classification runs - stays Tier0 (conservative default).
+    The per-scope reasoning is persisted as ScopeReasoning_IdentityGovernance.json (ScopeName/ScopeId/Source/
+    EAMTier/ResultingScope/Reason). If the parameter file is missing, the previous template-only behavior applies
+    (tenant-specific file only generated when role action overwrites exist). For
+    ResourceApps, a tenant-specific classification file is only generated from the shipped template when API
+    permission overwrites (Classification_ApiPermissionOverwrites.json) exist in the tenant-specific
+    classification folder.
+    Role action overwrites are considered and applied for EntraID, DeviceManagement, Defender, Azure and
+    IdentityGovernance; API permission overwrites are considered and applied for ResourceApps; always AFTER any
+    Tier0/Tier1 placeholder substitution for that RBAC system, and only for the generated tenant-specific
+    classification files, never for the shipped templates.
+    For Azure, an overwrite whose action already lives in a category whose scope is driven by the hosted
+    managed identity's own tier (e.g. "Managed Identity", "Compute", "Storage") will remove that action from
+    the dynamically-scoped entry and re-add it under the overwrite's own scope - a console warning is printed
+    when this happens.
+    Azure RBAC is always processed last to ensure managed identity EAM data from the other scopes is already available.
 
 .PARAMETER EntraIdClassificationParameterFile
     Path to the classification parameter file for Microsoft Entra ID. Default is ./Classification/Templates/Classification_AadResources.Param.json.
@@ -24,12 +57,55 @@
 .PARAMETER EntraIdCustomizedClassificationFile
     Path to the customized classification file for Microsoft Entra ID. Default is ./Classification/<TenantName>/Classification_AadResources.json.
     The file path will be recognized by the tenant name in the context of EntraOps and used for the classification.
+    ScopeReasoning_EntraID.json is written alongside it in the same folder.
 
 .PARAMETER DeviceMgmtClassificationParameterFile
     Path to the classification parameter file for Microsoft Intune (DeviceManagement). Default is ./Classification/Templates/Classification_DeviceManagement.Param.json.
 
 .PARAMETER DeviceMgmtCustomizedClassificationFile
     Path to the customized classification file for Microsoft Intune (DeviceManagement). Default is ./Classification/<TenantName>/Classification_DeviceManagement.json.
+
+.PARAMETER DefenderClassificationTemplateFile
+    Path to the classification template for Microsoft Defender. Default is ./Classification/Templates/Classification_Defender.json.
+    Not parameterized; used as-is with role action overwrites applied by Import-EntraOpsClassificationOverwrites.
+
+.PARAMETER DefenderClassificationParameterFile
+    Path to the classification parameter file for Microsoft Defender. Default is ./Classification/Templates/Classification_Defender.Param.json.
+    The file must contain <Tier0IncludedResourceScope> and <Tier1IncludedResourceScope> placeholders.
+
+.PARAMETER DefenderCustomizedClassificationFile
+    Path to the customized classification file for Microsoft Defender. Default is ./Classification/<TenantName>/Classification_Defender.json.
+    Generated from DefenderClassificationParameterFile with Tier0/Tier1 resource scope substituted.
+
+.PARAMETER IdGovClassificationTemplateFile
+    Path to the classification template for Identity Governance. Default is ./Classification/Templates/Classification_IdentityGovernance.json.
+    Only used as fallback (together with role action overwrites) when IdGovClassificationParameterFile is missing.
+
+.PARAMETER IdGovClassificationParameterFile
+    Path to the classification parameter file for Identity Governance. Default is ./Classification/Templates/Classification_IdentityGovernance.Param.json.
+    The file must contain the <Tier0ExcludedIdGovScope>, <Tier1IncludedIdGovScope> and <Tier2IncludedIdGovScope>
+    placeholders, which are populated with the catalog/access package scope IDs classified by
+    Get-EntraOpsIdGovScopeClassification.
+
+.PARAMETER IdGovCustomizedClassificationFile
+    Path to the customized classification file for Identity Governance. Default is ./Classification/<TenantName>/Classification_IdentityGovernance.json.
+    Generated from IdGovClassificationParameterFile with per-catalog/access package tier scopes substituted
+    (alongside ScopeReasoning_IdentityGovernance.json documenting WHY each scope got its tier).
+
+.PARAMETER ResourceAppsClassificationTemplateFile
+    Path to the classification template for Resource Apps (API permissions). Default is ./Classification/Templates/Classification_ApiPermissions.json.
+
+.PARAMETER ResourceAppsCustomizedClassificationFile
+    Path to the customized classification file for Resource Apps (API permissions). Default is ./Classification/<TenantName>/Classification_ApiPermissions.json.
+    Only created when API permission overwrites (Classification_ApiPermissionOverwrites.json) exist.
+
+.PARAMETER AzureClassificationParameterFile
+    Path to the classification parameter file for Azure RBAC. Default is ./Classification/Templates/Classification_Azure.Param.json.
+    The file must contain <Tier0IncludedResourceScope> and <Tier1IncludedResourceScope> placeholders.
+
+.PARAMETER AzureCustomizedClassificationFile
+    Path to the customized classification file for Azure RBAC. Default is ./Classification/<TenantName>/Classification_Azure.json.
+    The file path will be recognised by the tenant name in the context of EntraOps.
 
 .PARAMETER EntraOpsEamFolder
     Path to the folder where the EntraOps classification definition files are stored. Default is ./Classification.
@@ -41,7 +117,9 @@
     Array of high privileged roles in Azure RBAC which should be considered for the analysis. Default selection are high-privileged roles: Owner, Role Based Access Control Administrator and User Access Administrator.
 
 .PARAMETER AzureHighPrivilegedScopes
-    Scope of high privileged roles in Azure RBAC which should be considered for the analysis. Default selection is all scopes including management groups.
+    Scopes of high privileged Azure RBAC role assignments to consider for the Azure Resource Graph source.
+    Each configured value is matched exactly against the assignment scope; child scopes are not included.
+    Default selection is all scopes including management groups.
 
 .PARAMETER ExposureCriticalityLevel
     Criticality level of assets in Exposure Management which should be considered for the analysis. Default selection is criticality level <1.
@@ -53,6 +131,11 @@
     Controls which privileged tiers and object types are included when building Device Management (Intune) scope tag assignments.
     "ControlPlaneAndManagementPlane" (default): Tier0 (ControlPlane) and Tier1 (ManagementPlane) devices and users are both included.
     "ControlPlaneDevicesOnly": Only devices owned by Tier0 (ControlPlane) users are included; Tier1 and user group memberships are skipped.
+
+.PARAMETER IncludeObjectDetails
+    Include object display names, UPNs, classification reasons, and related descriptive metadata in console
+    output. Defaults to ConsoleOutput.IncludeObjectDetails from EntraOpsConfig.json. Object IDs are always shown,
+    and persisted classification reasoning files retain the full audit data.
 
 .EXAMPLE
     Get privileged objects from various Microsoft Entra RBACs and Microsoft Azure roles to identify the scope of privileged objects and update the classification definition file for Microsoft Entra ID.
@@ -79,6 +162,14 @@
     Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "PrivilegedObjectIds" -PrivilegedObjectIds $PrivilegedObjects
 
 .EXAMPLE
+    Update classification for Entra ID, DeviceManagement (Intune), and Azure RBAC. Azure runs last and uses Exposure Management (criticalityLevel < 1) and EntraOps EAM managed identity data to parameterize Tier0/Tier1 resource scopes.
+    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "EntraOps" -ClassificationParameterScope ("EntraID", "DeviceManagement", "Azure")
+
+.EXAMPLE
+    Update classification only for Azure RBAC scope parameterization.
+    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "EntraOps" -ClassificationParameterScope ("Azure")
+
+.EXAMPLE
     Update classification for both Entra ID and DeviceManagement (Intune) RBAC systems. The DeviceManagement logic resolves privileged devices to scope tags.
     Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "EntraOps" -ClassificationParameterScope ("EntraID", "DeviceManagement")
 
@@ -89,6 +180,29 @@
 .EXAMPLE
     Update DeviceManagement classification using only Tier0 (ControlPlane) owned devices - Tier1 and user group memberships are excluded.
     Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "EntraOps" -ClassificationParameterScope ("DeviceManagement") -DeviceMgmtPrivilegedTierScope "ControlPlaneDevicesOnly"
+
+.EXAMPLE
+    Update Azure RBAC classification and see WHY each Azure resource scope (e.g. the resource hosting a
+    user-assigned managed identity that itself became Tier0/ControlPlane via an Entra ID role, API permission
+    or other privileged role assignment) was included in Tier0. The per-resource reason is written to the
+    console/log AND persisted alongside Classification_Azure.json as
+    ScopeReasoning_Azure.json (Tier0Scope, Tier1Scope and
+    ScopeDetails with ScopeName/ScopeId/Source/EAMTier/ResultingScope/Reason per resource scope - structure
+    aligned with ScopeReasoning_IdentityGovernance.json) for
+    later auditing - it is not part of the PrivilegedEAM export itself. Interactively (or in the corresponding
+    Pull-EntraOpsPrivilegedEAM / Update-EntraOps.yaml job log) you can also look for the "Azure RBAC
+    Classification Summary" section near the end of the console output. It lists every resource grouped by
+    Source (SystemAssignedMI, UserAssignedMI, UAMIConsumer or ExposureManagement) together with its EAM tier
+    and Reason, for example:
+      [UserAssignedMI] (1 resource(s))
+        uami-deployment-agent [EAM: ControlPlane]
+          Reason    : User-assigned MI resource: uami-deployment-agent (3f2c1a9e-...)
+          ResourceId: /subscriptions/<subId>/resourcegroups/<rg>/providers/microsoft.managedidentity/userassignedidentities/uami-deployment-agent
+      [UAMIConsumer] (1 resource(s))
+        vm-web01 [EAM: ControlPlane]
+          Reason    : Uses UAMI: uami-deployment-agent / MI: uami-deployment-agent
+          ResourceId: /subscriptions/<subId>/resourcegroups/<rg>/providers/microsoft.compute/virtualmachines/vm-web01
+    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "EntraOps" -ClassificationParameterScope ("Azure") -Verbose
 
 #>
 
@@ -101,20 +215,50 @@ function Update-EntraOpsClassificationControlPlaneScope {
         [object]$PrivilegedObjectClassificationSource = "All"
         ,
         [Parameter(Mandatory = $false)]
-        [ValidateSet("EntraID", "DeviceManagement")]
-        [object]$ClassificationParameterScope = ("EntraID", "DeviceManagement")
+        [ValidateSet("EntraID", "DeviceManagement", "Azure", "Defender", "IdentityGovernance", "ResourceApps")]
+        [object]$ClassificationParameterScope = ("Azure", "EntraID", "DeviceManagement", "Defender", "IdentityGovernance", "ResourceApps")
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$EntraIdClassificationParameterFile = "$DefaultFolderClassification\Templates\Classification_AadResources.Param.json"
+        [System.String]$EntraIdClassificationParameterFile = "$DefaultFolderClassification/Templates/Classification_AadResources.Param.json"
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$EntraIdCustomizedClassificationFile = "$DefaultFolderClassification\$($TenantNameContext)\Classification_AadResources.json"
+        [System.String]$EntraIdCustomizedClassificationFile = "$DefaultFolderClassification/$($TenantNameContext)/Classification_AadResources.json"
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$DeviceMgmtClassificationParameterFile = "$DefaultFolderClassification\Templates\Classification_DeviceManagement.Param.json"
+        [System.String]$DeviceMgmtClassificationParameterFile = "$DefaultFolderClassification/Templates/Classification_DeviceManagement.Param.json"
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$DeviceMgmtCustomizedClassificationFile = "$DefaultFolderClassification\$($TenantNameContext)\Classification_DeviceManagement.json"
+        [System.String]$DeviceMgmtCustomizedClassificationFile = "$DefaultFolderClassification/$($TenantNameContext)/Classification_DeviceManagement.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$DefenderClassificationTemplateFile = "$DefaultFolderClassification/Templates/Classification_Defender.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$DefenderClassificationParameterFile = "$DefaultFolderClassification/Templates/Classification_Defender.Param.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$DefenderCustomizedClassificationFile = "$DefaultFolderClassification/$($TenantNameContext)/Classification_Defender.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$IdGovClassificationTemplateFile = "$DefaultFolderClassification/Templates/Classification_IdentityGovernance.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$IdGovClassificationParameterFile = "$DefaultFolderClassification/Templates/Classification_IdentityGovernance.Param.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$IdGovCustomizedClassificationFile = "$DefaultFolderClassification/$($TenantNameContext)/Classification_IdentityGovernance.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$ResourceAppsClassificationTemplateFile = "$DefaultFolderClassification/Templates/Classification_ApiPermissions.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$ResourceAppsCustomizedClassificationFile = "$DefaultFolderClassification/$($TenantNameContext)/Classification_ApiPermissions.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$AzureClassificationParameterFile = "$DefaultFolderClassification/Templates/Classification_Azure.Param.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$AzureCustomizedClassificationFile = "$DefaultFolderClassification/$($TenantNameContext)/Classification_Azure.json"
         ,
         [Parameter(Mandatory = $false)]
         [string]$EntraOpsEamFolder = "$DefaultFolderClassifiedEam"
@@ -138,6 +282,9 @@ function Update-EntraOpsClassificationControlPlaneScope {
         [Parameter(Mandatory = $false)]
         [ValidateSet("ControlPlaneAndManagementPlane", "ControlPlaneDevicesOnly")]
         [string]$DeviceMgmtPrivilegedTierScope = "ControlPlaneAndManagementPlane"
+        ,
+        [Parameter(Mandatory = $false)]
+        [boolean]$IncludeObjectDetails = [bool]$Global:EntraOpsIncludeObjectDetails
     )
 
     $Parameters = @{
@@ -155,6 +302,12 @@ function Update-EntraOpsClassificationControlPlaneScope {
     # Initialize tracking before any calls so captured warnings can be added immediately
     $ScopeSummary = [System.Collections.Generic.List[psobject]]::new()
     $WarningMessages = New-Object -TypeName "System.Collections.Generic.List[psobject]"
+
+    # Cross-tenant discovery can change Graph context; this classification always belongs to the configured tenant.
+    $HomeTenantId = $EntraOpsConfig.TenantId
+    if ([string]::IsNullOrWhiteSpace($HomeTenantId)) {
+        $HomeTenantId = Get-EntraOpsAzContextValue -Property TenantId
+    }
 
     $PrivilegedObjects = Get-EntraOpsClassificationControlPlaneObjects @Parameters -WarningVariable CollectedObjectWarnings -WarningAction SilentlyContinue
 
@@ -174,6 +327,18 @@ function Update-EntraOpsClassificationControlPlaneScope {
     $DirectoryLevelAssignmentScope = @("/")
     $PrivilegedObjects = $PrivilegedObjects | sort-object ObjectType, ObjectDisplayName | Select-Object -Unique *
 
+    # Ensure an empty role action overwrites file exists alongside the other tenant-specific classification files.
+    # This file is only evaluated from the tenant-specific folder (no Templates fallback).
+    $RoleActionOverwritesFolder = Join-Path -Path $DefaultFolderClassification -ChildPath $TenantNameContext
+    $RoleActionOverwritesFile = Join-Path -Path $RoleActionOverwritesFolder -ChildPath 'Classification_RoleActionOverwrites.json'
+    if (-not (Test-Path -Path $RoleActionOverwritesFile)) {
+        if (-not (Test-Path -Path $RoleActionOverwritesFolder)) {
+            New-Item -Path $RoleActionOverwritesFolder -ItemType Directory -Force | Out-Null
+        }
+        '[]' | Out-File -FilePath $RoleActionOverwritesFile -Force
+        Write-Host "Created empty role action overwrites file: $RoleActionOverwritesFile" -ForegroundColor Cyan
+    }
+
     Write-Host ""
     Write-Host "=========================================================" -ForegroundColor Cyan
     Write-Host " EntraOps - Control Plane Scope Classification Update" -ForegroundColor Cyan
@@ -188,21 +353,68 @@ function Update-EntraOpsClassificationControlPlaneScope {
     Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
     $PrivilegedObjects | Sort-Object ObjectType, ObjectDisplayName | Group-Object -Property ObjectType | Sort-Object Name | ForEach-Object {
         Write-Host "  [$($_.Name)] ($($_.Count) object(s))" -ForegroundColor DarkCyan
-        $_.Group | Sort-Object ObjectDisplayName | ForEach-Object {
-            $Protection = @()
-            if ($_.RestrictedManagementByRAG -eq $True) { $Protection += "RAG" }
-            if ($_.RestrictedManagementByAadRole -eq $True) { $Protection += "AadRole" }
-            if ($_.RestrictedManagementByRMAU -eq $True) { $Protection += "RMAU" }
-            $ProtectionLabel = if ($Protection.Count -gt 0) { "[Protected: $($Protection -join ', ')]" } else { "[UNPROTECTED]" }
-            $Color = if ($Protection.Count -gt 0) { "DarkGreen" } else { "Yellow" }
-            $ObjSources = @($_.Classification.ClassificationSource | Select-Object -Unique | Sort-Object)
-            $ObjSourceLabel = if ($ObjSources.Count -gt 0) { $ObjSources -join ', ' } else { $PrivilegedObjectClassificationSource }
-            Write-Host "    $($_.ObjectDisplayName) ($($_.ObjectId)) | Source(s): $ObjSourceLabel | $ProtectionLabel" -ForegroundColor $Color
+        if ($IncludeObjectDetails) {
+            $_.Group | Sort-Object ObjectDisplayName | ForEach-Object {
+                $Protection = @()
+                if ($_.RestrictedManagementByRAG -eq $True) { $Protection += "RAG" }
+                if ($_.RestrictedManagementByAadRole -eq $True) { $Protection += "AadRole" }
+                if ($_.RestrictedManagementByRMAU -eq $True) { $Protection += "RMAU" }
+                $ProtectionLabel = if ($Protection.Count -gt 0) { "[Protected: $($Protection -join ', ')]" } else { "[UNPROTECTED]" }
+                $Color = if ($Protection.Count -gt 0) { "DarkGreen" } else { "Yellow" }
+                $ObjSources = @($_.Classification.ClassificationSource | Select-Object -Unique | Sort-Object)
+                $ObjSourceLabel = if ($ObjSources.Count -gt 0) { $ObjSources -join ', ' } else { $PrivilegedObjectClassificationSource }
+                Write-Host "    $($_.ObjectDisplayName) ($($_.ObjectId)) | Source(s): $ObjSourceLabel | $ProtectionLabel" -ForegroundColor $Color
+            }
+        } else {
+            $_.Group | Sort-Object ObjectId | ForEach-Object {
+                Write-Host "    $($_.ObjectId)" -ForegroundColor DarkGray
+            }
         }
+    }
+    if (-not $IncludeObjectDetails) {
+        Write-Host "  Descriptive object details omitted. Set ConsoleOutput.IncludeObjectDetails to true to include them." -ForegroundColor DarkGray
     }
     Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
     Write-Host ""
-    #endregion   
+    #endregion
+
+    #region Persist WHY each privileged object was identified/protected (ControlPlaneScopeReasoning.json)
+    # This mirrors the "Identified privileged objects by source" console summary above so it is available for
+    # later auditing instead of only being visible in the console/job log at generation time.
+    $ControlPlaneScopeReasoningFolder = Join-Path -Path $DefaultFolderClassification -ChildPath $TenantNameContext
+    if (-not (Test-Path -Path $ControlPlaneScopeReasoningFolder)) {
+        New-Item -Path $ControlPlaneScopeReasoningFolder -ItemType Directory -Force | Out-Null
+    }
+    $ControlPlaneScopeReasoningFile = Join-Path -Path $ControlPlaneScopeReasoningFolder -ChildPath "ScopeReasoning_ControlPlane.json"
+    $ControlPlaneScopeReasoningPayload = [PSCustomObject]@{
+        PrivilegedObjectClassificationSource = $PrivilegedObjectClassificationSource
+        ClassificationParameterScope         = $ClassificationParameterScope
+        AzureResourceGraphCriteria           = [PSCustomObject]@{
+            SourceEnabled        = [bool]($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "PrivilegedRolesFromAzGraph")
+            HighPrivilegedRoles  = @($AzureHighPrivilegedRoles)
+            HighPrivilegedScopes = @($AzureHighPrivilegedScopes)
+            ScopeMatch           = "Exact assignment scope; child scopes are not included unless listed explicitly."
+            WildcardScopeMatch   = "All assignment scopes"
+        }
+        # ObjectId breaks ties for objects sharing the same ObjectType/ObjectDisplayName (duplicate display names are allowed in Entra ID).
+        PrivilegedObjects                    = @($PrivilegedObjects | Sort-Object ObjectType, ObjectDisplayName, ObjectId | ForEach-Object {
+                [PSCustomObject]@{
+                    ObjectId                      = $_.ObjectId
+                    ObjectDisplayName             = $_.ObjectDisplayName
+                    ObjectType                    = $_.ObjectType
+                    ObjectSubType                 = $_.ObjectSubType
+                    ClassificationSource          = @($_.Classification.ClassificationSource | Select-Object -Unique | Sort-Object)
+                    ClassificationReason          = $_.Classification.ClassificationReason
+                    RestrictedManagementByRAG     = [bool]$_.RestrictedManagementByRAG
+                    RestrictedManagementByAadRole = [bool]$_.RestrictedManagementByAadRole
+                    RestrictedManagementByRMAU    = [bool]$_.RestrictedManagementByRMAU
+                }
+            })
+    }
+    $ControlPlaneScopeReasoningPayload | ConvertTo-Json -Depth 6 | Out-File -FilePath $ControlPlaneScopeReasoningFile -Force
+    Write-Host "  Control Plane scope reasoning file: $ControlPlaneScopeReasoningFile" -ForegroundColor Cyan
+    Write-Host ""
+    #endregion
 
     #region EntraID RBAC Classification Parameter Scope
     if ($ClassificationParameterScope -contains "EntraID") {
@@ -210,31 +422,96 @@ function Update-EntraOpsClassificationControlPlaneScope {
         Write-Host "=========================================================" -ForegroundColor Cyan
         Write-Host " Entra ID RBAC - Scope Parameter Update" -ForegroundColor Cyan
         Write-Host "=========================================================" -ForegroundColor Cyan
-        $EntraIdRoleClassification = Get-Content -Path $EntraIdClassificationParameterFile
+        $EntraIdRoleClassification = Get-Content -Path $EntraIdClassificationParameterFile -Raw
+
+        # Persist WHY each resolved scope (Administrative Unit or directory-level fallback) was added, mirroring
+        # ScopeReasoning_DeviceManagement.json/ScopeReasoning_Azure.json/ScopeReasoning_IdentityGovernance.json -
+        # otherwise the only record of "why is this AU in scope" is transient console output at generation time.
+        $EntraIdScopeReasoning = [System.Collections.Generic.List[psobject]]::new()
+
+        # Build one reasoning entry per unique Administrative Unit id found on a set of privileged objects
+        # (Users/Groups share the same AssignedAdministrativeUnits/ObjectDisplayName shape).
+        function New-EntraIdAuScopeReasoning {
+            param([string]$ScopeCategory, [psobject[]]$ObjectsWithAU)
+            $Entries = [System.Collections.Generic.List[psobject]]::new()
+            $UniqueAUs = @($ObjectsWithAU.AssignedAdministrativeUnits | Where-Object { $null -ne $_.id } | Select-Object -Unique id, displayName)
+            foreach ($AU in $UniqueAUs) {
+                $MatchedObjects = @($ObjectsWithAU | Where-Object { $_.AssignedAdministrativeUnits.id -contains $AU.id })
+                $Names = @($MatchedObjects | Select-Object -First 3 -ExpandProperty ObjectDisplayName)
+                $Reason = "Administrative Unit assigned to $($MatchedObjects.Count) Control Plane object(s): $($Names -join ', ')"
+                if ($MatchedObjects.Count -gt 3) { $Reason += " (+$($MatchedObjects.Count - 3) more)" }
+                $Entries.Add([PSCustomObject]@{
+                        ScopeCategory   = $ScopeCategory
+                        ScopeId         = "/administrativeUnits/$($AU.id)"
+                        ScopeName       = $AU.displayName
+                        Reason          = $Reason
+                        AffectedObjects = @($MatchedObjects | Sort-Object ObjectDisplayName, ObjectId | ForEach-Object {
+                                [PSCustomObject]@{
+                                    id          = "$($_.ObjectId)"
+                                    displayName = "$($_.ObjectDisplayName)"
+                                }
+                            })
+                    }) | Out-Null
+            }
+            return $Entries
+        }
+
+        # Build the reasoning entry for the directory-level ("/") fallback scope, driven by a set of
+        # objects lacking RAG/Entra ID role/RMAU protection.
+        function New-EntraIdDirectoryScopeReasoning {
+            param([string]$ScopeCategory, [psobject[]]$UnprotectedObjects, [string]$ProtectionGap)
+            $Names = @($UnprotectedObjects | Select-Object -First 3 -ExpandProperty ObjectDisplayName)
+            $Reason = "$($UnprotectedObjects.Count) Control Plane object(s) $ProtectionGap require directory-level scope: $($Names -join ', ')"
+            if ($UnprotectedObjects.Count -gt 3) { $Reason += " (+$($UnprotectedObjects.Count - 3) more)" }
+            return [PSCustomObject]@{
+                ScopeCategory   = $ScopeCategory
+                ScopeId         = $DirectoryLevelAssignmentScope
+                ScopeName       = "Directory (root)"
+                Reason          = $Reason
+                AffectedObjects = @($UnprotectedObjects | Sort-Object ObjectDisplayName, ObjectId | ForEach-Object {
+                        [PSCustomObject]@{
+                            id          = "$($_.ObjectId)"
+                            displayName = "$($_.ObjectDisplayName)"
+                        }
+                    })
+            }
+        }
 
         #region Privileged User
         Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
         Write-Host " Privileged Users" -ForegroundColor DarkCyan
         Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
         $PrivilegedUsersAll = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" })
-        $PrivilegedUsersWithoutProtection = @($PrivilegedUsersAll | Where-Object { $_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByAadRole -eq $False -and $_.RestrictedManagementByRMAU -eq $False })
+        # -ne $true rather than -eq $false: when a protection flag could not be resolved it is $null, and
+        # "$null -eq $false" is FALSE - so an object of unknown protection state counted as protected and
+        # was excluded here, suppressing the directory-level ("/") fallback scope that exists to cover
+        # unprotected privileged objects. Unknown must be treated as unprotected (fail safe, wider Tier 0).
+        $PrivilegedUsersWithoutProtection = @($PrivilegedUsersAll | Where-Object { $_.RestrictedManagementByRAG -ne $true -and $_.RestrictedManagementByAadRole -ne $true -and $_.RestrictedManagementByRMAU -ne $true })
 
         Write-Host "  Total users  : $($PrivilegedUsersAll.Count)" -ForegroundColor Gray
         Write-Host "  Unprotected  : $($PrivilegedUsersWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedUsersWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
 
         # Include all Administrative Units because of Privileged Authentication Admin role assignment on (RM)AU level
         $PrivilegedUserWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.AssignedAdministrativeUnits }
-        $ScopeNamePrivilegedUsers = $PrivilegedUserWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+        # @() is required: a pipeline yielding a single scope unwraps to [string], which turns the
+        # "+= $DirectoryLevelAssignmentScope" below into string concatenation instead of an append.
+        $ScopeNamePrivilegedUsers = @($PrivilegedUserWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+        $EntraIdScopeReasoning.AddRange([psobject[]]@(New-EntraIdAuScopeReasoning -ScopeCategory "PrivilegedUsers" -ObjectsWithAU $PrivilegedUserWithAU))
         if ($PrivilegedUsersWithoutProtection.Count -gt 0) {
             Write-Warning "  Control Plane users without protection - directory scope required!"
             $WarningMessages.Add([PSCustomObject]@{ Type = "UnprotectedUsers"; Message = "$($PrivilegedUsersWithoutProtection.Count) Control Plane user(s) without protection - directory scope required" })
             $PrivilegedUsersWithoutProtection | ForEach-Object {
-                Write-Host "    [!] $($_.ObjectDisplayName) ($($_.ObjectId))" -ForegroundColor Yellow
+                if ($IncludeObjectDetails) {
+                    Write-Host "    [!] $($_.ObjectDisplayName) ($($_.ObjectId))" -ForegroundColor Yellow
+                } else {
+                    Write-Host "    [!] $($_.ObjectId)" -ForegroundColor Yellow
+                }
             }
             $ScopeNamePrivilegedUsers += $DirectoryLevelAssignmentScope
+            $EntraIdScopeReasoning.Add((New-EntraIdDirectoryScopeReasoning -ScopeCategory "PrivilegedUsers" -UnprotectedObjects $PrivilegedUsersWithoutProtection -ProtectionGap "without RAG/Entra ID role/RMAU protection")) | Out-Null
         }
 
-        if ($null -ne $ScopeNamePrivilegedUsers) {
+        if (@($ScopeNamePrivilegedUsers).Count -gt 0) {
             $ScopeNamePrivilegedUsers = @($ScopeNamePrivilegedUsers | Sort-Object -Unique)
             Write-Host "  Scope entries added:" -ForegroundColor Gray
             $ScopeNamePrivilegedUsers | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
@@ -256,15 +533,48 @@ function Update-EntraOpsClassificationControlPlaneScope {
         Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
         Write-Host " Privileged Devices" -ForegroundColor DarkCyan
         Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
-        $PrivilegedUsersOwnedDevices = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.OwnedDevices } | Select-Object -ExpandProperty OwnedDevices)
-        $PrivilegedUsersPawDevices = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.AssociatedPawDevice } | Select-Object -ExpandProperty AssociatedPawDevice)
+        Write-Host "  Home tenant for device/RMAU evaluation: $HomeTenantId" -ForegroundColor Gray
+        $PrivilegedDeviceOwners = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" })
+        # Computed once and reused below so the "was a home tenant found" decision for
+        # excluding foreign-tenant owners and for the owner filter stays a single condition.
+        $HasHomeTenantId = -not [string]::IsNullOrWhiteSpace($HomeTenantId)
+        if (-not $HasHomeTenantId) {
+            Write-Warning "  Home tenant ID is unavailable; device owners will not be filtered by tenant."
+            $WarningMessages.Add([PSCustomObject]@{ Type = "MissingHomeTenantId"; Message = "Home tenant ID is unavailable; device owners were not filtered by tenant" })
+            $ForeignTenantDeviceOwners = @()
+        } else {
+            $ForeignTenantDeviceOwners = @($PrivilegedDeviceOwners | Where-Object {
+                    -not [string]::IsNullOrEmpty($_.ObjectTenantId) -and $_.ObjectTenantId -ne $HomeTenantId
+                })
+        }
+        if ($ForeignTenantDeviceOwners.Count -gt 0) {
+            Write-Warning "  Excluded devices for $($ForeignTenantDeviceOwners.Count) privileged user(s) not owned by home tenant $HomeTenantId."
+            $WarningMessages.Add([PSCustomObject]@{ Type = "ForeignTenantDeviceOwner"; Message = "Excluded devices for $($ForeignTenantDeviceOwners.Count) privileged user(s) not owned by home tenant $HomeTenantId" })
+            foreach ($ForeignTenantDeviceOwner in $ForeignTenantDeviceOwners) {
+                $EntraIdScopeReasoning.Add([PSCustomObject]@{
+                        ScopeCategory = "ExcludedCrossTenantDevices"
+                        ScopeId       = $ForeignTenantDeviceOwner.ObjectId
+                        ScopeName     = $ForeignTenantDeviceOwner.ObjectDisplayName
+                        Reason        = "Devices excluded from RMAU scope evaluation because their privileged user owner belongs to tenant $($ForeignTenantDeviceOwner.ObjectTenantId), not home tenant $HomeTenantId"
+                    }) | Out-Null
+            }
+        }
+        if ($HasHomeTenantId) {
+            $PrivilegedDeviceOwners = @($PrivilegedDeviceOwners | Where-Object {
+                [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $HomeTenantId
+            })
+        }
+        $PrivilegedUsersOwnedDevices = @($PrivilegedDeviceOwners | Where-Object { $null -ne $_.OwnedDevices } | Select-Object -ExpandProperty OwnedDevices)
+        $PrivilegedUsersPawDevices = @($PrivilegedDeviceOwners | Where-Object { $null -ne $_.AssociatedPawDevice } | Select-Object -ExpandProperty AssociatedPawDevice)
         $PrivilegedUsersWithDevices = @($PrivilegedUsersOwnedDevices + $PrivilegedUsersPawDevices | Select-Object -Unique)
-        Write-Host "  Devices of privileged users (OwnedDevices + AssociatedPawDevice): $(@($PrivilegedUsersWithDevices).Count)" -ForegroundColor Gray
+        Write-Host "  Devices of tenant-local privileged users (OwnedDevices + AssociatedPawDevice): $(@($PrivilegedUsersWithDevices).Count)" -ForegroundColor Gray
         # Build per-device protection status. Devices not in any AU at all are unprotected but would be
         # invisible to a flat AU list - track HasRMAU per device to catch them.
         $PrivilegedDevicesProtection = @($PrivilegedUsersWithDevices | ForEach-Object {
                 $DeviceId = $_
-                $DeviceAUs = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/devices/$DeviceId/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Where-Object { $null -ne $_.id } | Select-Object id, displayName, isMemberManagementRestricted)
+                # A device with zero administrativeUnit memberships is the common case, not an error -
+                # suppress the noisy 404 warning this endpoint returns for that state.
+                $DeviceAUs = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/devices/$DeviceId/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject -SuppressNotFoundWarning | Where-Object { $null -ne $_.id } | Select-Object id, displayName, isMemberManagementRestricted)
                 [PSCustomObject]@{
                     DeviceId = $DeviceId
                     AUs      = $DeviceAUs
@@ -272,12 +582,30 @@ function Update-EntraOpsClassificationControlPlaneScope {
                 }
             })
         $PrivilegedDevicesWithoutProtection = @($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $False })
-        $ScopeNamePrivilegedDevices = @(
-            # RMAU AUs from RMAU-protected devices
-            ($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $True } | ForEach-Object { $_.AUs } | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
-            # All AUs from unprotected devices (no RMAU)
-            ($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $False } | ForEach-Object { $_.AUs } | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
-        ) | Where-Object { $null -ne $_ }
+        # Outer @() is required: the Where-Object pipeline unwraps a single scope to [string], which turns
+        # the "+= $DirectoryLevelAssignmentScope" below into string concatenation instead of an append.
+        $ScopeNamePrivilegedDevices = @(@(
+                # RMAU AUs from RMAU-protected devices
+                ($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $True } | ForEach-Object { $_.AUs } | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+                # All AUs from unprotected devices (no RMAU)
+                ($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $False } | ForEach-Object { $_.AUs } | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+            ) | Where-Object { $null -ne $_ })
+
+        # Devices carry no ObjectDisplayName (only DeviceId) and their AUs come from a per-device Graph lookup
+        # rather than AssignedAdministrativeUnits, so they get their own reasoning-entry logic instead of
+        # New-EntraIdAuScopeReasoning.
+        foreach ($AU in @($PrivilegedDevicesProtection.AUs | Where-Object { $null -ne $_.id } | Select-Object -Unique id, displayName)) {
+            $MatchedDevices = @($PrivilegedDevicesProtection | Where-Object { $_.AUs.id -contains $AU.id })
+            $Names = @($MatchedDevices | Select-Object -First 3 -ExpandProperty DeviceId)
+            $Reason = "Administrative Unit assigned to $($MatchedDevices.Count) Control Plane device(s): $($Names -join ', ')"
+            if ($MatchedDevices.Count -gt 3) { $Reason += " (+$($MatchedDevices.Count - 3) more)" }
+            $EntraIdScopeReasoning.Add([PSCustomObject]@{
+                    ScopeCategory = "PrivilegedDevices"
+                    ScopeId       = "/administrativeUnits/$($AU.id)"
+                    ScopeName     = $AU.displayName
+                    Reason        = $Reason
+                }) | Out-Null
+        }
 
         Write-Host "  Unprotected  : $($PrivilegedDevicesWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedDevicesWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
         if ($PrivilegedDevicesWithoutProtection.Count -gt 0) {
@@ -287,8 +615,17 @@ function Update-EntraOpsClassificationControlPlaneScope {
                 Write-Host "    [!] Device $($_.DeviceId)" -ForegroundColor Yellow
             }
             $ScopeNamePrivilegedDevices += $DirectoryLevelAssignmentScope
+            $DeviceNames = @($PrivilegedDevicesWithoutProtection | Select-Object -First 3 -ExpandProperty DeviceId)
+            $DeviceReason = "$($PrivilegedDevicesWithoutProtection.Count) Control Plane device(s) without RMAU protection require directory-level scope: $($DeviceNames -join ', ')"
+            if ($PrivilegedDevicesWithoutProtection.Count -gt 3) { $DeviceReason += " (+$($PrivilegedDevicesWithoutProtection.Count - 3) more)" }
+            $EntraIdScopeReasoning.Add([PSCustomObject]@{
+                    ScopeCategory = "PrivilegedDevices"
+                    ScopeId       = $DirectoryLevelAssignmentScope
+                    ScopeName     = "Directory (root)"
+                    Reason        = $DeviceReason
+                }) | Out-Null
         }
-        if ($null -ne $ScopeNamePrivilegedDevices) {
+        if (@($ScopeNamePrivilegedDevices).Count -gt 0) {
             $ScopeNamePrivilegedDevices = @($ScopeNamePrivilegedDevices | Sort-Object -Unique)
             Write-Host "  Scope entries added:" -ForegroundColor Gray
             $ScopeNamePrivilegedDevices | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
@@ -311,28 +648,38 @@ function Update-EntraOpsClassificationControlPlaneScope {
         Write-Host " Privileged Groups" -ForegroundColor DarkCyan
         Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
         $PrivilegedGroupsAll = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" })
-        $PrivilegedGroupsWithoutProtection = @($PrivilegedGroupsAll | Where-Object { $_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByAadRole -eq $False -and $_.RestrictedManagementByRMAU -eq $False })
+        # See the equivalent user filter above: an unresolved ($null) protection flag must count as
+        # unprotected, otherwise the group is silently excluded from the directory-level fallback scope.
+        $PrivilegedGroupsWithoutProtection = @($PrivilegedGroupsAll | Where-Object { $_.RestrictedManagementByRAG -ne $true -and $_.RestrictedManagementByAadRole -ne $true -and $_.RestrictedManagementByRMAU -ne $true })
         $PrivilegedGroupWithRMAU = @($PrivilegedGroupsAll | Where-Object { $_.RestrictedManagementByRMAU -eq $True })
 
         Write-Host "  Total groups : $($PrivilegedGroupsAll.Count)" -ForegroundColor Gray
         Write-Host "  Protected(RMAU): $($PrivilegedGroupWithRMAU.Count)" -ForegroundColor DarkGreen
         Write-Host "  Unprotected  : $($PrivilegedGroupsWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedGroupsWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
 
-        $ScopeNamePrivilegedGroups = @(
-            # RMAU AUs from RMAU-protected groups
-            ($PrivilegedGroupWithRMAU.AssignedAdministrativeUnits | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
-            # All AUs from unprotected groups (no RMAU)
-            ($PrivilegedGroupsWithoutProtection.AssignedAdministrativeUnits | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
-        ) | Where-Object { $null -ne $_ }
+        # Outer @() is required: the Where-Object pipeline unwraps a single scope to [string], which turns
+        # the "+= $DirectoryLevelAssignmentScope" below into string concatenation instead of an append.
+        $ScopeNamePrivilegedGroups = @(@(
+                # RMAU AUs from RMAU-protected groups
+                ($PrivilegedGroupWithRMAU.AssignedAdministrativeUnits | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+                # All AUs from unprotected groups (no RMAU)
+                ($PrivilegedGroupsWithoutProtection.AssignedAdministrativeUnits | Where-Object { $null -ne $_.id } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
+            ) | Where-Object { $null -ne $_ })
+        $EntraIdScopeReasoning.AddRange([psobject[]]@(New-EntraIdAuScopeReasoning -ScopeCategory "PrivilegedGroups" -ObjectsWithAU (@($PrivilegedGroupWithRMAU) + @($PrivilegedGroupsWithoutProtection))))
         if ($PrivilegedGroupsWithoutProtection.Count -gt 0) {
             Write-Warning "  Control Plane groups without RMAU protection - directory scope required!"
             $WarningMessages.Add([PSCustomObject]@{ Type = "UnprotectedGroups"; Message = "$($PrivilegedGroupsWithoutProtection.Count) Control Plane group(s) without RMAU protection - directory scope required" })
             $PrivilegedGroupsWithoutProtection | ForEach-Object {
-                Write-Host "    [!] $($_.ObjectDisplayName) ($($_.ObjectId))" -ForegroundColor Yellow
+                if ($IncludeObjectDetails) {
+                    Write-Host "    [!] $($_.ObjectDisplayName) ($($_.ObjectId))" -ForegroundColor Yellow
+                } else {
+                    Write-Host "    [!] $($_.ObjectId)" -ForegroundColor Yellow
+                }
             }
             $ScopeNamePrivilegedGroups += $DirectoryLevelAssignmentScope
+            $EntraIdScopeReasoning.Add((New-EntraIdDirectoryScopeReasoning -ScopeCategory "PrivilegedGroups" -UnprotectedObjects $PrivilegedGroupsWithoutProtection -ProtectionGap "without RMAU protection")) | Out-Null
         }
-        if ($null -ne $ScopeNamePrivilegedGroups) {
+        if (@($ScopeNamePrivilegedGroups).Count -gt 0) {
             $ScopeNamePrivilegedGroups = @($ScopeNamePrivilegedGroups | Sort-Object -Unique)
             Write-Host "  Scope entries added:" -ForegroundColor Gray
             $ScopeNamePrivilegedGroups | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
@@ -358,10 +705,16 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $PrivilegedApplicationObjects = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "application" })
         Write-Host "  Service Principals : $($PrivilegedServicePrincipals.Count)" -ForegroundColor Gray
         Write-Host "  Application objects: $($PrivilegedApplicationObjects.Count)" -ForegroundColor Gray
+        # Initialized here (not just inside the branch below) so the "@(...).Count -gt 0"
+        # guard further down stays false - not $null, whose @($null).Count is 1 - when no
+        # privileged service principals/applications were found.
+        $ScopeNamePrivilegedServicePrincipals = @()
     
         if ($PrivilegedServicePrincipals.Count -gt 0 -or $PrivilegedApplicationObjects.Count -gt 0) {
             # Get list of object-level role assignment scope which includes Control Plane Service Principals
-            $ScopeNameServicePrincipalObject = $PrivilegedServicePrincipals | ForEach-Object { "/$($_.ObjectId)" }
+            # @() is required: a single service principal would unwrap to [string] and make the
+            # array concatenation building $ScopeNamePrivilegedServicePrincipals a string join instead.
+            $ScopeNameServicePrincipalObject = @($PrivilegedServicePrincipals | ForEach-Object { "/$($_.ObjectId)" })
 
             # Get current tenant ID to identify single-tenant apps
             $CurrentTenantId = (Get-AzContext).Tenant.Id
@@ -374,7 +727,11 @@ function Update-EntraOpsClassificationControlPlaneScope {
                 Write-Host "  Processing $($PrivilegedApplicationObjects.Count) direct application objects from EntraOps..." -ForegroundColor Gray
                 foreach ($AppObj in $PrivilegedApplicationObjects) {
                     $ScopeNameApplicationObject += "/$($AppObj.ObjectId)"
-                    Write-Host "  [+] Direct app object: $($AppObj.ObjectDisplayName) -> /$($AppObj.ObjectId)" -ForegroundColor DarkGreen
+                    if ($IncludeObjectDetails) {
+                        Write-Host "  [+] Direct app object: $($AppObj.ObjectDisplayName) -> /$($AppObj.ObjectId)" -ForegroundColor DarkGreen
+                    } else {
+                        Write-Host "  [+] Direct app object: $($AppObj.ObjectId)" -ForegroundColor DarkGreen
+                    }
                 }
             }
 
@@ -424,7 +781,11 @@ function Update-EntraOpsClassificationControlPlaneScope {
                             foreach ($AppObject in $AppObjectList) {
                                 if ($null -ne $AppObject.id) {
                                     $ScopeNameApplicationObject += "/$($AppObject.id)"
-                                    Write-Host "  [+] App object resolved: $($App.ObjectDisplayName) ($($SpDetails.appId)) -> /$($AppObject.id)" -ForegroundColor DarkGreen
+                                    if ($IncludeObjectDetails) {
+                                        Write-Host "  [+] App object resolved: $($App.ObjectDisplayName) ($($SpDetails.appId)) -> /$($AppObject.id)" -ForegroundColor DarkGreen
+                                    } else {
+                                        Write-Host "  [+] App object resolved: $($AppObject.id)" -ForegroundColor DarkGreen
+                                    }
                                 }
                             }
                         }
@@ -434,19 +795,48 @@ function Update-EntraOpsClassificationControlPlaneScope {
                     }
                 } else {
                     if ($null -ne $SpDetails) {
-                        Write-Host "  [~] Skipped: $($App.ObjectDisplayName) - Type: $($SpDetails.servicePrincipalType), Owner: $(if ($SpDetails.appOwnerOrganizationId -ne $CurrentTenantId) { 'External tenant' } else { $SpDetails.appOwnerOrganizationId })" -ForegroundColor DarkGray
+                        if ($IncludeObjectDetails) {
+                            Write-Host "  [~] Skipped: $($App.ObjectDisplayName) - Type: $($SpDetails.servicePrincipalType), Owner: $(if ($SpDetails.appOwnerOrganizationId -ne $CurrentTenantId) { 'External tenant' } else { $SpDetails.appOwnerOrganizationId })" -ForegroundColor DarkGray
+                        } else {
+                            Write-Host "  [~] Skipped object: $($App.ObjectId)" -ForegroundColor DarkGray
+                        }
                     }
                 }
             }
 
-            $PrivilegedServicePrincipalWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" -and $null -ne $_.AssignedAdministrativeUnits.id }
-            $PrivilegedServicePrincipalWithAU = $PrivilegedServicePrincipalWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+            $PrivilegedServicePrincipalObjectsWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" -and $null -ne $_.AssignedAdministrativeUnits.id }
+            $PrivilegedServicePrincipalWithAU = @($PrivilegedServicePrincipalObjectsWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" })
 
             # Always add also directory level assignment scope because of missing protection of service principal by RAG, AAD Role or RMAU assignment
             $ScopeNamePrivilegedServicePrincipals = $ScopeNameServicePrincipalObject + $ScopeNameApplicationObject + $DirectoryLevelAssignmentScope + $PrivilegedServicePrincipalWithAU
 
             Write-Host "  Scope entries added:" -ForegroundColor Gray
             $ScopeNamePrivilegedServicePrincipals | Sort-Object -Unique | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
+
+            # Object-level scopes (one entry per SP/app object, already unambiguous - no aggregation needed)
+            foreach ($SpEntry in $PrivilegedServicePrincipals) {
+                $EntraIdScopeReasoning.Add([PSCustomObject]@{
+                        ScopeCategory = "PrivilegedServicePrincipals"
+                        ScopeId       = "/$($SpEntry.ObjectId)"
+                        ScopeName     = $SpEntry.ObjectDisplayName
+                        Reason        = "Object-level role assignment scope for Control Plane service principal '$($SpEntry.ObjectDisplayName)'"
+                    }) | Out-Null
+            }
+            foreach ($AppScope in $ScopeNameApplicationObject) {
+                $EntraIdScopeReasoning.Add([PSCustomObject]@{
+                        ScopeCategory = "PrivilegedServicePrincipals"
+                        ScopeId       = $AppScope
+                        ScopeName     = $null
+                        Reason        = "Object-level role assignment scope for the application object of a Control Plane single-tenant app/direct application object"
+                    }) | Out-Null
+            }
+            $EntraIdScopeReasoning.Add([PSCustomObject]@{
+                    ScopeCategory = "PrivilegedServicePrincipals"
+                    ScopeId       = $DirectoryLevelAssignmentScope
+                    ScopeName     = "Directory (root)"
+                    Reason        = "Always included: service principals are not protected by RAG/Entra ID role/RMAU assignment"
+                }) | Out-Null
+            $EntraIdScopeReasoning.AddRange([psobject[]]@(New-EntraIdAuScopeReasoning -ScopeCategory "PrivilegedServicePrincipals" -ObjectsWithAU $PrivilegedServicePrincipalObjectsWithAU))
         } else {
             Write-Warning "  No privileged applications found - defaulting to directory scope '/'"
             $WarningMessages.Add([PSCustomObject]@{ Type = "EmptyScope"; Message = "No privileged applications found - ScopeNamePrivilegedServicePrincipals defaulting to directory scope '/'" })
@@ -454,7 +844,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
             $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedServicePrincipals'; Entries = 1; IncludesDirectory = $true; Status = 'Default(/)' })
         }
 
-        if ($null -ne $ScopeNamePrivilegedServicePrincipals) {
+        if (@($ScopeNamePrivilegedServicePrincipals).Count -gt 0) {
             $ScopeNamePrivilegedServicePrincipals = @($ScopeNamePrivilegedServicePrincipals | Sort-Object -Unique)
             $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipals | ConvertTo-Json
             $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipalsJSON.Replace('[', '').Replace(']', '')
@@ -465,8 +855,25 @@ function Update-EntraOpsClassificationControlPlaneScope {
         Write-Host ""
         #endregion
 
-        $EntraIdRoleClassification = $EntraIdRoleClassification | ConvertFrom-Json -Depth 10 | ConvertTo-Json -Depth 10 | Out-File -FilePath $EntraIdCustomizedClassificationFile -Force
+        # Apply role action overwrites (down-/upgrade of individual role actions) to the generated classification
+        $EntraIdRoleClassificationDefinition = @($EntraIdRoleClassification | ConvertFrom-Json -Depth 10)
+        $EntraIdRoleActionOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "EntraID").RoleActionOverwrites)
+        if ($EntraIdRoleActionOverwrites.Count -gt 0) {
+            Write-Host "  Applying $($EntraIdRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+            $EntraIdRoleClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $EntraIdRoleClassificationDefinition -RoleActionOverwrites $EntraIdRoleActionOverwrites
+        }
+        $EntraIdRoleClassificationDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $EntraIdCustomizedClassificationFile -Force
         Write-Host "  Output file: $EntraIdCustomizedClassificationFile" -ForegroundColor Cyan
+
+        #region Persist WHY each resolved EntraID scope (Administrative Unit or directory-level fallback) got its tier
+        # Mirrors ScopeReasoning_DeviceManagement.json/ScopeReasoning_Azure.json/ScopeReasoning_IdentityGovernance.json.
+        $EntraIdScopeReasoningFile = Join-Path (Split-Path $EntraIdCustomizedClassificationFile -Parent) "ScopeReasoning_EntraID.json"
+        $EntraIdScopeReasoningPayload = [PSCustomObject]@{
+            ScopeDetails = @($EntraIdScopeReasoning | Sort-Object ScopeCategory, ScopeName, ScopeId)
+        }
+        $EntraIdScopeReasoningPayload | ConvertTo-Json -Depth 5 | Out-File -FilePath $EntraIdScopeReasoningFile -Force
+        Write-Host "  Scope reasoning file: $EntraIdScopeReasoningFile" -ForegroundColor Cyan
+        #endregion
 
     } # end if EntraID
     #endregion
@@ -478,7 +885,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         Write-Host " DeviceManagement (Intune) RBAC - Scope Parameter Update" -ForegroundColor Cyan
         Write-Host "=========================================================" -ForegroundColor Cyan
 
-        $DeviceMgmtRoleClassification = Get-Content -Path $DeviceMgmtClassificationParameterFile
+        $DeviceMgmtRoleClassification = Get-Content -Path $DeviceMgmtClassificationParameterFile -Raw
 
         #region Collect privileged devices from Control Plane and Management Plane
         Write-Host ""
@@ -489,7 +896,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         # Collect all ControlPlane (Tier 0) and ManagementPlane (Tier 1) objects from EntraOps data
         $EntraOpsAllPrivilegedForDeviceMgmt = foreach ($Scope in $EntraOpsScopes) {
             try {
-                Get-Content -Path "$EntraOpsEamFolder\$($Scope)\$($Scope).json" -ErrorAction Stop | ConvertFrom-Json -Depth 10
+                Get-Content -Path (Join-Path -Path $EntraOpsEamFolder -ChildPath $Scope -AdditionalChildPath "$($Scope).json") -ErrorAction Stop | ConvertFrom-Json -Depth 10
             } catch {
                 Write-Verbose "No data for ${Scope}: $_"
             }
@@ -563,7 +970,9 @@ function Update-EntraOpsClassificationControlPlaneScope {
             )
             $Groups = @()
             try {
-                $MemberOf = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/$ObjectType/$ObjectId/transitiveMemberOf/microsoft.graph.group?`$select=id,displayName" -OutputType PSObject
+                # A device/user with zero group memberships is the common case, not an error -
+                # suppress the noisy 404 warning this endpoint returns for that state.
+                $MemberOf = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/$ObjectType/$ObjectId/transitiveMemberOf/microsoft.graph.group?`$select=id,displayName" -OutputType PSObject -SuppressNotFoundWarning
                 if ($null -ne $MemberOf) {
                     $Groups = @($MemberOf | Where-Object { $null -ne $_.id } | Select-Object id, displayName)
                 }
@@ -759,7 +1168,11 @@ function Update-EntraOpsClassificationControlPlaneScope {
         Write-Host "  Tier 0 (ControlPlane) groups with scope tag assignments:" -ForegroundColor White
         if ($Tier0FilteredGroupDetails.Count -gt 0) {
             $Tier0FilteredGroupDetails | Sort-Object GroupName | ForEach-Object {
-                Write-Host "    $($_.GroupName) ($($_.GroupId)) [EAMTierLevelName: $($_.EAMTierLevelName)] -> ScopeTag(s): $($_.ScopeTagNames)" -ForegroundColor DarkGreen
+                if ($IncludeObjectDetails) {
+                    Write-Host "    $($_.GroupName) ($($_.GroupId)) [EAMTierLevelName: $($_.EAMTierLevelName)] -> ScopeTag(s): $($_.ScopeTagNames)" -ForegroundColor DarkGreen
+                } else {
+                    Write-Host "    $($_.GroupId)" -ForegroundColor DarkGreen
+                }
             }
         } else {
             Write-Host "    (none - no Tier 0 groups are assigned to any Intune scope tags)" -ForegroundColor Yellow
@@ -777,7 +1190,11 @@ function Update-EntraOpsClassificationControlPlaneScope {
         Write-Host "  Tier 1 (ManagementPlane) groups with scope tag assignments:" -ForegroundColor White
         if ($Tier1FilteredGroupDetails.Count -gt 0) {
             $Tier1FilteredGroupDetails | Sort-Object GroupName | ForEach-Object {
-                Write-Host "    $($_.GroupName) ($($_.GroupId)) [EAMTierLevelName: $($_.EAMTierLevelName)] -> ScopeTag(s): $($_.ScopeTagNames)" -ForegroundColor DarkGreen
+                if ($IncludeObjectDetails) {
+                    Write-Host "    $($_.GroupName) ($($_.GroupId)) [EAMTierLevelName: $($_.EAMTierLevelName)] -> ScopeTag(s): $($_.ScopeTagNames)" -ForegroundColor DarkGreen
+                } else {
+                    Write-Host "    $($_.GroupId)" -ForegroundColor DarkGreen
+                }
             }
         } else {
             Write-Host "    (none - no Tier 1 groups are assigned to any Intune scope tags)" -ForegroundColor Yellow
@@ -835,7 +1252,14 @@ function Update-EntraOpsClassificationControlPlaneScope {
         # Tier2EnterpriseDeviceScopeTagId is no longer needed - ManagementPlane uses "/*" wildcard
         # with ExcludedRoleAssignmentScopeName to cover all scopes not in Tier 0/1
 
-        $DeviceMgmtRoleClassification = $DeviceMgmtRoleClassification | ConvertFrom-Json -Depth 10 | ConvertTo-Json -Depth 10 | Out-File -FilePath $DeviceMgmtCustomizedClassificationFile -Force
+        # Apply role action overwrites (down-/upgrade of individual role actions) to the generated classification
+        $DeviceMgmtRoleClassificationDefinition = @($DeviceMgmtRoleClassification | ConvertFrom-Json -Depth 10)
+        $DeviceMgmtRoleActionOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "DeviceManagement").RoleActionOverwrites)
+        if ($DeviceMgmtRoleActionOverwrites.Count -gt 0) {
+            Write-Host "  Applying $($DeviceMgmtRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+            $DeviceMgmtRoleClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $DeviceMgmtRoleClassificationDefinition -RoleActionOverwrites $DeviceMgmtRoleActionOverwrites
+        }
+        $DeviceMgmtRoleClassificationDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $DeviceMgmtCustomizedClassificationFile -Force
         Write-Host "  Output file: $DeviceMgmtCustomizedClassificationFile" -ForegroundColor Cyan
         #endregion
 
@@ -866,7 +1290,11 @@ function Update-EntraOpsClassificationControlPlaneScope {
             $AllTierGroupSummary | Where-Object { $null -ne $_ } | Group-Object GroupId | Sort-Object { ($_.Group | Select-Object -First 1).EAMTierLevelName }, { ($_.Group | Select-Object -First 1).GroupName } | ForEach-Object {
                 $EamLabels = ($_.Group | Select-Object -Unique EAMTierLevelName, ObjectType | ForEach-Object { "$($_.EAMTierLevelName) ($($_.ObjectType))" }) -join ', '
                 $GroupEntry = $_.Group[0]
-                Write-Host "    $($GroupEntry.GroupName) ($($GroupEntry.GroupId)) [EAMTierLevelName: $EamLabels]" -ForegroundColor DarkGreen
+                if ($IncludeObjectDetails) {
+                    Write-Host "    $($GroupEntry.GroupName) ($($GroupEntry.GroupId)) [EAMTierLevelName: $EamLabels]" -ForegroundColor DarkGreen
+                } else {
+                    Write-Host "    $($GroupEntry.GroupId)" -ForegroundColor DarkGreen
+                }
             }
         } else {
             Write-Host "    (none)" -ForegroundColor DarkGray
@@ -997,29 +1425,35 @@ function Update-EntraOpsClassificationControlPlaneScope {
             }
         }
 
-        # Build allClassifiedDevices flat list (sorted by id for stable output)
-        $AllClassifiedDevices = @($AllClassifiedDeviceIds | ForEach-Object {
+        # Build allClassifiedDevices flat list (sorted by id for deterministic output - see note below)
+        $AllClassifiedDevices = @($AllClassifiedDeviceIds | Sort-Object | ForEach-Object {
                 [PSCustomObject]@{
                     id          = $_
                     displayName = $DeviceNameCache[$_] ?? $_
                 }
-            } | Sort-Object id)
+            })
 
-        # Save to JSON alongside the classification file
-        $DeviceMembersOutputFile = Join-Path (Split-Path $DeviceMgmtCustomizedClassificationFile -Parent) "DeviceManagement_ScopeGroupDeviceMembers.json"
-
-        # Build sorted groupDeviceMembers (group IDs and deviceMembers both sorted by id) for stable JSON output
-        $SortedGroupDeviceMembers = [ordered]@{}
+        # Serialize groupDeviceMembers with a stable (sorted) key/member order. PowerShell Hashtable
+        # enumeration order for string keys is randomized per process (.NET string-hash-randomization
+        # security hardening), so iterating $GroupDeviceMembers (or the $Tier0DeviceGroups/
+        # $Tier1DeviceGroups hashtables used to build it) directly would reorder the JSON output on
+        # every run even when the underlying group/device membership is unchanged - producing a
+        # spurious diff (and an unnecessary commit) in the Pull-EntraOpsPrivilegedEAM workflow every
+        # time it runs. Sort explicitly here so the output is stable across runs when the actual data
+        # is unchanged.
+        $OrderedGroupDeviceMembers = [ordered]@{}
         foreach ($grpId in ($GroupDeviceMembers.Keys | Sort-Object)) {
-            $grpData = $GroupDeviceMembers[$grpId]
-            $SortedGroupDeviceMembers[$grpId] = [PSCustomObject]@{
-                displayName   = $grpData.displayName
-                deviceMembers = @($grpData.deviceMembers | Sort-Object id)
+            $GroupEntry = $GroupDeviceMembers[$grpId]
+            $OrderedGroupDeviceMembers[$grpId] = [PSCustomObject]@{
+                displayName   = $GroupEntry.displayName
+                deviceMembers = @($GroupEntry.deviceMembers | Sort-Object id)
             }
         }
 
+        # Save to JSON alongside the classification file
+        $DeviceMembersOutputFile = Join-Path (Split-Path $DeviceMgmtCustomizedClassificationFile -Parent) "DeviceManagement_ScopeGroupDeviceMembers.json"
         $DeviceMembersPayload = [PSCustomObject]@{
-            groupDeviceMembers   = $SortedGroupDeviceMembers
+            groupDeviceMembers   = $OrderedGroupDeviceMembers
             allClassifiedDevices = $AllClassifiedDevices
         }
         $DeviceMembersPayload | ConvertTo-Json -Depth 5 | Out-File -FilePath $DeviceMembersOutputFile -Force
@@ -1028,7 +1462,604 @@ function Update-EntraOpsClassificationControlPlaneScope {
         Write-Host ""
         #endregion
 
+        #region Persist WHY each group is Tier0/Tier1 and whether it matched an Intune scope tag
+        # Mirrors the "Groups in scope" / "groups with scope tag assignments" console summaries above, so this
+        # is available for later auditing instead of only being visible in the console/job log at generation time.
+        $ScopeTagLookup = @{}
+        foreach ($Detail in (@($Tier0FilteredGroupDetails) + @($Tier1FilteredGroupDetails))) {
+            if ($null -eq $Detail) { continue }
+            $ScopeTagLookup[$Detail.GroupId] = $Detail.ScopeTagNames
+        }
+        # GroupId breaks ties for groups sharing the same EAMTierLevelName/GroupName (duplicate group names are allowed in Entra ID).
+        $DeviceMgmtGroupReasoning = @($AllTierGroupSummary | Where-Object { $null -ne $_ } | Group-Object GroupId | Sort-Object { ($_.Group | Select-Object -First 1).EAMTierLevelName }, { ($_.Group | Select-Object -First 1).GroupName }, Name | ForEach-Object {
+                $GroupEntry = $_.Group[0]
+                [PSCustomObject]@{
+                    GroupId                  = $GroupEntry.GroupId
+                    GroupName                = $GroupEntry.GroupName
+                    EAMTierLevelName         = @($_.Group | Select-Object -Unique EAMTierLevelName, ObjectType | ForEach-Object { "$($_.EAMTierLevelName) ($($_.ObjectType))" })
+                    IncludedInScopeTagFilter = $ScopeTagLookup.ContainsKey($GroupEntry.GroupId)
+                    MatchedIntuneScopeTags   = if ($ScopeTagLookup.ContainsKey($GroupEntry.GroupId)) { $ScopeTagLookup[$GroupEntry.GroupId] } else { $null }
+                }
+            })
+        $DeviceMgmtGroupReasoningFile = Join-Path (Split-Path $DeviceMgmtCustomizedClassificationFile -Parent) "ScopeReasoning_DeviceManagement.json"
+        $DeviceMgmtGroupReasoningPayload = [PSCustomObject]@{
+            Groups = $DeviceMgmtGroupReasoning
+        }
+        $DeviceMgmtGroupReasoningPayload | ConvertTo-Json -Depth 5 | Out-File -FilePath $DeviceMgmtGroupReasoningFile -Force
+        Write-Host "  Group scope reasoning file: $DeviceMgmtGroupReasoningFile" -ForegroundColor Cyan
+        Write-Host ""
+        #endregion
+
     } # end if DeviceManagement
+    #endregion
+
+    #region Template-based RBAC systems without scope placeholders (ResourceApps)
+    # These RBAC systems have no *.Param.json parameter files. A tenant-specific classification file is only
+    # generated from the shipped template when overwrites for the RBAC system exist in the tenant-specific
+    # classification folder. Without overwrites, the classification cmdlets keep using the shipped template via
+    # their default path resolution.
+    # Uses the shared EAMTierLevelName/TierLevelDefinition[] schema (same as Azure/Defender/DeviceManagement/
+    # AadResources - ResourceApps entries additionally carry ResourceAppId/ResourceScope), handled by
+    # Invoke-EntraOpsClassificationActionOverwrite. ResourceApps (API permissions) is customized via the
+    # schema-aligned Classification_ApiPermissionOverwrites.json (matches Classification_ApiPermissions.json's own
+    # PermissionValue/PermissionType/TargetAppId/Category shape instead of the RoleDefinitionActions/scope-pattern
+    # shape). IdentityGovernance moved to its own scope parameterization region below (per-catalog/access package
+    # tier scoping), with a template-only fallback when Classification_IdentityGovernance.Param.json is missing.
+    $TemplateOnlyParameterScopes = @(
+        [PSCustomObject]@{ RbacSystem = 'ResourceApps'; TemplateFile = $ResourceAppsClassificationTemplateFile; OutputFile = $ResourceAppsCustomizedClassificationFile; OverwriteProperty = 'ApiPermissionOverwrites' }
+    )
+    foreach ($TemplateParameterScope in $TemplateOnlyParameterScopes) {
+        if ($ClassificationParameterScope -notcontains $TemplateParameterScope.RbacSystem) { continue }
+        $TemplateOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem $TemplateParameterScope.RbacSystem).($TemplateParameterScope.OverwriteProperty))
+        if ($TemplateOverwrites.Count -eq 0) {
+            Write-Verbose "No overwrites for $($TemplateParameterScope.RbacSystem) - tenant-specific classification file will not be generated."
+            continue
+        }
+        Write-Host ""
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        Write-Host " $($TemplateParameterScope.RbacSystem) RBAC - Classification Overwrite Update" -ForegroundColor Cyan
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        if (-not (Test-Path -Path $TemplateParameterScope.TemplateFile)) {
+            Write-Warning "  Classification template file not found: $($TemplateParameterScope.TemplateFile)"
+            $WarningMessages.Add([PSCustomObject]@{ Type = "MissingTemplateFile"; Message = "Classification template file for $($TemplateParameterScope.RbacSystem) not found: $($TemplateParameterScope.TemplateFile)" })
+            continue
+        }
+        $TemplateClassificationDefinition = @(Get-Content -Path $TemplateParameterScope.TemplateFile -Raw | ConvertFrom-Json -Depth 10)
+        Write-Host "  Applying $($TemplateOverwrites.Count) classification overwrite(s)..." -ForegroundColor Yellow
+        $TemplateClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $TemplateClassificationDefinition -RoleActionOverwrites $TemplateOverwrites
+        $TemplateClassificationDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $TemplateParameterScope.OutputFile -Force
+        Write-Host "  Output file: $($TemplateParameterScope.OutputFile)" -ForegroundColor Cyan
+    }
+    #endregion
+
+    #region Shared Azure Resource/Subscription Scope (reused by Defender, Azure and IdentityGovernance RBAC parameterization)
+    # Computed once so that Defender, Azure and IdentityGovernance RBAC parameterization below reuse the same
+    # Exposure Management and Azure Resource Graph managed-identity discovery, instead of issuing duplicate queries.
+    # IdentityGovernance needs the Tier0/Tier1 resource scope buckets to classify Azure resources (subscriptions,
+    # resource groups, ...) that have been onboarded to access package catalogs.
+    $SharedAzureResourceScope = $null
+    if ($ClassificationParameterScope -contains "Defender" -or $ClassificationParameterScope -contains "Azure" -or $ClassificationParameterScope -contains "IdentityGovernance") {
+        Write-Host ""
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        Write-Host " Resolving Shared Azure Resource/Subscription Scope" -ForegroundColor Cyan
+        Write-Host " (reused by Defender and Azure RBAC parameterization)" -ForegroundColor Cyan
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages
+        Write-Host "  Tier 0 (ControlPlane) resources    : $($SharedAzureResourceScope.Tier0ResourceScope.Count) scope path(s)" -ForegroundColor Gray
+        Write-Host "  Tier 1 (ManagementPlane) resources : $($SharedAzureResourceScope.Tier1ResourceScope.Count) scope path(s)" -ForegroundColor Gray
+        Write-Host "  All subscriptions                  : $($SharedAzureResourceScope.AllSubscriptionScope.Count)" -ForegroundColor Gray
+        Write-Host ""
+    }
+    #endregion
+
+    #region IdentityGovernance RBAC Classification Parameter Scope
+    if ($ClassificationParameterScope -contains "IdentityGovernance") {
+        Write-Host ""
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        Write-Host " Identity Governance RBAC - Scope Parameter Update" -ForegroundColor Cyan
+        Write-Host "=========================================================" -ForegroundColor Cyan
+
+        if (-not (Test-Path -Path $IdGovClassificationParameterFile)) {
+            # Fallback to the previous template-only behavior: a tenant-specific classification file is only
+            # generated from the shipped template when role action overwrites exist.
+            Write-Warning "  Identity Governance classification parameter file not found: $IdGovClassificationParameterFile - falling back to template-only overwrite handling (no per-catalog scope tiering)."
+            $WarningMessages.Add([PSCustomObject]@{ Type = "MissingTemplateFile"; Message = "Identity Governance classification parameter file not found: $IdGovClassificationParameterFile - fell back to template-only overwrite handling" })
+            $IdGovTemplateOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "IdentityGovernance").RoleActionOverwrites)
+            if ($IdGovTemplateOverwrites.Count -gt 0 -and (Test-Path -Path $IdGovClassificationTemplateFile)) {
+                $IdGovTemplateDefinition = @(Get-Content -Path $IdGovClassificationTemplateFile -Raw | ConvertFrom-Json -Depth 10)
+                Write-Host "  Applying $($IdGovTemplateOverwrites.Count) classification overwrite(s)..." -ForegroundColor Yellow
+                $IdGovTemplateDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $IdGovTemplateDefinition -RoleActionOverwrites $IdGovTemplateOverwrites
+                $IdGovTemplateDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $IdGovCustomizedClassificationFile -Force
+                Write-Host "  Output file: $IdGovCustomizedClassificationFile" -ForegroundColor Cyan
+            }
+        } else {
+            $IdGovRoleClassification = Get-Content -Path $IdGovClassificationParameterFile -Raw
+
+            # Reuse the shared Azure resource/subscription scope resolved earlier (needed to classify Azure
+            # resources onboarded to catalogs); resolve it lazily if the shared block did not run.
+            if ($null -eq $SharedAzureResourceScope) {
+                $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages
+            }
+
+            Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+            Write-Host " Classifying Access Package Catalogs and Access Packages" -ForegroundColor DarkCyan
+            Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+            Write-Host "  Each catalog/access package scope is tiered by the most privileged resource assigned to it" -ForegroundColor Gray
+            Write-Host "  (groups by their EntraOps classification, directory roles by EntraID/default classification," -ForegroundColor Gray
+            Write-Host "  API permissions from access packages, Azure resources by Tier0/Tier1 resource scope)." -ForegroundColor Gray
+            Write-Host "  Unclassifiable scopes stay Tier0 (ControlPlane) - conservative default." -ForegroundColor Gray
+
+            $IdGovScopeClassifications = @(Get-EntraOpsIdGovScopeClassification -EntraOpsEamFolder $EntraOpsEamFolder -FolderClassification $DefaultFolderClassification -AzureResourceTierScope $SharedAzureResourceScope -WarningMessages $WarningMessages)
+
+            $Tier0IdGovScope = @($IdGovScopeClassifications | Where-Object { $_.ResultingScope -eq "Tier0" } | Select-Object -ExpandProperty ScopeId | Sort-Object -Unique)
+            $Tier1IdGovScope = @($IdGovScopeClassifications | Where-Object { $_.ResultingScope -eq "Tier1" } | Select-Object -ExpandProperty ScopeId | Sort-Object -Unique)
+            $Tier2IdGovScope = @($IdGovScopeClassifications | Where-Object { $_.ResultingScope -eq "Tier2" } | Select-Object -ExpandProperty ScopeId | Sort-Object -Unique)
+            # ControlPlane keeps matching every catalog/access package by wildcard (conservative default for
+            # unknown/new scopes between classification runs) - only scopes affirmatively classified as Tier1 or
+            # Tier2 are excluded from it and served by their own tier entries instead.
+            $Tier0ExcludedIdGovScope = @($Tier1IdGovScope + $Tier2IdGovScope | Sort-Object -Unique)
+
+            Write-Host ""
+            Write-Host "  Tier0 (ControlPlane) scopes     : $($Tier0IdGovScope.Count) (matched by wildcard, no exclusion)" -ForegroundColor Gray
+            Write-Host "  Tier1 (ManagementPlane) scopes  : $($Tier1IdGovScope.Count)" -ForegroundColor Gray
+            Write-Host "  Tier2 (UserAccess) scopes       : $($Tier2IdGovScope.Count)" -ForegroundColor Gray
+
+            #region Replace placeholders in IdentityGovernance classification parameter file
+            $Tier0ExcludedIdGovScopeJSON = ($Tier0ExcludedIdGovScope | ForEach-Object { "`"$_`"" }) -join ", "
+            $Tier1IdGovScopeJSON = ($Tier1IdGovScope | ForEach-Object { "`"$_`"" }) -join ", "
+            $Tier2IdGovScopeJSON = ($Tier2IdGovScope | ForEach-Object { "`"$_`"" }) -join ", "
+            $IdGovRoleClassification = $IdGovRoleClassification.replace('<Tier0ExcludedIdGovScope>', $Tier0ExcludedIdGovScopeJSON)
+            $IdGovRoleClassification = $IdGovRoleClassification.replace('<Tier1IncludedIdGovScope>', $Tier1IdGovScopeJSON)
+            $IdGovRoleClassification = $IdGovRoleClassification.replace('<Tier2IncludedIdGovScope>', $Tier2IdGovScopeJSON)
+            $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'IdGov:Tier0ExcludedIdGovScope'; Entries = $Tier0ExcludedIdGovScope.Count; IncludesDirectory = $false; Status = 'Updated' })
+            $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'IdGov:Tier1IncludedIdGovScope'; Entries = $Tier1IdGovScope.Count; IncludesDirectory = $false; Status = 'Updated' })
+            $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'IdGov:Tier2IncludedIdGovScope'; Entries = $Tier2IdGovScope.Count; IncludesDirectory = $false; Status = 'Updated' })
+
+            $IdGovClassificationDefinition = @($IdGovRoleClassification | ConvertFrom-Json -Depth 10)
+
+            # Apply role action overwrites (down-/upgrade of individual role actions) to the generated
+            # classification. Applied AFTER placeholder substitution, so overwrites match against the actual
+            # resolved catalog/access package scope IDs, not the raw placeholder tokens. The same placeholder
+            # tokens are also resolved inside overwrite scope entries (mirrors the Azure parameterization).
+            $IdGovRoleActionOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "IdentityGovernance").RoleActionOverwrites)
+            if ($IdGovRoleActionOverwrites.Count -gt 0) {
+                foreach ($Overwrite in $IdGovRoleActionOverwrites) {
+                    $ResolvedScopes = [System.Collections.Generic.List[string]]::new()
+                    foreach ($ScopeEntry in @($Overwrite.RoleAssignmentScopeName)) {
+                        switch ($ScopeEntry) {
+                            '<Tier0ExcludedIdGovScope>' { foreach ($Path in $Tier0ExcludedIdGovScope) { $ResolvedScopes.Add($Path) | Out-Null } }
+                            '<Tier1IncludedIdGovScope>' { foreach ($Path in $Tier1IdGovScope) { $ResolvedScopes.Add($Path) | Out-Null } }
+                            '<Tier2IncludedIdGovScope>' { foreach ($Path in $Tier2IdGovScope) { $ResolvedScopes.Add($Path) | Out-Null } }
+                            default { $ResolvedScopes.Add($ScopeEntry) | Out-Null }
+                        }
+                    }
+                    $Overwrite.RoleAssignmentScopeName = @($ResolvedScopes | Select-Object -Unique)
+                }
+                Write-Host "  Applying $($IdGovRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+                $IdGovClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $IdGovClassificationDefinition -RoleActionOverwrites $IdGovRoleActionOverwrites
+            }
+
+            # Ensure output directory exists
+            $IdGovOutputDir = Split-Path $IdGovCustomizedClassificationFile -Parent
+            if (-not (Test-Path -Path $IdGovOutputDir)) {
+                New-Item -Path $IdGovOutputDir -ItemType Directory -Force | Out-Null
+            }
+            $IdGovClassificationDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $IdGovCustomizedClassificationFile -Force
+            Write-Host "  Output file: $IdGovCustomizedClassificationFile" -ForegroundColor Cyan
+
+            # Persist WHY each catalog/access package scope was classified as Control, Management or User Access
+            # (ScopeName/ScopeId/Source/EAMTier/ResultingScope/Reason - same structure as ScopeReasoning_Azure.json,
+            # with ScopeName/ScopeId instead of ResourceName/ResourceId), so this is available for later auditing
+            # instead of only being visible in the console/job log at generation time.
+            $IdGovScopeReasoningFile = Join-Path -Path $IdGovOutputDir -ChildPath "ScopeReasoning_IdentityGovernance.json"
+            $IdGovScopeReasoningPayload = [PSCustomObject]@{
+                Tier0Scope   = $Tier0IdGovScope
+                Tier1Scope   = $Tier1IdGovScope
+                Tier2Scope   = $Tier2IdGovScope
+                # ScopeId breaks ties for scopes sharing the same ScopeType/ScopeName (e.g. two access packages with an identical name in different catalogs).
+                ScopeDetails = @($IdGovScopeClassifications | Sort-Object ScopeType, ScopeName, ScopeId | ForEach-Object {
+                        [PSCustomObject]@{
+                            ScopeName           = $_.ScopeName
+                            ScopeId             = $_.ScopeId
+                            ScopeType           = $_.ScopeType
+                            CatalogDisplayName  = $_.CatalogDisplayName
+                            Source              = $_.Source
+                            EAMTier             = $_.EAMTier
+                            ResultingScope      = $_.ResultingScope
+                            Reason              = $_.Reason
+                            ClassifiedResources = @($_.ClassifiedResources)
+                        }
+                    })
+            }
+            $IdGovScopeReasoningPayload | ConvertTo-Json -Depth 6 | Out-File -FilePath $IdGovScopeReasoningFile -Force
+            Write-Host "  Scope reasoning file: $IdGovScopeReasoningFile" -ForegroundColor Cyan
+            #endregion
+
+            #region IdentityGovernance RBAC Classification Summary
+            Write-Host ""
+            Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+            Write-Host " Identity Governance RBAC Classification Summary" -ForegroundColor DarkCyan
+            Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+            if ($IdGovScopeClassifications.Count -gt 0) {
+                $IdGovScopeClassifications | Group-Object ScopeType | Sort-Object Name | ForEach-Object {
+                    Write-Host "  [$($_.Name)] ($($_.Count) scope(s))" -ForegroundColor DarkCyan
+                    $_.Group | Sort-Object ResultingScope, ScopeName | ForEach-Object {
+                        if ($IncludeObjectDetails) {
+                            $Color = switch ($_.ResultingScope) { "Tier0" { 'DarkGreen' } "Tier1" { 'Yellow' } default { 'Gray' } }
+                            Write-Host "    $($_.ScopeName) [EAM: $($_.EAMTier) -> $($_.ResultingScope) scope]" -ForegroundColor $Color
+                            Write-Host "      Reason : $($_.Reason)" -ForegroundColor DarkGray
+                            Write-Host "      ScopeId: $($_.ScopeId)" -ForegroundColor DarkGray
+                        } else {
+                            Write-Host "    $($_.ScopeId)" -ForegroundColor DarkGray
+                        }
+                    }
+                }
+            } else {
+                Write-Host "  (no catalogs/access packages identified - ControlPlane wildcard default remains in effect)" -ForegroundColor Yellow
+            }
+            Write-Host ""
+            #endregion
+        }
+    } # end if IdentityGovernance
+    #endregion
+
+    #region Defender RBAC Classification Parameter Scope
+    if ($ClassificationParameterScope -contains "Defender") {
+        Write-Host ""
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        Write-Host " Microsoft Defender RBAC - Scope Parameter Update" -ForegroundColor Cyan
+        Write-Host "=========================================================" -ForegroundColor Cyan
+
+        if (-not (Test-Path -Path $DefenderClassificationParameterFile)) {
+            Write-Warning "  Defender classification parameter file not found: $DefenderClassificationParameterFile"
+            $WarningMessages.Add([PSCustomObject]@{ Type = "MissingTemplateFile"; Message = "Defender classification parameter file not found: $DefenderClassificationParameterFile" })
+        } else {
+            $DefenderRoleClassification = Get-Content -Path $DefenderClassificationParameterFile -Raw
+
+            Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+            Write-Host " Resolving Defender for Cloud Resource/Subscription Scope" -ForegroundColor DarkCyan
+            Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+            Write-Host "  Only Security posture / Posture management actions (microsoft.xdr/securityposture/*) are" -ForegroundColor Gray
+            Write-Host "  genuinely scopable per Defender for Cloud subscription/resource-group/resource; tenant-wide" -ForegroundColor Gray
+            Write-Host "  configuration/authorization/dataops actions remain governed at directory scope '/' only." -ForegroundColor Gray
+
+            $Tier0IncludedResourceScope = $SharedAzureResourceScope.Tier0ResourceScope
+            $Tier1IncludedResourceScope = $SharedAzureResourceScope.Tier1ResourceScope
+
+            Write-Host "  Tier 0 (ControlPlane) resource scope    : $($Tier0IncludedResourceScope.Count) entrie(s)" -ForegroundColor Gray
+            Write-Host "  Tier 1 (ManagementPlane) resource scope : $($Tier1IncludedResourceScope.Count) entrie(s)" -ForegroundColor Gray
+
+            $Tier0ScopeJSON = ($Tier0IncludedResourceScope | ForEach-Object { "`"$_`"" }) -join ", "
+            $DefenderRoleClassification = $DefenderRoleClassification.replace('<Tier0IncludedResourceScope>', $Tier0ScopeJSON)
+            $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'Defender:Tier0IncludedResourceScope'; Entries = $Tier0IncludedResourceScope.Count; IncludesDirectory = ($Tier0IncludedResourceScope -contains '/'); Status = 'Updated' })
+
+            if ($Tier1IncludedResourceScope.Count -gt 0) {
+                $Tier1ScopeJSON = ($Tier1IncludedResourceScope | ForEach-Object { "`"$_`"" }) -join ", "
+                $DefenderRoleClassification = $DefenderRoleClassification.replace('<Tier1IncludedResourceScope>', $Tier1ScopeJSON)
+                $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'Defender:Tier1IncludedResourceScope'; Entries = $Tier1IncludedResourceScope.Count; IncludesDirectory = $false; Status = 'Updated' })
+            } else {
+                Write-Warning "  No Tier 1 (ManagementPlane) resources found for Defender scope - placeholder cleared."
+                $WarningMessages.Add([PSCustomObject]@{ Type = "EmptyScope"; Message = "No Tier 1 (ManagementPlane) resources found - Defender Tier1IncludedResourceScope placeholder cleared" })
+                # Remove the placeholder along with a preceding comma (e.g. after Tier0IncludedResourceScope) or a
+                # following comma, so the surrounding JSON array is never left with a dangling/leading comma.
+                $DefenderRoleClassification = $DefenderRoleClassification -replace '\s*,\s*"?<Tier1IncludedResourceScope>"?', ''
+                $DefenderRoleClassification = $DefenderRoleClassification -replace '"?<Tier1IncludedResourceScope>"?\s*,\s*', ''
+                $DefenderRoleClassification = $DefenderRoleClassification -replace '"?<Tier1IncludedResourceScope>"?', ''
+                $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'Defender:Tier1IncludedResourceScope'; Entries = 0; IncludesDirectory = $false; Status = 'Cleared' })
+            }
+
+            # Apply role action overwrites (down-/upgrade of individual role actions) to the generated classification
+            $DefenderRoleClassificationDefinition = @($DefenderRoleClassification | ConvertFrom-Json -Depth 10)
+            $DefenderRoleActionOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "Defender").RoleActionOverwrites)
+            if ($DefenderRoleActionOverwrites.Count -gt 0) {
+                Write-Host "  Applying $($DefenderRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+                $DefenderRoleClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $DefenderRoleClassificationDefinition -RoleActionOverwrites $DefenderRoleActionOverwrites
+            }
+
+            # Ensure output directory exists
+            $DefenderOutputDir = Split-Path $DefenderCustomizedClassificationFile -Parent
+            if (-not (Test-Path -Path $DefenderOutputDir)) {
+                New-Item -Path $DefenderOutputDir -ItemType Directory -Force | Out-Null
+            }
+            $DefenderRoleClassificationDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $DefenderCustomizedClassificationFile -Force
+            Write-Host "  Output file: $DefenderCustomizedClassificationFile" -ForegroundColor Cyan
+
+            $DefenderCloudSetAssignments = [System.Collections.Generic.List[psobject]]::new()
+            $DefenderEamFile = Join-Path -Path (Join-Path -Path $EntraOpsEamFolder -ChildPath 'Defender') -ChildPath 'Defender.json'
+            if (Test-Path -LiteralPath $DefenderEamFile) {
+                try {
+                    $DefenderEamObjects = @(Get-Content -LiteralPath $DefenderEamFile -Raw | ConvertFrom-Json -Depth 10)
+                    foreach ($DefenderEamObject in $DefenderEamObjects) {
+                        foreach ($RoleAssignment in @($DefenderEamObject.RoleAssignments)) {
+                            if ("$($RoleAssignment.RoleAssignmentScopeId)" -notmatch '(?i)^/cloudset/') { continue }
+                            $SubscriptionScopes = if ($RoleAssignment.PSObject.Properties.Name -contains 'CloudSetSubscriptionScopes') { @($RoleAssignment.CloudSetSubscriptionScopes | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") }) } else { @() }
+                            $ResolutionStatus = if ($RoleAssignment.PSObject.Properties.Name -contains 'ScopeResolutionStatus') { "$($RoleAssignment.ScopeResolutionStatus)" } else { 'Unresolved' }
+                            $DefenderCloudSetAssignments.Add([PSCustomObject]@{
+                                    CloudSetId         = "$($RoleAssignment.RoleAssignmentScopeId)"
+                                    CloudSetName       = "$($RoleAssignment.RoleAssignmentScopeName)"
+                                    SubscriptionScopes = $SubscriptionScopes
+                                    ResolutionStatus   = $ResolutionStatus
+                                }) | Out-Null
+                        }
+                    }
+                } catch {
+                    $WarningMessage = "Failed to read Defender CloudSet assignments from '$DefenderEamFile': $($_.Exception.Message)"
+                    Write-Warning $WarningMessage
+                    $WarningMessages.Add([PSCustomObject]@{ Type = 'CloudSetReasoningReadError'; Message = $WarningMessage })
+                }
+            }
+
+            $CloudSetReasoning = @($DefenderCloudSetAssignments | Group-Object CloudSetId | Sort-Object Name | ForEach-Object {
+                    $CloudSetAssignments = @($_.Group)
+                    $SubscriptionScopes = @($CloudSetAssignments.SubscriptionScopes | Sort-Object -Unique)
+                    $Tier0SubscriptionScopes = @($SubscriptionScopes | Where-Object { $Tier0IncludedResourceScope -contains $_ })
+                    $Tier1SubscriptionScopes = @($SubscriptionScopes | Where-Object { $_ -notin $Tier0SubscriptionScopes -and $Tier1IncludedResourceScope -contains $_ })
+                    $ResolutionStatus = if ($SubscriptionScopes.Count -gt 0) { 'Resolved' } else { @($CloudSetAssignments.ResolutionStatus | Where-Object { $_ -eq 'Unresolved' } | Select-Object -First 1) ?? 'Unresolved' }
+                    $ResultingScope = if ($Tier0SubscriptionScopes.Count -gt 0) { 'Tier0' } elseif ($Tier1SubscriptionScopes.Count -gt 0) { 'Tier1' } elseif ($ResolutionStatus -eq 'Resolved') { 'Unclassified' } else { 'UnknownBoundedScope' }
+                    $AzureScopeEvidence = foreach ($SubscriptionScope in $SubscriptionScopes) {
+                        $ResourceEvidence = @($SharedAzureResourceScope.ResourceScopeDetails | Where-Object { @($_.ExpandedScopePaths) -contains $SubscriptionScope } | Sort-Object Source, ResourceName, ResourceId)
+                        [PSCustomObject]@{
+                            SubscriptionScope = $SubscriptionScope
+                            ResultingScope    = if ($Tier0SubscriptionScopes -contains $SubscriptionScope) { 'Tier0' } elseif ($Tier1SubscriptionScopes -contains $SubscriptionScope) { 'Tier1' } else { 'Unclassified' }
+                            ScopeDetails      = @($ResourceEvidence | ForEach-Object {
+                                    [PSCustomObject]@{
+                                        ScopeId = $_.ResourceId
+                                        Source  = $_.Source
+                                        EAMTier = $_.EAMTier
+                                        Reason  = $_.Reason
+                                    }
+                                })
+                        }
+                    }
+                    [PSCustomObject]@{
+                        CloudSetId              = $_.Name
+                        CloudSetName            = @($CloudSetAssignments.CloudSetName | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique | Select-Object -First 1)
+                        ResolutionStatus        = $ResolutionStatus
+                        SubscriptionScopes      = $SubscriptionScopes
+                        Tier0SubscriptionScopes = $Tier0SubscriptionScopes
+                        Tier1SubscriptionScopes = $Tier1SubscriptionScopes
+                        ResultingScope          = $ResultingScope
+                        Reason                  = "CloudSet contains $($SubscriptionScopes.Count) subscription(s); $($Tier0SubscriptionScopes.Count) map to Tier0 Azure reasoning and $($Tier1SubscriptionScopes.Count) map only to Tier1 Azure reasoning."
+                        AzureScopeEvidence      = @($AzureScopeEvidence)
+                    }
+                })
+            $DefenderScopeReasoningFile = Join-Path -Path $DefenderOutputDir -ChildPath 'ScopeReasoning_Defender.json'
+            [PSCustomObject]@{
+                CloudSetDetails     = $CloudSetReasoning
+                UnresolvedCloudSets = @($CloudSetReasoning | Where-Object { $_.ResolutionStatus -eq 'Unresolved' })
+            } | ConvertTo-Json -Depth 8 | Out-File -FilePath $DefenderScopeReasoningFile -Force
+            Write-Host "  CloudSet scope reasoning file: $DefenderScopeReasoningFile" -ForegroundColor Cyan
+        }
+        Write-Host ""
+    } # end if Defender
+    #endregion
+
+    #region Azure RBAC Classification Parameter Scope
+    if ($ClassificationParameterScope -contains "Azure") {
+        Write-Host ""
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        Write-Host " Azure RBAC - Scope Parameter Update" -ForegroundColor Cyan
+        Write-Host "=========================================================" -ForegroundColor Cyan
+
+        $AzureRoleClassification = Get-Content -Path $AzureClassificationParameterFile -Raw
+
+        # Identify which Service categories are actually driven by <Tier0/Tier1IncludedResourceScope> in the
+        # template (rather than a hardcoded list), so it stays in sync if the template is customized. Probe by
+        # substituting the placeholders with unique sentinel values (keeping the result valid JSON) and collecting
+        # the Service of every entry whose RoleAssignmentScopeName/ExcludedRoleAssignmentScopeName references them.
+        $DynamicScopeServices = [System.Collections.Generic.List[string]]::new()
+        try {
+            $Tier0Sentinel = "__EntraOpsTier0Placeholder__"
+            $Tier1Sentinel = "__EntraOpsTier1Placeholder__"
+            $ProbeText = (Get-Content -Path $AzureClassificationParameterFile -Raw).
+            Replace('<Tier0IncludedResourceScope>', "`"$Tier0Sentinel`"").
+            Replace('<Tier1IncludedResourceScope>', "`"$Tier1Sentinel`"")
+            $ProbeDefinition = @($ProbeText | ConvertFrom-Json -Depth 10)
+            foreach ($Tier in $ProbeDefinition) {
+                foreach ($Definition in @($Tier.TierLevelDefinition)) {
+                    $AllScopes = @($Definition.RoleAssignmentScopeName) + @($Definition.ExcludedRoleAssignmentScopeName)
+                    if (($AllScopes -contains $Tier0Sentinel -or $AllScopes -contains $Tier1Sentinel) -and ($DynamicScopeServices -notcontains $Definition.Service)) {
+                        $DynamicScopeServices.Add($Definition.Service) | Out-Null
+                    }
+                }
+            }
+        } catch {
+            Write-Warning "Failed to probe Classification_Azure.Param.json for dynamically-scoped categories: $_"
+        }
+
+        # Reuse the shared Azure resource/subscription scope resolved earlier (avoids duplicate Exposure
+        # Management / Azure Resource Graph queries when Defender parameterization also ran in this invocation).
+        if ($null -eq $SharedAzureResourceScope) {
+            $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages
+        }
+        $AzureResourceScopeDetails = $SharedAzureResourceScope.ResourceScopeDetails
+
+        #region Keep Tier0/Tier1 resource scopes split by the hosted managed identity's own effective tier
+        Write-Host ""
+        Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+        Write-Host " Azure RBAC Tier0/Tier1 Resource Scope (from shared resource scope)" -ForegroundColor DarkCyan
+        Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+        Write-Host "  Azure RBAC scope now follows the hosted managed identity's own effective tier: a resource" -ForegroundColor Gray
+        Write-Host "  hosting a ControlPlane-tier MI is Tier0, a resource hosting a ManagementPlane-tier MI is" -ForegroundColor Gray
+        Write-Host "  Tier1 (managing/assigning that identity is bounded by the identity's own granted privileges)." -ForegroundColor Gray
+
+        # Tier0/Tier1 resource scope is kept exactly as resolved per-MI-tier by Get-EntraOpsClassificationAzureResourceScope
+        # (no longer merged): a resource hosting a ControlPlane-tier managed identity is Tier0, a resource hosting
+        # a ManagementPlane-tier managed identity is Tier1. Managing/assigning a managed identity is only as
+        # privileged as what that identity itself was granted, so the RBAC scope for the "Managed Identity"
+        # category (and any other category reusing these placeholders) should reflect the identity's own tier.
+        $Tier0ResourceScope = @($SharedAzureResourceScope.Tier0ResourceScope | Select-Object -Unique | Sort-Object)
+        $Tier1ResourceScope = @($SharedAzureResourceScope.Tier1ResourceScope | Select-Object -Unique | Sort-Object)
+        Write-Host "  Total expanded ARM scope paths (Tier0): $($Tier0ResourceScope.Count)" -ForegroundColor Gray
+        if ($Tier0ResourceScope.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  Tier0 ARM scope hierarchy (resource → subscription → management groups):" -ForegroundColor White
+            $Tier0ResourceScope | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
+        }
+        Write-Host "  Total expanded ARM scope paths (Tier1): $($Tier1ResourceScope.Count)" -ForegroundColor Gray
+        if ($Tier1ResourceScope.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  Tier1 ARM scope hierarchy (resource → subscription → management groups):" -ForegroundColor White
+            $Tier1ResourceScope | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
+        }
+        #endregion
+
+        #region Replace placeholders in Azure classification parameter file
+        Write-Host ""
+        Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+        Write-Host " Replacing Azure RBAC Scope Placeholders" -ForegroundColor DarkCyan
+        Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+
+        $Tier0ScopeJSON = ($Tier0ResourceScope | ForEach-Object { "`"$_`"" }) -join ", "
+        $AzureRoleClassification = $AzureRoleClassification.replace('<Tier0IncludedResourceScope>', $Tier0ScopeJSON)
+        Write-Host "  <Tier0IncludedResourceScope> -> $($Tier0ResourceScope.Count) scope path(s)" -ForegroundColor DarkGreen
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'Tier0IncludedResourceScope'; Entries = $Tier0ResourceScope.Count; IncludesDirectory = $false; Status = 'Updated' })
+
+        # Tier 1: strictly the resources hosting a ManagementPlane-tier managed identity (may be empty if none exist)
+        $Tier1ScopeJSON = ($Tier1ResourceScope | ForEach-Object { "`"$_`"" }) -join ", "
+        $AzureRoleClassification = $AzureRoleClassification.replace('<Tier1IncludedResourceScope>', $Tier1ScopeJSON)
+        Write-Host "  <Tier1IncludedResourceScope> -> $($Tier1ResourceScope.Count) scope path(s)" -ForegroundColor DarkGreen
+        if ($Tier1ResourceScope.Count -eq 0) {
+            Write-Host "    (empty - no resource currently hosts a ManagementPlane-tier managed identity)" -ForegroundColor Yellow
+        }
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'Tier1IncludedResourceScope'; Entries = $Tier1ResourceScope.Count; IncludesDirectory = $false; Status = 'Updated' })
+
+        $AzureClassificationDefinition = @($AzureRoleClassification | ConvertFrom-Json -Depth 10)
+
+        # Apply role action overwrites (down-/upgrade of individual role actions) to the generated classification.
+        # Applied AFTER Tier0/Tier1 placeholder substitution, so overwrites match against the actual resolved
+        # ARM scope paths, not the raw <Tier0/Tier1IncludedResourceScope> placeholder tokens.
+        $AzureRoleActionOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "Azure").RoleActionOverwrites)
+        if ($AzureRoleActionOverwrites.Count -gt 0) {
+            # Classification_RoleActionOverwrites.json is a separate file from Classification_Azure.Param.json and
+            # is NOT covered by the template's raw-text <Tier0/Tier1IncludedResourceScope> substitution above, so
+            # resolve the same placeholder tokens here (as literal single-element RoleAssignmentScopeName array
+            # entries, e.g. ["<Tier0IncludedResourceScope>"]) to the actual resolved ARM scope paths.
+            foreach ($Overwrite in $AzureRoleActionOverwrites) {
+                $ResolvedScopes = [System.Collections.Generic.List[string]]::new()
+                foreach ($ScopeEntry in @($Overwrite.RoleAssignmentScopeName)) {
+                    if ($ScopeEntry -eq '<Tier0IncludedResourceScope>') {
+                        foreach ($Path in $Tier0ResourceScope) { $ResolvedScopes.Add($Path) | Out-Null }
+                    } elseif ($ScopeEntry -eq '<Tier1IncludedResourceScope>') {
+                        foreach ($Path in $Tier1ResourceScope) { $ResolvedScopes.Add($Path) | Out-Null }
+                    } else {
+                        $ResolvedScopes.Add($ScopeEntry) | Out-Null
+                    }
+                }
+                $Overwrite.RoleAssignmentScopeName = @($ResolvedScopes | Select-Object -Unique)
+            }
+
+            Write-Host "  Applying $($AzureRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+
+            # Warn when an overwritten action currently lives in one of the categories whose scope is driven by
+            # the hosted managed identity's own tier (<Tier0/Tier1IncludedResourceScope>, identified above from
+            # the template) - the overwrite will remove the action from that dynamically-scoped entry and
+            # re-add it under the overwrite's own (often broader) scope, bypassing the per-MI-tier resource
+            # scoping for that action.
+            foreach ($Overwrite in $AzureRoleActionOverwrites) {
+                foreach ($Action in @($Overwrite.RoleDefinitionActions)) {
+                    foreach ($Tier in $AzureClassificationDefinition) {
+                        foreach ($Definition in @($Tier.TierLevelDefinition)) {
+                            if ($DynamicScopeServices -notcontains $Definition.Service) { continue }
+                            if (@($Definition.RoleDefinitionActions) -contains $Action) {
+                                Write-Host "  ⚠ Overwrite for '$Action' will remove it from dynamically-scoped '$($Definition.Service)' ($($Tier.EAMTierLevelName)) - it will no longer be limited to MI-hosting resources of that tier." -ForegroundColor DarkYellow
+                            }
+                        }
+                    }
+                }
+            }
+
+            $AzureClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $AzureClassificationDefinition -RoleActionOverwrites $AzureRoleActionOverwrites
+        }
+
+        # Ensure output directory exists
+        $AzureOutputDir = Split-Path $AzureCustomizedClassificationFile -Parent
+        if (-not (Test-Path -Path $AzureOutputDir)) {
+            New-Item -Path $AzureOutputDir -ItemType Directory -Force | Out-Null
+        }
+        $AzureClassificationDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $AzureCustomizedClassificationFile -Force
+        Write-Host "  Output file: $AzureCustomizedClassificationFile" -ForegroundColor Cyan
+
+        # Persist WHY each resource was included in Tier0/Tier1 scope (Source/EAMTier/Reason/ScopeId), so this
+        # is available for later auditing instead of only being visible in the console/job log at generation time.
+        # Structure is aligned with ScopeReasoning_IdentityGovernance.json (Tier0/Tier1Scope and ScopeDetails
+        # with ScopeName/ScopeId).
+        $AzureResourceScopeReasoningFile = Join-Path -Path $AzureOutputDir -ChildPath "ScopeReasoning_Azure.json"
+        $AzureResourceScopeReasoningPayload = [PSCustomObject]@{
+            Tier0Scope   = $Tier0ResourceScope
+            Tier1Scope   = $Tier1ResourceScope
+            # ResourceId/Reason break ties for resources with multiple reasons (e.g. a VM using several
+            # UAMIs) since Source+ResourceName alone can be identical and ARG doesn't guarantee row order.
+            ScopeDetails = @($AzureResourceScopeDetails | Sort-Object Source, ResourceName, ResourceId, Reason | ForEach-Object {
+                    $ScopeDetail = [ordered]@{
+                        ScopeName      = $_.ResourceName
+                        ScopeId        = $_.ResourceId
+                        Source         = $_.Source
+                        EAMTier        = $_.EAMTier
+                        # Same bucketing fallback as Get-EntraOpsClassificationAzureResourceScope: only
+                        # empty/"Unknown" defaults to Tier0; "Unclassified" (evaluated, nothing privileged found)
+                        # intentionally lands in Tier1.
+                        ResultingScope = if ($_.EAMTier -eq "ControlPlane" -or [string]::IsNullOrEmpty($_.EAMTier) -or $_.EAMTier -eq "Unknown") { "Tier0" } else { "Tier1" }
+                        Reason         = $_.Reason
+                    }
+                    if ($_.PSObject.Properties.Name -contains 'CriticalityLevel') {
+                        $ScopeDetail['CriticalityLevel'] = $_.CriticalityLevel
+                    }
+                    if ($_.PSObject.Properties.Name -contains 'CriticalityRules') {
+                        $ScopeDetail['CriticalityRules'] = $_.CriticalityRules
+                    }
+                    if ($_.PSObject.Properties.Name -contains 'TierSource') {
+                        $ScopeDetail['TierSource'] = $_.TierSource
+                    }
+                    if ($_.PSObject.Properties.Name -contains 'TierEvidence') {
+                        $ScopeDetail['TierEvidence'] = @($_.TierEvidence)
+                    }
+                    if ($_.PSObject.Properties.Name -contains 'ManagedIdentityObjectId') {
+                        $ScopeDetail['ManagedIdentityObjectId'] = $_.ManagedIdentityObjectId
+                    }
+                    if ($_.PSObject.Properties.Name -contains 'ExpandedScopePaths') {
+                        $ScopeDetail['ExpandedScopePaths'] = @($_.ExpandedScopePaths)
+                    }
+                    [PSCustomObject]$ScopeDetail
+                })
+        }
+        $AzureResourceScopeReasoningPayload | ConvertTo-Json -Depth 5 | Out-File -FilePath $AzureResourceScopeReasoningFile -Force
+        Write-Host "  Resource scope reasoning file: $AzureResourceScopeReasoningFile" -ForegroundColor Cyan
+        #endregion
+
+        #region Azure RBAC Classification Summary
+        Write-Host ""
+        Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+        Write-Host " Azure RBAC Classification Summary" -ForegroundColor DarkCyan
+        Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+
+        Write-Host ""
+        Write-Host "  Resource scope details (grouped by source) - EAMTier is the hosted/used/consumed managed" -ForegroundColor White
+        Write-Host "  identity's own effective tier: only 'ControlPlane' (or truly unknown/unclassified) -> Tier0 scope," -ForegroundColor White
+        Write-Host "  everything else genuinely classified (ManagementPlane, UserAccess, etc.) -> Tier1 scope:" -ForegroundColor White
+        if ($AzureResourceScopeDetails.Count -gt 0) {
+            $AzureResourceScopeDetails | Group-Object Source | Sort-Object Name | ForEach-Object {
+                Write-Host "  [$($_.Name)] ($($_.Count) resource(s))" -ForegroundColor DarkCyan
+                $_.Group | Sort-Object ResourceName | ForEach-Object {
+                    if ($IncludeObjectDetails) {
+                        $IsTier0 = $_.EAMTier -eq "ControlPlane" -or [string]::IsNullOrEmpty($_.EAMTier) -or $_.EAMTier -eq "Unknown"
+                        $ResultingScope = if ($IsTier0) { "Tier0" } else { "Tier1" }
+                        $Color = if ($_.EAMTier -eq "ControlPlane") { 'DarkGreen' } elseif ($IsTier0) { 'Gray' } else { 'Yellow' }
+                        Write-Host "    $($_.ResourceName) [EAM: $($_.EAMTier) -> $ResultingScope scope]" -ForegroundColor $Color
+                        Write-Host "      Reason    : $($_.Reason)" -ForegroundColor DarkGray
+                        Write-Host "      ResourceId: $($_.ResourceId)" -ForegroundColor DarkGray
+                    } else {
+                        Write-Host "    $($_.ResourceId)" -ForegroundColor DarkGray
+                    }
+                }
+            }
+        } else {
+            Write-Host "  (no resources identified for Tier0/Tier1 scope)" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        #endregion
+
+    } # end if Azure
     #endregion
 
     # Final summary
@@ -1037,7 +2068,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
     Write-Host " RBAC Scope: $($ClassificationParameterScope -join ', ')" -ForegroundColor Cyan
     Write-Host "=========================================================" -ForegroundColor Cyan
     Write-Host ""
-    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages
+    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages -IncludeObjectDetails $IncludeObjectDetails
     $ScopeSummary | Format-Table -AutoSize -Property Placeholder,
     @{Name = 'ScopeEntries'; Expression = { $_.Entries }; Align = 'Right' },
     @{Name = 'Dir(/)'; Expression = { if ($_.IncludesDirectory) { 'YES' } else { 'no' } }; Align = 'Center' },

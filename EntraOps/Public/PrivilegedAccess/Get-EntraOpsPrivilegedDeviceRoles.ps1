@@ -25,7 +25,7 @@
 function Get-EntraOpsPrivilegedDeviceRoles {
     param (
         [Parameter(Mandatory = $False)]
-        [System.String]$TenantId = (Get-AzContext).Tenant.id
+        [System.String]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("User", "Group", "ServicePrincipal")]
@@ -57,7 +57,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     #region Get Scope and tags
     Write-Verbose -Message "Getting scope and tags for scope name ..."
     $ScopeTags = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/roleScopeTags" -OutputType PSObject)
-    # In research, replacement of the workaround solution (see blow) by using Get-MgBetaDeviceManagementDeviceCategory?
+    # Scope tags are used to resolve the display names of Intune role assignment scopes.
     #endregion
 
     #region Get role assignments for all permanent role member
@@ -66,6 +66,8 @@ function Get-EntraOpsPrivilegedDeviceRoles {
         $DeviceMgmtRoleAssignmentPrincipals = ($DeviceMgmtRoleAssignments | select-object -ExpandProperty principalIds -Unique)
         $DeviceMgmtPermanentRbacAssignments = foreach ($Principal in $DeviceMgmtRoleAssignmentPrincipals) {
             Write-Verbose "Get identity information from permanent member $Principal"
+            # Reset to avoid carrying over the ObjectType from a previous iteration when resolution fails
+            $ObjectType = $null
             try {
                 $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
                 $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
@@ -73,7 +75,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
                 Write-Warning "Issue to resolve directory object $Principal! $($_.Exception.Message)"
             }
 
-            $AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
+            $AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/RoleAssignments?`$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
 
             foreach ($DeviceMgmtPrincipalRoleAssignment in $AllPrinicpalDeviceMgmtRoleAssignments) {
 
@@ -156,7 +158,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
         $GroupsWithRbacAssignment = $AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -eq "group" } | Select-Object -Unique ObjectId, ObjectDisplayName
         $AllTransitiveMembers = @()
         foreach ($GroupWithRbacAssignment in $GroupsWithRbacAssignment) {
-            $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
+            $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId) -WarningMessages $WarningMessages
             $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{

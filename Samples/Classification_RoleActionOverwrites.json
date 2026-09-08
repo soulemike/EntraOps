@@ -1,0 +1,43 @@
+[
+  {
+    "RbacSystem": "EntraID",
+    "RoleDefinitionActions": [
+      "microsoft.directory/bitlockerKeys/key/read",
+      "microsoft.directory/deviceLocalCredentials/password/read",
+      "microsoft.directory/certificateBasedDeviceAuthConfigurations/create",
+      "microsoft.directory/certificateBasedDeviceAuthConfigurations/credentials/update",
+      "microsoft.directory/certificateBasedDeviceAuthConfigurations/delete",
+      "microsoft.directory/certificateBasedDeviceAuthConfigurations/standard/read",
+      "microsoft.directory/deletedItems.devices/delete",
+      "microsoft.directory/deletedItems.devices/restore",
+      "microsoft.directory/deviceManagementPolicies/basic/update",
+      "microsoft.directory/deviceRegistrationPolicy/basic/update",
+      "microsoft.directory/devices/allProperties/allTasks",
+      "microsoft.directory/devices/basic/update",
+      "microsoft.directory/devices/create",
+      "microsoft.directory/devices/customSecurityAttributes/read",
+      "microsoft.directory/devices/delete",
+      "microsoft.directory/devices/disable",
+      "microsoft.directory/devices/enable",
+      "microsoft.directory/devices/extensionAttributeSet1/update",
+      "microsoft.directory/devices/extensionAttributeSet2/update",
+      "microsoft.directory/devices/extensionAttributeSet3/update",
+      "microsoft.directory/devices/permissions/update",
+      "microsoft.directory/devices/registeredOwners/update",
+      "microsoft.directory/devices/registeredUsers/update",
+      "microsoft.directory/deviceTemplates/create",
+      "microsoft.directory/deviceTemplates/createDeviceFromTemplate",
+      "microsoft.directory/deviceTemplates/delete",
+      "microsoft.directory/deviceTemplates/deviceInstances/read",
+      "microsoft.directory/deviceTemplates/owners/read",
+      "microsoft.directory/deviceTemplates/owners/update",
+      "microsoft.intune/allEntities/allTasks",
+      "microsoft.intune/allEntities/read",
+      "microsoft.windows.updatesDeployments/allEntities/allProperties/allTasks"
+    ],
+    "RoleAssignmentScopeName": ["/*"],
+    "EAMTierLevelName": "ManagementPlane",
+    "EAMTierLevelTagValue": "1",
+    "Justification": "No privileged access workstation is present in the tenant."
+  }
+]

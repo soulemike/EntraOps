@@ -16,13 +16,21 @@
 
 .PARAMETER GlobalExclusion
     Use global exclusion list for classification. Default is $true. Global exclusion list is stored in "./Classification/Global.json".
+
+.PARAMETER IncludeJustification
+    Include the Justification property (documenting a manual classification overwrite) on all Classification
+    entries of the returned objects. Default is $false, so the property is not present in the output at all.
+
+.PARAMETER IncludeObjectDetails
+    Include descriptive object details in warning output. Defaults to ConsoleOutput.IncludeObjectDetails from
+    EntraOpsConfig.json. Object IDs are always shown.
 #>
 
 function Get-EntraOpsPrivilegedEAMIntune {
     [cmdletbinding()]
     param (
         [Parameter(Mandatory = $false)]
-        [System.String]$TenantId = (Get-AzContext).Tenant.Id
+        [System.String]$TenantId = (Get-EntraOpsAzContextValue -Property TenantId)
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$FolderClassification = "$DefaultFolderClassification"
@@ -38,6 +46,12 @@ function Get-EntraOpsPrivilegedEAMIntune {
         ,
         [Parameter(Mandatory = $false)]
         [System.Int32]$ParallelThrottleLimit = 10
+        ,
+        [Parameter(Mandatory = $false)]
+        [switch]$IncludeJustification
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$IncludeObjectDetails = [bool]$Global:EntraOpsIncludeObjectDetails
     )
 
     $WarningMessages = New-Object -TypeName "System.Collections.Generic.List[psobject]"
@@ -68,7 +82,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
     }
 
     $GlobalExclusionList = Import-EntraOpsGlobalExclusions -Enabled $GlobalExclusion
-    
+
     $Stage1Duration = ((Get-Date) - $Stage1Start).TotalSeconds
     Write-Host "✓ Stage 1 completed in $([Math]::Round($Stage1Duration, 2)) seconds ($($DeviceMgmtRbacAssignments.Count) role assignments retrieved)" -ForegroundColor Green
     Write-Progress -Activity "Stage 1/4: Fetching Device Management Roles" -Completed
@@ -78,7 +92,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
     if ($null -eq $DeviceMgmtRbacAssignments -or @($DeviceMgmtRbacAssignments).Count -eq 0) {
         Write-Warning "No Device Management role assignments found. Returning empty result."
         return @()
-    }    
+    }
 
     #region Get scope tages and assignments
     #region Stage 2: Fetch Scope Tags
@@ -89,7 +103,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
     Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
     Write-Host "Retrieving role scope tags and their assignments for Intune device management..." -ForegroundColor Gray
     Write-Progress -Activity "Stage 2/4: Fetching Scope Tags" -Status "Loading scope tags and assignments..." -PercentComplete 25
-    
+
     $ScopeTags = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri https://graph.microsoft.com/beta/deviceManagement/roleScopeTags -OutputType PSObject)
     # Build scope tag name lookup for display name resolution
     $ScopeTagNameLookup = @{}
@@ -167,6 +181,10 @@ function Get-EntraOpsPrivilegedEAMIntune {
     }
 
     $IntuneResourcesByClassificationJSON = Expand-EntraOpsPrivilegedEAMJsonFile -FilePath $IntuneClassificationFilePath | select-object EAMTierLevelName, EAMTierLevelTagValue, Category, Service, RoleAssignmentScopeName, ExcludedRoleAssignmentScopeName, RoleDefinitionActions, ExcludedRoleDefinitionActions
+
+    # Load classification overwrites (down-/upgrade of entire role definitions) from tenant-specific folder or Templates fallback.
+    # Role action overwrites are already baked into the classification file by Update-EntraOpsClassificationControlPlaneScope.
+    $ClassificationOverwrites = Import-EntraOpsClassificationOverwrites -RbacSystem "DeviceManagement" -FolderClassification $FolderClassification
     $DeviceMgmtRbacClassificationsByJSON = @()
     $DeviceMgmtRbacClassificationsByJSON += foreach ($DeviceMgmtRbacAssignment in $DeviceMgmtRbacAssignments | Select-Object -Unique RoleDefinitionId, RoleAssignmentScopeId) {
         if ($DeviceMgmtRbacAssignment.RoleAssignmentScopeId -ne "/") {
@@ -235,19 +253,47 @@ function Get-EntraOpsPrivilegedEAMIntune {
             }
         }
 
-        # Check if role action and scope exists in JSON definition
-        $IntuneRoleActionsInJsonDefinition = @()
-        $IntuneRoleActionsInJsonDefinition = foreach ($Action in $IntuneRoleActions.rolePermissions.allowedResourceActions) {
-            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $_.ExcludedRoleDefinitionActions -notcontains $Action }
+        # Guard: does any allowed role action match an in-scope classification? Matchers are
+        # precomputed once (loop-invariant) and the probe short-circuits on the first hit instead
+        # of materializing the full match set only to test .Count -gt 0.
+        $GuardMatchers = @(foreach ($ClassEntry in $MatchedClassificationByScope) {
+                Build-EntraOpsClassificationActionMatcher -RoleDefinitionActions $ClassEntry.RoleDefinitionActions -ExcludedRoleDefinitionActions $ClassEntry.ExcludedRoleDefinitionActions
+            })
+        $HasClassifiedRoleAction = $false
+        foreach ($Action in $IntuneRoleActions.rolePermissions.allowedResourceActions) {
+            if ([string]::IsNullOrEmpty($Action)) { continue }
+            foreach ($Matcher in $GuardMatchers) {
+                $AllowedMatch = $Matcher.AllowedExact.Contains($Action)
+                if (-not $AllowedMatch) {
+                    foreach ($Pattern in $Matcher.AllowedWildcards) { if ($Action -like $Pattern) { $AllowedMatch = $true; break } }
+                }
+                if (-not $AllowedMatch) { continue }
+                $ExcludedMatch = $Matcher.ExcludedExact.Contains($Action)
+                if (-not $ExcludedMatch) {
+                    foreach ($Pattern in $Matcher.ExcludedWildcards) { if ($Action -like $Pattern) { $ExcludedMatch = $true; break } }
+                }
+                if (-not $ExcludedMatch) { $HasClassifiedRoleAction = $true; break }
+            }
+            if ($HasClassifiedRoleAction) { break }
         }
 
-
-        if (($IntuneRoleActionsInJsonDefinition.Count -gt 0)) {
+        if ($HasClassifiedRoleAction) {
             # Track which scope name (group GUID or wildcard) triggered each classification match,
             # and which specific groups from this assignment are relevant (non-excluded)
+            # Matchers precomputed once per classification entry (loop-invariant across the action
+            # loop). This site deliberately checks allowed actions only, like the helper call it
+            # replaces - exclusions here are scope-based, handled below per match type.
+            $IntuneClassificationMatchers = @(foreach ($ClassEntry in $IntuneResourcesByClassificationJSON) {
+                    [pscustomobject]@{
+                        Entry   = $ClassEntry
+                        Matcher = Build-EntraOpsClassificationActionMatcher -RoleDefinitionActions $ClassEntry.RoleDefinitionActions
+                    }
+                })
             $ClassifiedWithMatchedScope = @()
             foreach ($IntuneRoleAction in $IntuneRoleActions.rolePermissions.allowedResourceActions) {
-                $ClassifiedWithMatchedScope += foreach ($ClassEntry in $IntuneResourcesByClassificationJSON) {
+                if ([string]::IsNullOrEmpty($IntuneRoleAction)) { continue }
+                $ClassifiedWithMatchedScope += foreach ($MatcherEntry in $IntuneClassificationMatchers) {
+                    $ClassEntry = $MatcherEntry.Entry
                     $ScopeName = $ClassEntry.RoleAssignmentScopeName
 
                     # Same scope matching logic as above
@@ -264,7 +310,14 @@ function Get-EntraOpsPrivilegedEAMIntune {
                         $MatchType = "guid"
                     }
 
-                    if ($ScopeMatch -and $IntuneRoleAction -in $ClassEntry.RoleDefinitionActions) {
+                    $ActionMatch = $false
+                    if ($ScopeMatch) {
+                        $ActionMatch = $MatcherEntry.Matcher.AllowedExact.Contains($IntuneRoleAction)
+                        if (-not $ActionMatch) {
+                            foreach ($Pattern in $MatcherEntry.Matcher.AllowedWildcards) { if ($IntuneRoleAction -like $Pattern) { $ActionMatch = $true; break } }
+                        }
+                    }
+                    if ($ScopeMatch -and $ActionMatch) {
                         $IsExcluded = $false
                         $EntryMatchedGroups = @()
 
@@ -345,7 +398,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                 [PSCustomObject]@{
                     'AdminTierLevel'             = $UniqueClass.EAMTierLevelTagValue
                     'AdminTierLevelName'         = $UniqueClass.EAMTierLevelName
-                    'MatchedActions'             = if ($MatchedActions.Count -gt 0) { $MatchedActions } else { $null }
+                    'MatchedActions'             = if ($MatchedActions.Count -gt 0) { , @($MatchedActions) } else { $null }
                     'ScopedObjects'              = if ($ScopedObjects.Count -gt 0) { $ScopedObjects } else { $null }
                     'Service'                    = $UniqueClass.Service
                     'TaggedBy'                   = "JSONwithAction"
@@ -371,11 +424,17 @@ function Get-EntraOpsPrivilegedEAMIntune {
         $DeviceMgmtRbacAssignment = $DeviceMgmtRbacAssignment | Select-Object -ExcludeProperty Classification, DirectoryScopeIds
         $Classification = @()
         $Classification += ($DeviceMgmtRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DeviceMgmtRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, MatchedActions, ScopedObjects | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, MatchedActions, ScopedObjects, Justification | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DeviceMgmtRbacAssignment
     }
-    
+
+    # Apply role definition classification overwrites (down-/upgrade by RoleDefinitionId or RoleDefinitionName)
+    if ($ClassificationOverwrites.RoleDefinitionOverwrites.Count -gt 0) {
+        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from Classification_RoleDefinitionOverwrites.json..." -ForegroundColor Yellow
+        $DeviceMgmtRbacClassifications = Invoke-EntraOpsClassificationRoleOverwrite -RbacClassifications $DeviceMgmtRbacClassifications -RoleDefinitionOverwrites $ClassificationOverwrites.RoleDefinitionOverwrites -RoleSystem "DeviceManagement"
+    }
+
     $Stage3Duration = ((Get-Date) - $Stage3Start).TotalSeconds
     Write-Host "✓ Stage 3 completed in $([Math]::Round($Stage3Duration, 2)) seconds ($($DeviceMgmtRbacClassifications.Count) role assignments classified)" -ForegroundColor Green
     Write-Progress -Activity "Stage 3/4: Classifying Role Actions" -Completed
@@ -394,7 +453,14 @@ function Get-EntraOpsPrivilegedEAMIntune {
     $DeviceMgmtRbacByObject = $DeviceMgmtRbacClassifications | Group-Object ObjectId -AsHashTable -AsString
 
     # Collect unique objects and resolve details
-    $UniqueObjects = $DeviceMgmtRbacAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    # Case-insensitive dedup (mirrors Get-EntraOpsPrivilegedEAMAzure.ps1): Select-Object -Unique compares
+    # ObjectId case-sensitively and would emit the same principal twice when ids differ only in casing.
+    $UniqueObjects = @(
+        $DeviceMgmtRbacAssignments |
+            Where-Object { $null -ne $_.ObjectId } |
+            Group-Object -Property { "$($_.ObjectId)".ToLowerInvariant() } |
+            ForEach-Object { $_.Group[0] | Select-Object ObjectId, ObjectType }
+    )
     $ObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution `
         -UniqueObjects $UniqueObjects `
         -TenantId $TenantId `
@@ -411,13 +477,13 @@ function Get-EntraOpsPrivilegedEAMIntune {
         -ParallelThrottleLimit $ParallelThrottleLimit `
         -WarningMessages $WarningMessages
     #endregion
-    
+
     Write-Host "Applying global exclusions and finalizing results..."
     $FilteredIntuneObjects = $DeviceMgmtRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
-    
+
     Write-Host "Completed processing $($FilteredIntuneObjects.Count) privileged objects."
 
-    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages
+    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages -IncludeObjectDetails $IncludeObjectDetails
 
-    $FilteredIntuneObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    $FilteredIntuneObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Set-EntraOpsEAMClassificationJustification -IncludeJustification:$IncludeJustification | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }

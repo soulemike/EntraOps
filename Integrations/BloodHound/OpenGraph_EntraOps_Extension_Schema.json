@@ -279,22 +279,21 @@
     {
       "environment_kind": "EO_Tenant",
       "source_kind": "EntraOps",
-      "principal_kinds": [
-      ]
+      "principal_kinds": []
     }
   ],
   "relationship_findings": [
     {
-    "name": "EO_IntuneRolePermission_Finding",
-    "display_name": "Principal has Intune Role Permission on the device",
-    "environment_kind": "EO_Tenant",
-    "relationship_kind": "EO_IntuneRolePermission",
-    "remediation": {
-      "short_description": "Lorem short_description ipsum dolor sit amet, consectetur adipiscing elit.",
-      "long_description": "Lorem long_description ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-      "short_remediation": "Lorem short_remediation ipsum dolor sit amet, consectetur adipiscing elit.",
-      "long_remediation": "Lorem long_remediation ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur."
+      "name": "EO_IntuneRolePermission_Finding",
+      "display_name": "Principal has Intune Role Permission on the device",
+      "environment_kind": "EO_Tenant",
+      "relationship_kind": "EO_IntuneRolePermission",
+      "remediation": {
+        "short_description": "Lorem short_description ipsum dolor sit amet, consectetur adipiscing elit.",
+        "long_description": "Lorem long_description ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+        "short_remediation": "Lorem short_remediation ipsum dolor sit amet, consectetur adipiscing elit.",
+        "long_remediation": "Lorem long_remediation ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur."
+      }
     }
-  }
   ]
 }
