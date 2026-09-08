@@ -2,7 +2,7 @@
 
 Describe 'Convert-EntraOpsExportToSampleData' {
     BeforeAll {
-        $ImplementationPath = Join-Path $PSScriptRoot '../EntraOps/Public/Convert-EntraOpsExportToSampleData.ps1'
+        $ImplementationPath = Join-Path $PSScriptRoot '../EntraOps/Public/Reportings/Convert-EntraOpsExportToSampleData.ps1'
         Import-Module (Join-Path $PSScriptRoot '../EntraOps/EntraOps.psd1') -Force
         $OriginalGuid = '11111111-2222-3333-4444-555555555555'
         $OriginalUpn = 'secret_person_example.com#EXT#@fabrikam.onmicrosoft.com'
@@ -117,7 +117,7 @@ Describe 'Convert-EntraOpsExportToSampleData' {
         $Manifest.generatedReports | Should -Be @('EamDashboard', 'TierBreachAnalyzer', 'AccessPathMap')
 
         $ReportText = Get-ChildItem -LiteralPath $ReportDestination -Recurse -File -Filter '*.js' |
-            Get-Content -Raw | Out-String
+        Get-Content -Raw | Out-String
         $ReportText | Should -Not -Match ([regex]::Escape($OriginalGuid))
         $ReportText | Should -Not -Match 'fabrikam|Secret Person|secret_person'
     }
@@ -128,8 +128,8 @@ Describe 'Convert-EntraOpsExportToSampleData' {
                 -SourceTenantName 'fabrikam' -Seed 'pester-seed' -Verbose `
                 -ProgressAction SilentlyContinue 4>&1)
         $VerboseText = $Output |
-            Where-Object { $_ -is [System.Management.Automation.VerboseRecord] } |
-            Out-String
+        Where-Object { $_ -is [System.Management.Automation.VerboseRecord] } |
+        Out-String
 
         $VerboseText | Should -Match ([regex]::Escape('[1/3]'))
         $VerboseText | Should -Match ([regex]::Escape('[2/3]'))
