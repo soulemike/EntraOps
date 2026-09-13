@@ -1,6 +1,11 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [1.1.0] - 2026-09-13
+
+### Fixed
+- **Configuration Analyzer snapshot history**: Mixed partial Tenant Governance snapshots that successfully publish changed resource types are now retained in history. Only fully stale partial captures, which publish no resource types, are omitted.
+
 ## [1.0.0] - 2026-09-08
 
 ### Added
