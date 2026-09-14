@@ -77,7 +77,19 @@ function New-EntraOpsWorkloadIdentity {
         # needed to enumerate role assignments made directly at "/"; the root management group assignment
         # already covers every management group, subscription and resource below it.
         [Parameter(Mandatory = $False)]
-        [switch]$GrantArmRootScopeReader
+        [switch]$GrantArmRootScopeReader,
+
+        [Parameter(Mandatory = $False)]
+        [string]$AdoOrgName,
+
+        [Parameter(Mandatory = $False)]
+        [string]$AdoProjectName,
+
+        [Parameter(Mandatory = $False)]
+        [string]$AdoServiceConnectionName,
+
+        [Parameter(Mandatory = $False)]
+        [string]$AdoFederatedCredentialIssuer
     )
 
     $ErrorActionPreference = "Stop"
@@ -518,6 +530,27 @@ function New-EntraOpsWorkloadIdentity {
                         Add-EntraOpsProvisioningFailure -Message "Failed to add Federated Credential '$($FederatedCredentialParam.name)' to $AppDisplayName. Error: $($_.Exception.Message)"
                     }
                 }
+            }
+        } elseif ($Config.DevOpsPlatform -eq "AzureDevOps") {
+            Write-Output "Add Federated Credential to $AppDisplayName for Azure DevOps..."
+
+            if ([string]::IsNullOrWhiteSpace($AdoFederatedCredentialIssuer)) {
+                $AdoFederatedCredentialIssuer = "https://login.microsoftonline.com/$($Config.TenantId)/v2.0"
+            }
+
+            $FederatedCredentialParam = @{
+                name      = "$($AdoOrgName)-$($AdoProjectName)-$($AdoServiceConnectionName)"
+                issuer    = $AdoFederatedCredentialIssuer
+                subject   = "sc://$($AdoOrgName)/$($AdoProjectName)/$($AdoServiceConnectionName)"
+                audiences = @(
+                    "api://AzureADTokenExchange"
+                )
+            }
+
+            try {
+                New-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -BodyParameter $FederatedCredentialParam
+            } catch {
+                Write-Warning "Failed to add Federated Credential to $AppDisplayName. Error: $_"
             }
         } else {
             Write-Warning "Automation configuration of federated credential for DevOps Platform $($Config.DevOpsPlatform) is not implemented yet."

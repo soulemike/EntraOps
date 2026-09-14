@@ -20,7 +20,8 @@
     shown. Written as ConsoleOutput.IncludeObjectDetails and disabled by default for automation-log privacy.
 
 .PARAMETER DevOpsPlatform
-    Defines the platform where the EntraOps repository is hosted. Default and support is currently limited to GitHub.
+    Defines the platform where the EntraOps repository is hosted. Supported values are GitHub, AzureDevOps and None.
+    Default is GitHub.
 
 .PARAMETER ConfigFilePath
     Location of the config file which will be created. Default is ./EntraOpsConfig.json.
@@ -167,6 +168,10 @@ When enabled, run New-EntraOpsWorkloadIdentity afterwards to grant the workload 
 .EXAMPLE
     Create a configuration file in the default location, update classification files before analyzing privileges, and enable both Log Analytics and Sentinel WatchList ingestion.
     New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -ApplyAutomatedControlPlaneScopeUpdate $true -IngestToLogAnalytics $true -IngestToWatchLists $true -ApplyAutomatedClassificationUpdate $true
+
+.EXAMPLE
+    Create environment file for Azure DevOps deployment with core monitoring only.
+    New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -DevOpsPlatform "AzureDevOps" -ApplyAutomatedClassificationUpdate $true
  #>
 
 function New-EntraOpsConfigFile {
