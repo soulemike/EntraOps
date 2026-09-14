@@ -2,6 +2,9 @@
 All essential changes on EntraOps will be documented in this changelog.
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-09-13
+
 ### Added
 - **ServiceEM - Service-scoped Landing Zones for Enterprise Access Model**: New submodule (developed in collaboration with **Michael Soule**) for creating and managing tiered, service-scoped landing zones aligned with Microsoft's Enterprise Access Model. ServiceEM automates the provisioning of Azure resource groups, Entra ID security groups (role-assignable), PIM for Groups policies, Entra Identity Governance access packages, and Azure RBAC assignments with constrained delegation at ControlPlane, ManagementPlane, and WorkloadPlane tiers. Enables delegated administration with least-privilege access through ABAC conditions, automated group lifecycle management, and optional PIM authentication context enforcement. See [ServiceEM.md](ServiceEM.md) for complete documentation, configuration options, and examples.
   - **Constrained Delegation**: Configurable role-based access controls with ABAC conditions limiting which roles can be assigned and to which principals (e.g., ManagementPlane can assign any role except Owner/UAA to WorkloadPlane-Admins; WorkloadPlane can assign only Key Vault/Storage data-plane roles to WorkloadPlane-Users)
@@ -11,11 +14,14 @@ All essential changes on EntraOps will be documented in this changelog.
   - **Centralized and Delegated Governance Models**: Supports tenant-wide delegation groups or service-specific isolation
   - **Azure Landing Zones**: Automated resource group creation with PIM-eligible role assignments and inheritance detection to prevent redundant assignments
   - **Configuration-driven**: All settings including role IDs, delegation rules, and authentication contexts configurable via `EntraOpsConfig.json` with inline role name comments for readability
-
-## [1.1.0] - 2026-09-13
+- **Azure DevOps pipeline support**: New `azure-pipelines-push.yml` enables Log Analytics ingestion from Azure DevOps in addition to GitHub Actions. Includes pipeline import, authorization, and build service permission setup documentation.
+- **`Update-EntraOps` generic-host PAT support**: `-UpstreamUrl` parameter supports private forks and alternative Git hosts; PAT is passed via `GIT_CONFIG` environment variables with HTTP `extraheader` instead of embedding credentials in the clone URL.
+- **`New-EntraOpsWorkloadIdentity` Azure DevOps platform**: New `-DevOpsPlatform AzureDevOps` branch with federated-credential parameters for Azure DevOps service connections.
 
 ### Fixed
 - **Configuration Analyzer snapshot history**: Mixed partial Tenant Governance snapshots that successfully publish changed resource types are now retained in history. Only fully stale partial captures, which publish no resource types, are omitted.
+- **Log Analytics ingestion reliability**: Chunking fixed to stay under the 1 MB per-request API limit; DCR stream name resolution now uses `dataFlows.streams` instead of `outputStream`; `_CL` suffix handling aligned with Azure Monitor conventions.
+- **`Install-EntraOpsRequiredModule` robustness**: Replaced fragile empty-string checks with `[string]::IsNullOrWhiteSpace()` to prevent false-positive module installation attempts.
 
 ## [1.0.0] - 2026-09-08
 
