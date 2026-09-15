@@ -148,7 +148,7 @@ New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -AzureRegio
 - **Assignment policy errors**: Usually caused by invalid WorkloadPlaneAdmin/ServiceMembers emails
 - **Azure RBAC failures**: User lacks Azure subscription permissions
 
-> **💡 Visual Learner?** See the **[ServiceEM Landing Zone Visualization](./EntraOps/Public/ServiceEM/ServiceEM-LandingZone-Visualization.md)** for interactive Mermaid diagrams showing group structures, access packages, policies, and RBAC assignments for both Centralized and PerService governance models.
+> **💡 Visual Learner?** See the **[ServiceEM Landing Zone Visualization](./ServiceEM-LandingZone-Visualization.md)** for interactive Mermaid diagrams showing group structures, access packages, policies, and RBAC assignments for both Centralized and PerService governance models.
 
 ---
 
@@ -253,7 +253,7 @@ New-EntraOpsSubscriptionLandingZone `
 
 **What gets created:**
 - **Sub scope**: Subscription-level groups, catalog, access packages, PIM policies
-- **Rg scope**: Resource group `RG-Rg-MyFirstApp` with tier-specific groups and RBAC
+- **Rg scope**: Resource group `RG-MyFirstApp` with tier-specific groups and RBAC
 - **Governance**: PerService model (creates per-service admin groups automatically)
 
 **Explicit Centralized deployment (requires pre-existing groups):**
@@ -427,7 +427,7 @@ VERBOSE: [New-EntraOpsServicePIMPolicy] Updating PIM Policy ID: Group_baa5996e-1
 
 # 19. Azure Resource Group created with RBAC assignments
 VERBOSE: [New-EntraOpsServiceAZContainer] Azure Resource Group not found, creating
-VERBOSE: Created resource group 'RG-Rg-MyEntraOpsApp' in location 'westeurope'
+VERBOSE: Created resource group 'RG-MyEntraOpsApp' in location 'westeurope'
 
 # 20. Inherited subscription-level permissions detected, RG assignments skipped
 VERBOSE: [New-EntraOpsServiceAZContainer] ManagementPlane-Admins already has Contributor eligible at a higher scope — skipping RG assignment
@@ -520,6 +520,8 @@ This will create `EntraOpsConfig.json` with:
 - Authentication context is **disabled** by default (`EnableAuthenticationContext: false`)
 - When disabled, PIM policies enforce **MFA + Business Justification only**
 - Constrained delegation is configured with sensible defaults for ManagementPlane and WorkloadPlane tiers
+
+> **Governance model default:** New-EntraOpsSubscriptionLandingZone defaults to PerService at runtime, but New-EntraOpsConfigFile generates config with GovernanceModel = "Centralized".
 
 ### Basic Settings
 
@@ -775,7 +777,7 @@ Constrained delegations limit which roles can be assigned and to which principal
 
 **Permissions:** Can assign **any** Azure role **EXCEPT** the high-privileged roles listed in `ExcludedRoleDefinitionIds`
 
-**Target:** Can only assign roles to the group matching `AllowedTargetGroupFilter` (default: WorkloadPlane-Admins)
+**Target:** Can only assign roles to the group matching `AllowedTargetGroupFilter` (default: WorkloadPlane-Admins) [VALIDATED: hard-coded in current implementation]
 
 **Default Excluded Roles:**
 - `8e3af657-a8ff-443c-a75c-2fe8c4bcb635` - Owner
@@ -790,7 +792,7 @@ Constrained delegations limit which roles can be assigned and to which principal
 
 **Permissions:** Can assign **only** the data-plane roles listed in `AllowedRoleDefinitionIds`
 
-**Target:** Can only assign roles to the group matching `AllowedTargetGroupFilter` (default: WorkloadPlane-Users)
+**Target:** Can only assign roles to the group matching `AllowedTargetGroupFilter` (default: WorkloadPlane-Users) [VALIDATED: hard-coded in current implementation]
 
 **Default Allowed Roles:**
 - **Key Vault roles:**
@@ -848,6 +850,8 @@ Authentication context enforcement requires users to meet additional Conditional
 **EnableAuthenticationContext:** `true` or `false`
 - When `true`, PIM policies will require authentication context for role activation
 - When `false` or not defined, PIM policies enforce **MFA + Business Justification only** (default behavior)
+
+> **Implementation note:** New-EntraOpsServicePIMPolicy adds the authentication context step-up only when EnableAuthenticationContext is `true` and an AuthenticationContextClassReferenceId is configured for the relevant tier. Otherwise it enforces MFA + Business Justification only.
 
 **Default Enforcement (when authentication context is disabled):**
 The following requirements are always enforced for PIM role activation:
@@ -1052,6 +1056,8 @@ New-EntraOpsSubscriptionLandingZone `
 - **WorkloadPlaneAdmin**: Assigned to ManagementPlane-Admins access package (or WorkloadPlane-Admins in Centralized Rg scope)
 - **ServiceMembers**: Assigned to WorkloadPlane-Members access package (or WorkloadPlane-Users in Centralized Rg scope)
 
+WorkloadPlaneAdmin is only used when -AssignOwner is passed to New-EntraOpsServiceBootstrap.
+
 By default, the owner is also added to the members list. Use `-OwnerIsNotMember` to exclude:
 
 ```powershell
@@ -1076,7 +1082,9 @@ New-EntraOpsSubscriptionLandingZone `
 
 ### Cmdlet Inventory
 
-ServiceEM provides 17 cmdlets for automated landing zone provisioning and management:
+ServiceEM provides 16 exported cmdlets for automated landing zone provisioning and management:
+
+> **Legacy note:** The docs previously listed 17 cmdlets, but EntraOps.psd1 exports 16. Two legacy variants exist in EntraOps/Public/ServiceEM/Legacy/ but are not exported.
 
 | # | Cmdlet | Purpose |
 |---|---|---|
@@ -1095,7 +1103,7 @@ ServiceEM provides 17 cmdlets for automated landing zone provisioning and manage
 | 13 | `New-EntraOpsSubscriptionLandingZone` | **Landing Zone** — Sub + Rg split variant; orchestrates Bootstrap for both subscription and resource group scopes |
 | 14 | `New-EntraOpsSubscriptionLandingZoneAlt` | **Landing Zone** — Alternative flat single-call variant (deprecated in favor of `New-EntraOpsSubscriptionLandingZone`) |
 | 15 | `New-EntraOpsTenantLandingZone` | **Landing Zone** — Multi-component tenant-wide deployment (Billing, Mgs, Subs, Rg scopes) |
-| 16 | `Get-EntraOpsServiceEMReport` | Read-only reporting cmdlet for auditing existing service configurations |
+| 16 | `Get-EntraOpsServiceEMReport` | single tenant wrapper with a `.Catalogs` collection |
 | 17 | `Remove-EntraOpsServiceCatalog` | Cleanup cmdlet — removes catalog, access packages, assignments, Entra groups, and the Azure RG (use `-ExcludeGroupIds` to preserve delegation groups, `-SkipAzureResourceGroup` to preserve the RG) |
 
 ### Naming Conventions
@@ -1111,7 +1119,7 @@ ServiceEM follows consistent naming patterns for all created resources:
 | **Delegation Group (ManagementPlane)** | `PRG-{Scope}-{AccessLevel}-Persona}` | `PRG-Tenant-ManagementPlane-PlatformOps` |
 | **EM Catalog** | `Catalog-{ServiceName}` | `Catalog-Rg-MyApp` |
 | **Access Package** | `AP-{ServiceName}-{AccessLevel}-{Name}` | `AP-Rg-MyApp-WorkloadPlane-Users` |
-| **Resource Group** | `RG-{ServiceName}` | `RG-Rg-MyApp` |
+| **Resource Group** | `RG-{ServiceName}` | `RG-MyApp` |
 
 **Scope Prefixes:**
 - `Sub-{DeploymentPrefix}` — Subscription-level resources
@@ -1776,7 +1784,7 @@ After deployment, verify the following:
 
 ### Documentation
 
-- **[ServiceEM Landing Zone Visualization](./EntraOps/Public/ServiceEM/ServiceEM-LandingZone-Visualization.md)** - Comprehensive Mermaid diagrams showing:
+- **[ServiceEM Landing Zone Visualization](./ServiceEM-LandingZone-Visualization.md)** - Comprehensive Mermaid diagrams showing:
   - Group structure by EAM plane (ControlPlane, ManagementPlane, WorkloadPlane, CatalogPlane)
   - Access package → group resource role scopes
   - Assignment policies with requestor scopes and approvers

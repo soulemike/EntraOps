@@ -114,7 +114,7 @@ The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipel
 ServiceEM supports two governance approaches:
 
 - **Centralized**: Tenant-wide delegation groups (e.g., `PRG-Tenant-ControlPlane-IdentityOps`) for ControlPlane and ManagementPlane tiers
-- **Delegated**: Service-specific groups with isolated permissions per service landing zone
+- **PerService**: Service-specific groups with isolated permissions per service landing zone
 
 ### Documentation
 
