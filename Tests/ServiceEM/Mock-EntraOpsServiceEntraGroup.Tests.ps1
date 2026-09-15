@@ -55,52 +55,8 @@ BeforeAll {
     # Note: Resolve-EntraOpsServiceEMDelegationGroup is a private function
     # and is tested indirectly through New-EntraOpsSubscriptionLandingZone
     
-    # Mock Microsoft Graph cmdlets
-    function Mock-GetMgGroup {
-        param($Filter, $GroupId, $ConsistencyLevel)
-        if ($Filter -and $Filter -like "*mailNickname*") {
-            $mailNick = ($Filter -split "'")[1]
-            if ($script:MockGroups[$mailNick]) {
-                return $script:MockGroups[$mailNick]
-            }
-        }
-        return $null
-    }
-    
-    function Mock-NewMgGroup {
-        param($BodyParameter)
-        $newGroup = @{
-            Id                 = [guid]::NewGuid().ToString()
-            DisplayName        = $BodyParameter.DisplayName
-            MailNickname       = $BodyParameter.MailNickname
-            GroupTypes         = $BodyParameter.GroupTypes
-            SecurityEnabled    = $BodyParameter.SecurityEnabled
-            MailEnabled        = $BodyParameter.MailEnabled
-            IsAssignableToRole = $BodyParameter.IsAssignableToRole
-        }
-        $script:MockGroups[$BodyParameter.MailNickname] = $newGroup
-        return $newGroup
-    }
-    
-    function Mock-RemoveMgGroup {
-        param($GroupId)
-        $keyToRemove = $script:MockGroups.Keys | Where-Object { $script:MockGroups[$_].Id -eq $GroupId } | Select-Object -First 1
-        if ($keyToRemove) {
-            $script:MockGroups.Remove($keyToRemove)
-        }
-    }
-    
-    function Mock-GetMgContext {
-        return @{ Account = "test@example.com"; Scopes = @("Group.ReadWrite.All") }
-    }
-    
     # Initialize mock state
     $script:MockGroups = @{}
-    
-    Mock Get-MgGroup -MockWith ${function:Mock-GetMgGroup}
-    Mock New-MgGroup -MockWith ${function:Mock-NewMgGroup}
-    Mock Remove-MgGroup -MockWith ${function:Mock-RemoveMgGroup}
-    Mock Get-MgContext -MockWith ${function:Mock-GetMgContext}
     Mock Write-Verbose {}
     Mock Write-Warning {}
     Mock Write-Host {}
