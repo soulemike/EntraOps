@@ -7,28 +7,24 @@
 #   2. Configure pipeline variables (see below) or link a Variable Group
 #   3. Ensure the service principal / managed identity has required Microsoft Graph permissions
 #
-# Scheduling: Edit this file's schedules section or configure via ADO UI (pipeline -> Edit -> Triggers)
+# Scheduling: Run Update-EntraOpsAzureDevOpsSchedules from the EntraOps module
+# after changing EntraOpsConfig.json.
 
 trigger: none
 pr: none
 
+# BEGIN EntraOps managed schedules
 schedules:
-- cron: "30 9 * * *"
-  displayName: Daily EntraOps Pull
-  branches:
-    include:
-    - main
-  always: true
+  - cron: "30 9 * * *"
+    displayName: "EntraOps privileged access pull"
+    branches:
+      include:
+        - "main"
+    always: true
+# END EntraOps managed schedules
 
 variables:
-  # Required: tenant FQDN (e.g. contoso.onmicrosoft.com)
-  TenantName: $(EntraOpsTenantName)
-  # Optional: override config file path
   ConfigFile: ./EntraOpsConfig.json
-  # Optional: enable automated classification template updates from upstream
-  ApplyAutomatedClassificationUpdate: $(EntraOpsApplyAutomatedClassificationUpdate)
-  # Optional: enable automated Control Plane scope updates
-  ApplyAutomatedControlPlaneScopeUpdate: $(EntraOpsApplyAutomatedControlPlaneScopeUpdate)
   # ADO Service Connection name (configured in Project Settings -> Service Connections)
   AzureServiceConnection: $(EntraOpsAzureServiceConnection)
 
@@ -36,63 +32,93 @@ pool:
   vmImage: ubuntu-latest
 
 steps:
-- checkout: self
-  persistCredentials: true
-  displayName: 'Checkout repository'
+  - checkout: self
+    persistCredentials: true
+    displayName: "Checkout repository"
 
-# Optional: Update classification templates from upstream (GitHub/AzurePrivilegedIAM)
-- task: AzurePowerShell@5
-  displayName: 'Update Classification Templates'
-  condition: eq(variables.ApplyAutomatedClassificationUpdate, 'true')
-  inputs:
-    azureSubscription: '$(AzureServiceConnection)'
-    ScriptType: InlineScript
-    Inline: |
-      Import-Module ./EntraOps
-      Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $(TenantName) -ConfigFile $(ConfigFile)
-      $ClassificationUpdateParams = $EntraOpsConfig.AutomatedClassificationUpdate
-      Update-EntraOpsClassificationFiles @ClassificationUpdateParams
-      Disconnect-EntraOps
-    pwsh: true
-    preferredAzurePowerShellVersion: '12.3.0'
+  - task: PowerShell@2
+    displayName: "Read EntraOps configuration"
+    inputs:
+      targetType: inline
+      script: |
+        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+        $ClassificationUpdate = ($Config.AutomatedClassificationUpdate.ApplyAutomatedClassificationUpdate -eq $true).ToString().ToLowerInvariant()
+        $ControlPlaneUpdate = ($Config.AutomatedControlPlaneScopeUpdate.ApplyAutomatedControlPlaneScopeUpdate -eq $true).ToString().ToLowerInvariant()
+        Write-Host "##vso[task.setvariable variable=ApplyAutomatedClassificationUpdate]$ClassificationUpdate"
+        Write-Host "##vso[task.setvariable variable=ApplyAutomatedControlPlaneScopeUpdate]$ControlPlaneUpdate"
+      pwsh: true
 
-# Optional: Update Control Plane scope definitions
-- task: AzurePowerShell@5
-  displayName: 'Update Control Plane Scope'
-  condition: eq(variables.ApplyAutomatedControlPlaneScopeUpdate, 'true')
-  inputs:
-    azureSubscription: '$(AzureServiceConnection)'
-    ScriptType: InlineScript
-    Inline: |
-      Import-Module ./EntraOps
-      Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $(TenantName) -ConfigFile $(ConfigFile)
-      $CpUpdateParams = $EntraOpsConfig.AutomatedControlPlaneScopeUpdate
-      Update-EntraOpsClassificationControlPlaneScope @CpUpdateParams
-      Disconnect-EntraOps
-    pwsh: true
-    preferredAzurePowerShellVersion: '12.3.0'
+  - task: AzurePowerShell@5
+    displayName: "Get updated definition files for classification"
+    condition: and(succeeded(), eq(variables['ApplyAutomatedClassificationUpdate'], 'true'))
+    inputs:
+      azureSubscription: "$(AzureServiceConnection)"
+      ScriptType: InlineScript
+      Inline: |
+        Import-Module ./EntraOps
+        Connect-EntraOps -AuthenticationType FederatedCredentials -ConfigFilePath '$(ConfigFile)'
+        try {
+          $ClassificationUpdateParams = $EntraOpsConfig.AutomatedClassificationUpdate
+          Update-EntraOpsClassificationFiles @ClassificationUpdateParams
+        } finally {
+          Disconnect-EntraOps
+        }
+      pwsh: true
+      preferredAzurePowerShellVersion: "12.3.0"
 
-# Core step: Collect and classify privileged access, save to JSON
-- task: AzurePowerShell@5
-  displayName: 'Collect Privileged EAM Data'
-  inputs:
-    azureSubscription: '$(AzureServiceConnection)'
-    ScriptType: InlineScript
-    Inline: |
-      Import-Module ./EntraOps
-      Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $(TenantName) -ConfigFile $(ConfigFile)
-      Save-EntraOpsPrivilegedEAMJson -RbacSystems $($EntraOpsConfig.RbacSystems)
-      Disconnect-EntraOps
-    pwsh: true
-    preferredAzurePowerShellVersion: '12.3.0'
+  - task: AzurePowerShell@5
+    displayName: "Get updated scope for definition of Control Plane in Entra ID"
+    condition: and(succeeded(), eq(variables['ApplyAutomatedControlPlaneScopeUpdate'], 'true'))
+    inputs:
+      azureSubscription: "$(AzureServiceConnection)"
+      ScriptType: InlineScript
+      Inline: |
+        Import-Module ./EntraOps
+        Connect-EntraOps -AuthenticationType FederatedCredentials -ConfigFilePath '$(ConfigFile)'
+        try {
+          $ControlPlaneUpdateParams = $EntraOpsConfig.AutomatedControlPlaneScopeUpdate
+          Update-EntraOpsClassificationControlPlaneScope @ControlPlaneUpdateParams
+        } finally {
+          Disconnect-EntraOps
+        }
+      pwsh: true
+      preferredAzurePowerShellVersion: "12.3.0"
 
-# Commit generated JSON back to the repo (track history "as code")
-- task: PowerShell@2
-  displayName: 'Git Commit & Push'
-  inputs:
-    targetType: filePath
-    filePath: './scripts/ado/Ado-GitPush.ps1'
-    arguments: '-CommitMessage "EntraOps Pull"'
-    pwsh: true
-  env:
-    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+  - task: AzurePowerShell@5
+    displayName: "Run Save-EntraOpsPrivilegedEAMJson"
+    inputs:
+      azureSubscription: "$(AzureServiceConnection)"
+      ScriptType: InlineScript
+      Inline: |
+        Import-Module ./EntraOps
+        Connect-EntraOps -AuthenticationType FederatedCredentials -ConfigFilePath '$(ConfigFile)'
+        try {
+          Save-EntraOpsPrivilegedEAMJson -RbacSystems $EntraOpsConfig.RbacSystems
+        } finally {
+          Disconnect-EntraOps
+        }
+      pwsh: true
+      preferredAzurePowerShellVersion: "12.3.0"
+
+  - task: PowerShell@2
+    displayName: "Validate generated Privileged EAM artifacts"
+    inputs:
+      targetType: inline
+      script: |
+        Import-Module ./EntraOps
+        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+        $Strict = $Config.GeneratedArtifactValidation.FailOnContradictoryTierPair -eq $true
+        $StrictEmptyClassification = $Config.GeneratedArtifactValidation.FailOnPrivilegedAssignmentWithoutClassification -eq $true
+        Test-EntraOpsGeneratedArtifacts -PrivilegedEamPath ./PrivilegedEAM -FailOnContradictoryTierPair:$Strict -FailOnPrivilegedAssignmentWithoutClassification:$StrictEmptyClassification
+      pwsh: true
+
+  # Commit generated JSON back to the repo (track history "as code")
+  - task: PowerShell@2
+    displayName: "Git Commit & Push"
+    inputs:
+      targetType: filePath
+      filePath: "./.azure-pipelines/scripts/Ado-GitPush.ps1"
+      arguments: '-CommitMessage "EntraOps Pull"'
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)

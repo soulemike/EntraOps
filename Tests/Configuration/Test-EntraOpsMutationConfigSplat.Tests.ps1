@@ -38,11 +38,11 @@ Describe "Mutation configuration workflow splatting" {
         $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
 
         $SectionReceivers = [ordered]@{
-            AutomatedAdministrativeUnitManagement = @(
+            AutomatedAdministrativeUnitManagement         = @(
                 'New-EntraOpsPrivilegedAdministrativeUnit'
                 'Update-EntraOpsPrivilegedAdministrativeUnit'
             )
-            AutomatedConditionalAccessTargetGroups = @(
+            AutomatedConditionalAccessTargetGroups        = @(
                 'New-EntraOpsPrivilegedConditionalAccessGroup'
                 'Update-EntraOpsPrivilegedConditionalAccessGroup'
             )
@@ -50,7 +50,7 @@ Describe "Mutation configuration workflow splatting" {
                 'New-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
                 'Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
             )
-            AutomatedElmCatalogProtection = @(
+            AutomatedElmCatalogProtection                 = @(
                 'Update-EntraOpsPrivilegedUnprotectedElmCatalog'
             )
         }
@@ -82,6 +82,17 @@ Describe "Mutation configuration workflow splatting" {
         $Config.AutomatedEntraOpsUpdate.RunBrowserTests | Should -BeTrue
         @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Not -Contain './.github/workflows'
         $Config.ClassificationExplorer.GenerateChangeHistory | Should -BeFalse
+    }
+
+    It "generates Azure DevOps update targets and publication defaults" {
+        $ConfigPath = Join-Path $TestDrive 'EntraOps-AzureDevOps.json'
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform AzureDevOps -ConfigFilePath $ConfigPath | Out-Null
+        $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
+
+        $Config.DevOpsPlatform | Should -Be 'AzureDevOps'
+        $Config.AutomatedEntraOpsUpdate.PublicationMode | Should -Be 'DirectPush'
+        @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Contain './.azure-pipelines'
+        @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Not -Contain './.github/actions'
     }
 
     It "writes explicitly selected automated-update validation options" {

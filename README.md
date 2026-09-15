@@ -13,6 +13,7 @@
     - [Filter on classification in EntraOps](#filter-on-classification-in-entraops)
     - [Filter on classified objects and object details](#filter-on-classified-objects-and-object-details)
   - [Using EntraOps with GitHub](#using-entraops-with-github)
+  - [Using EntraOps with Azure DevOps](#using-entraops-with-azure-devops)
   - [Log Analytics Ingestion Setup](#log-analytics-ingestion-setup)
     - [Overview of Components](#overview-of-components)
     - [Step 1: Create the Log Analytics Workspace](#step-1-create-the-log-analytics-workspace)
@@ -20,6 +21,8 @@
     - [Step 3: Create the Data Collection Endpoint (DCE)](#step-3-create-the-data-collection-endpoint-dce)
     - [Step 4: Create the Data Collection Rule (DCR)](#step-4-create-the-data-collection-rule-dcr)
     - [Step 5: Assign Required RBAC Roles](#step-5-assign-required-rbac-roles)
+      - [PowerShell example](#powershell-example)
+      - [Automated assignment via EntraOps cmdlet](#automated-assignment-via-entraops-cmdlet)
     - [Step 6: Configure EntraOpsConfig.json](#step-6-configure-entraopsconfigjson)
     - [Ingestion Behavior and Limits](#ingestion-behavior-and-limits)
   - [EntraOps Integration in Microsoft Sentinel](#entraops-integration-in-microsoft-sentinel)
@@ -31,8 +34,10 @@
       - [Available Workbooks](#available-workbooks)
       - [Post-Deployment Configuration](#post-deployment-configuration)
   - [EntraOps Integration to Attack Path Management](#entraops-integration-to-attack-path-management)
-    - [BloodHound](#bloodhound)
+    - [BloodHound Integration](#bloodhound-integration)
   - [Tenant Governance Relationship Support](#tenant-governance-relationship-support)
+    - [Configuring EntraOps for Tenant Governance Relationships](#configuring-entraops-for-tenant-governance-relationships)
+    - [Authentication Recommendations for Tenant Governance](#authentication-recommendations-for-tenant-governance)
   - [Classify privileged objects by Custom Security Attributes](#classify-privileged-objects-by-custom-security-attributes)
   - [Classification of Identity Governance delegation and roles](#classification-of-identity-governance-delegation-and-roles)
     - [Identify delegated management with different classifications](#identify-delegated-management-with-different-classifications)
@@ -41,20 +46,20 @@
     - [Microsoft Security Exposure Management](#microsoft-security-exposure-management)
     - [Adjusted Control Plane Scope by using Restricted Management and Role Assignments](#adjusted-control-plane-scope-by-using-restricted-management-and-role-assignments)
   - [Why was this classification chosen for the role?](#why-was-this-classification-chosen-for-the-role)
-  - [Update EntraOps PowerShell Module and CI/CD (GitHub Actions)](#update-entraops-powershell-module-and-cicd-github-actions)
+  - [Update EntraOps PowerShell Module and CI/CD](#update-entraops-powershell-module-and-cicd)
   - [Changelog](#changelog)
   - [Project Policies and License](#project-policies-and-license)
     - [Managed Service or Commercial Use Notice](#managed-service-or-commercial-use-notice)
 
 ## Introduction
 
-EntraOps is a community research project that demonstrates automated management of a Microsoft Entra ID tenant at scale using a DevOps approach. The PowerShell module and GitHub repository template analyze privileges and apply a customizable classification model to identify access sensitivity based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA). EntraOps requires PowerShell 7.4 or later and can run in GitHub Actions, custom automation, managed-identity hosts, or local environments.
+EntraOps is a community research project that demonstrates automated management of a Microsoft Entra ID tenant at scale using a DevOps approach. The PowerShell module and repository templates analyze privileges and apply a customizable classification model to identify access sensitivity based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA). EntraOps requires PowerShell 7.4 or later and can run in GitHub Actions, Azure Pipelines, custom automation, managed-identity hosts, or local environments.
 
-Start with the **[EntraOps Docs](./Docs/index.html)** and guided **[Get Started setup guide](./Docs/get-started/index.html)** for an interactive run, a local configuration, or GitHub automation.
+Start with the **[EntraOps Docs](./Docs/index.html)** and guided **[Get Started setup guide](./Docs/get-started/index.html)** for an interactive run, a local configuration, GitHub Actions, or Azure Pipelines.
 
 ## Key features
 
-- 🚀 Automate deployment with GitHub, or run locally on any platform that supports PowerShell Core.
+- 🚀 Automate deployment with GitHub Actions or Azure Pipelines, or run locally on any platform that supports PowerShell Core.
 
 - ☑️ Track changes to privileged principals and their assignments as code.
 
@@ -91,7 +96,7 @@ Currently the following RBAC systems are supported:
 - 🖥️ Microsoft Intune RBAC
 - ☁️ Microsoft Azure RBAC
 
-The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline, or in any automation/worker environment that supports PowerShell Core. Automated pipeline creation currently supports GitHub only.
+The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline, or in any automation/worker environment that supports PowerShell Core. Shipped automation templates support both GitHub Actions and Azure Pipelines.
 
 ## Service EM - Service-scoped Landing Zones
 
@@ -334,6 +339,22 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
     ```powershell
     Update-EntraOpsRequiredWorkflowParameters
     ```
+
+  ## Using EntraOps with Azure DevOps
+
+  EntraOps also ships Azure Pipelines for collection, push operations, reporting, Tenant Governance
+  snapshots, repository updates, and CI validation. They use an Azure Resource Manager service
+  connection with workload identity federation and read operational settings directly from
+  `EntraOpsConfig.json`. Apply YAML schedules with the public module command:
+
+  ```powershell
+  Import-Module ./EntraOps
+  Update-EntraOpsAzureDevOpsSchedules -ConfigFile ./EntraOpsConfig.json -BranchName main
+  ```
+
+  Use the [Get Started guide](./Docs/get-started/index.html?guide=expert#deploy-with-azure-devops) for
+  the integrated service-connection setup, pipeline import, repository permissions, cross-tenant
+  guidance, reporting behavior, troubleshooting, and GitHub/Azure DevOps comparison.
 
 ## Log Analytics Ingestion Setup
 
@@ -885,17 +906,21 @@ _Enter the role definition name in the "used by Roles" and choose the desired ti
 <a href="https://cloud-architekt.github.io/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" target="_blank"><img src="https://cloud-architekt.github.io/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" width="1000" /></a>
 <br>
 
-## Update EntraOps PowerShell Module and CI/CD (GitHub Actions)
+## Update EntraOps PowerShell Module and CI/CD
 
 EntraOps can be updated without losing classification definition and files by using the cmdlet `Update-EntraOps`.
 The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, workflow files, repository resources (incl. workbooks and parsers) and parameters in workflows based on "EntraOps.config" file.
 
-Currently, there is also a workflow named "Update-EntraOps" which can be executed on demand or run on scheduled basis (defined in EntraOps.config) and updates the PowerShell module only.
-There are some restrictions to update workflows by another workflow which makes it hard to update the actions automatically.
+The GitHub `Update-EntraOps` workflow and Azure DevOps `azure-pipelines-update` pipeline can run on
+demand or on the schedule defined in `EntraOpsConfig.json`. GitHub defaults to publishing updates
+through a pull request; Azure DevOps uses direct push. Updating GitHub workflow definitions requires
+the separately configured publisher GitHub App, while Azure DevOps pipeline definitions are included
+in its default update targets.
 
 Regardless of the way to update EntraOps files, it could be required to update the EntraOps.config file and service principals of EntraOps to take benefit of new features. Create a new EntraOps.config file or add manually the named properties in the description of the feature. Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpObjectId` and the object ID of the EntraOps service principal (Example: `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-CloudLab" -ExistingSpObjectId eca9154b-0d2a-4609-aa41-064eb317bfb3`). Ignore errors regarding existing API permissions or conflicts with existing roles.
 
-Don't forget to update your workflow files by using the cmdlet `Update-EntraOpsRequiredWorkflowParameters`.
+After changing automation settings, run `Update-EntraOpsRequiredWorkflowParameters` for GitHub or
+`Update-EntraOpsAzureDevOpsSchedules` for Azure DevOps, then commit the resulting definition changes.
 
 I recommend to remove and create a service principal but also re-create the EntraOps.config file if there should be any issues by updating EntraOps.
 

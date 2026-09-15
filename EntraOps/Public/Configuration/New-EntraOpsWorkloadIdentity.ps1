@@ -31,6 +31,18 @@
     Name of the entity (e.g., branch name "main" or environment name "prod") which will be used for creating the federated credential.
     By default, the value is "main".
 
+.PARAMETER AdoOrgName
+    Azure DevOps organization name used in the service connection subject.
+
+.PARAMETER AdoProjectName
+    Azure DevOps project name used in the service connection subject.
+
+.PARAMETER AdoServiceConnectionName
+    Exact Azure DevOps service connection name.
+
+.PARAMETER AdoFederatedCredentialIssuer
+    Exact issuer shown by the Azure DevOps workload identity federation service connection.
+
 .EXAMPLE
     Create App Registration based on the configuration in the config file (default location: ./EntraOpsConfig.json).
     If the Ingestion to Log Analytics is defined in Config file, the required permissions will be added to the Resource Group of the Data Collection Rule.
@@ -105,11 +117,22 @@ function New-EntraOpsWorkloadIdentity {
     # Load configuration file
     $Config = Get-Content -Path $ConfigFile | ConvertFrom-Json
     if ($CreateFederatedCredential) {
-        $GitHubOrg = $GitHubOrg.Trim()
-        $GitHubRepo = $GitHubRepo.Trim()
-        $FederatedEntityName = $FederatedEntityName.Trim()
-        if ([string]::IsNullOrWhiteSpace($GitHubOrg) -or [string]::IsNullOrWhiteSpace($GitHubRepo) -or [string]::IsNullOrWhiteSpace($FederatedEntityName)) {
-            throw "GitHubOrg, GitHubRepo, and FederatedEntityName must contain non-whitespace values when CreateFederatedCredential is specified."
+        if ($Config.DevOpsPlatform -eq 'GitHub') {
+            $GitHubOrg = $GitHubOrg.Trim()
+            $GitHubRepo = $GitHubRepo.Trim()
+            $FederatedEntityName = $FederatedEntityName.Trim()
+            if ([string]::IsNullOrWhiteSpace($GitHubOrg) -or [string]::IsNullOrWhiteSpace($GitHubRepo) -or [string]::IsNullOrWhiteSpace($FederatedEntityName)) {
+                throw "GitHubOrg, GitHubRepo, and FederatedEntityName must contain non-whitespace values when CreateFederatedCredential is specified for GitHub."
+            }
+        } elseif ($Config.DevOpsPlatform -eq 'AzureDevOps') {
+            $AdoOrgName = $AdoOrgName.Trim()
+            $AdoProjectName = $AdoProjectName.Trim()
+            $AdoServiceConnectionName = $AdoServiceConnectionName.Trim()
+            $AdoFederatedCredentialIssuer = $AdoFederatedCredentialIssuer.Trim()
+            if ([string]::IsNullOrWhiteSpace($AdoOrgName) -or [string]::IsNullOrWhiteSpace($AdoProjectName) -or
+                [string]::IsNullOrWhiteSpace($AdoServiceConnectionName) -or [string]::IsNullOrWhiteSpace($AdoFederatedCredentialIssuer)) {
+                throw "AdoOrgName, AdoProjectName, AdoServiceConnectionName, and the exact AdoFederatedCredentialIssuer shown by Azure DevOps are required when CreateFederatedCredential is specified for AzureDevOps."
+            }
         }
     }
 
@@ -534,10 +557,6 @@ function New-EntraOpsWorkloadIdentity {
         } elseif ($Config.DevOpsPlatform -eq "AzureDevOps") {
             Write-Output "Add Federated Credential to $AppDisplayName for Azure DevOps..."
 
-            if ([string]::IsNullOrWhiteSpace($AdoFederatedCredentialIssuer)) {
-                $AdoFederatedCredentialIssuer = "https://login.microsoftonline.com/$($Config.TenantId)/v2.0"
-            }
-
             $FederatedCredentialParam = @{
                 name      = "$($AdoOrgName)-$($AdoProjectName)-$($AdoServiceConnectionName)"
                 issuer    = $AdoFederatedCredentialIssuer
@@ -548,9 +567,22 @@ function New-EntraOpsWorkloadIdentity {
             }
 
             try {
-                New-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -BodyParameter $FederatedCredentialParam
+                $ExistingFederatedCredentials = @(Get-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -All)
+                $ExistingFederatedCredential = $ExistingFederatedCredentials | Where-Object { $_.Name -eq $FederatedCredentialParam.name } | Select-Object -First 1
+                if ($ExistingFederatedCredential) {
+                    $AudienceDifference = @(Compare-Object -ReferenceObject @($FederatedCredentialParam.audiences) -DifferenceObject @($ExistingFederatedCredential.Audiences))
+                    if ($ExistingFederatedCredential.Issuer -ceq $FederatedCredentialParam.issuer -and
+                        $ExistingFederatedCredential.Subject -ceq $FederatedCredentialParam.subject -and
+                        $AudienceDifference.Count -eq 0) {
+                        Write-Output "Federated Credential '$($FederatedCredentialParam.name)' is already configured."
+                    } else {
+                        Add-EntraOpsProvisioningFailure -Message "Federated Credential '$($FederatedCredentialParam.name)' already exists but does not match the Azure DevOps service connection issuer, subject, or audience."
+                    }
+                } else {
+                    New-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -BodyParameter $FederatedCredentialParam | Out-Null
+                }
             } catch {
-                Write-Warning "Failed to add Federated Credential to $AppDisplayName. Error: $_"
+                Add-EntraOpsProvisioningFailure -Message "Failed to configure the Azure DevOps Federated Credential '$($FederatedCredentialParam.name)' on $AppDisplayName. Error: $($_.Exception.Message)"
             }
         } else {
             Write-Warning "Automation configuration of federated credential for DevOps Platform $($Config.DevOpsPlatform) is not implemented yet."

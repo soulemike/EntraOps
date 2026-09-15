@@ -300,7 +300,7 @@ Describe 'Update-EntraOps prepared candidate apply path' {
 
 Describe 'Update candidate resolution' {
     BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         $RepositoryRoot = $script:TestRepositoryRoot
         $Resolver = Get-Command Get-EntraOpsUpdateCandidate
 
@@ -369,7 +369,7 @@ Describe 'Update candidate resolution' {
         $CmdletDefaults = @(($FunctionAst.Body.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'TargetUpdateFolders' }).DefaultValue.SafeGetValue())
 
         $ConfigGenerator = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'EntraOps/Public/Configuration/New-EntraOpsConfigFile.ps1') -Raw
-        $GeneratorMatch = [regex]::Match($ConfigGenerator, 'TargetUpdateFolders\s*=\s*@\((?<List>[^)]*)\)')
+        $GeneratorMatch = [regex]::Match($ConfigGenerator, '(?s)\$DefaultUpdateTargets\s*=\s*if.*?\}\s*else\s*\{\s*@\((?<List>[^)]*)\)')
         $GeneratorMatch.Success | Should -BeTrue
         $GeneratorDefaults = @([regex]::Matches($GeneratorMatch.Groups['List'].Value, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
 
@@ -412,7 +412,7 @@ Describe 'Update candidate resolution' {
 
 Describe 'Automated update change detection' {
     BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         $RepositoryRoot = $script:TestRepositoryRoot
         $ChangeDetector = Get-Command Get-EntraOpsUpdatePlan
         $SourceCommit = '1234567890abcdef1234567890abcdef12345678'
@@ -552,7 +552,7 @@ Describe 'Automated update change detection' {
 
 Describe 'Automated update defaults' {
     BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         $RepositoryRoot = $script:TestRepositoryRoot
     }
 
@@ -563,7 +563,8 @@ Describe 'Automated update defaults' {
         $ConfigGenerator | Should -Match 'UpdateScheduledTrigger\s*=\s*\$ApplyAutomatedEntraOpsUpdate'
         $ConfigGenerator | Should -Match "\[ValidateSet\('PullRequest', 'DirectPush'\)\]"
         $ConfigGenerator | Should -Match '\[string\]\$UpdatePublicationMode\s*=\s*''PullRequest'''
-        $ConfigGenerator | Should -Match 'PublicationMode\s*=\s*\$UpdatePublicationMode'
+        $ConfigGenerator | Should -Match 'PublicationMode\s*=\s*\$DefaultUpdatePublicationMode'
+        $ConfigGenerator | Should -Match '(?s)\$DevOpsPlatform -eq ''AzureDevOps''.*DirectPush'
         $ConfigGenerator | Should -Match "\[ValidateSet\('OnChange', 'Always', 'Never'\)\]"
         $ConfigGenerator | Should -Match '\[string\]\$ValidationFrequency\s*=\s*''OnChange'''
         $ConfigGenerator | Should -Match '\[boolean\]\$RunBrowserTests\s*=\s*\$true'
@@ -590,12 +591,14 @@ Describe 'Automated update defaults' {
         $ConfigGenerator = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'EntraOps/Public/Configuration/New-EntraOpsConfigFile.ps1') -Raw
         $Wizard = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'Docs/configuration/config-wizard.js') -Raw
         $SetupWizard = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'Docs/get-started/setup-wizard.js') -Raw
-        $GeneratorMatch = [regex]::Match($ConfigGenerator, 'TargetUpdateFolders\s*=\s*@\((?<List>[^)]*)\)')
+        $GeneratorDefaultsRegion = ($ConfigGenerator -split '\$DefaultUpdateTargets\s*=')[1] -split '\$DefaultUpdatePublicationMode\s*='
+        $SetupDefaultsRegion = ($SetupWizard -split 'var updateTargets\s*=')[1] -split 'return \{'
 
-        $GeneratorMatch.Success | Should -BeTrue
-        $GeneratorMatch.Groups['List'].Value | Should -Not -Match '"\./\.github/workflows"'
+        $GeneratorDefaultsRegion | Should -Not -BeNullOrEmpty
+        $GeneratorDefaultsRegion | Should -Not -Match '"\./\.github/workflows"'
         $Wizard | Should -Match 'UpdateTargetFolders:\s*\[(?![^\]]*"\./\.github/workflows")'
-        $SetupWizard | Should -Match 'TargetUpdateFolders:\s*\[(?![^\]]*"\./\.github/workflows")'
+        $SetupDefaultsRegion | Should -Not -BeNullOrEmpty
+        $SetupDefaultsRegion | Should -Not -Match '"\./\.github/workflows"'
     }
 
     It 'documents manual and GitHub App workflow-update opt-in paths' {
@@ -773,7 +776,7 @@ Describe 'Automated update defaults' {
 
 Describe 'Generated artifact validation' {
     BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         $PullWorkflow = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/workflows/Pull-EntraOpsPrivilegedEAM.yaml') -Raw
     }
 
@@ -825,7 +828,7 @@ Describe 'Deployment browser validation' {
 
 Describe 'Git-Push credential header' {
     BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         $script:GitPushAction = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/actions/Git-Push/action.yml') -Raw
         $script:GitPushScript = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/scripts/Publish-EntraOpsGitHubChanges.ps1') -Raw
     }
@@ -872,7 +875,7 @@ Describe 'Git-Push credential header' {
 
 Describe 'Git-Push publisher behavior' {
     BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         $script:Publisher = Join-Path $script:TestRepositoryRoot '.github/scripts/Publish-EntraOpsGitHubChanges.ps1'
         $script:Remote = Join-Path $TestDrive 'remote.git'
         $script:Seed = Join-Path $TestDrive 'seed'

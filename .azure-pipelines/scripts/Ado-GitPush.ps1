@@ -33,7 +33,12 @@ if ($LASTEXITCODE -ne 0) {
     exit 0
 }
 
-git -c http.extraheader="AUTHORIZATION: bearer $AccessToken" push origin HEAD:$BranchName
+$env:GIT_CONFIG_COUNT = '2'
+$env:GIT_CONFIG_KEY_0 = 'http.extraHeader'
+$env:GIT_CONFIG_VALUE_0 = ''
+$env:GIT_CONFIG_KEY_1 = 'http.extraHeader'
+$env:GIT_CONFIG_VALUE_1 = "AUTHORIZATION: bearer $AccessToken"
+git push origin HEAD:$BranchName
 if ($LASTEXITCODE -ne 0) {
     Write-Error "git push failed."
     exit 1

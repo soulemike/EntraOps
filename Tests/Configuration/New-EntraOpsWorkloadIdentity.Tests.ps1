@@ -51,27 +51,28 @@ BeforeAll {
         param (
             [Parameter(Mandatory = $true)][string]$Path,
             [string[]]$RbacSystems = @('Azure'),
-            [bool]$EnableTenantGovernanceSnapshot = $false
+            [bool]$EnableTenantGovernanceSnapshot = $false,
+            [string]$DevOpsPlatform = 'GitHub'
         )
 
         @{
             TenantId                                      = '11111111-1111-1111-1111-111111111111'
             AuthenticationType                            = 'FederatedCredentials'
-            DevOpsPlatform                                = 'GitHub'
+            DevOpsPlatform                                = $DevOpsPlatform
             ClientId                                      = 'not-configured'
             RbacSystems                                   = $RbacSystems
-            AutomatedAdministrativeUnitManagement        = @{ ApplyAdministrativeUnitAssignments = $false }
+            AutomatedAdministrativeUnitManagement         = @{ ApplyAdministrativeUnitAssignments = $false }
             AutomatedRmauAssignmentsForUnprotectedObjects = @{ ApplyRmauAssignmentsForUnprotectedObjects = $false }
-            AutomatedElmCatalogProtection                = @{ ApplyPrivilegedElmCatalogProtection = $false }
-            AutomatedConditionalAccessTargetGroups       = @{ ApplyConditionalAccessTargetGroups = $false }
+            AutomatedElmCatalogProtection                 = @{ ApplyPrivilegedElmCatalogProtection = $false }
+            AutomatedConditionalAccessTargetGroups        = @{ ApplyConditionalAccessTargetGroups = $false }
             AutomatedControlPlaneScopeUpdate              = @{
                 ApplyAutomatedControlPlaneScopeUpdate = $false
                 PrivilegedObjectClassificationSource  = @()
             }
             LogAnalytics                                  = @{ IngestToLogAnalytics = $false }
             SentinelWatchLists                            = @{
-                IngestToWatchLists      = $false
-                WatchListTemplates      = @('None')
+                IngestToWatchLists        = $false
+                WatchListTemplates        = @('None')
                 WatchListWorkloadIdentity = @('None')
             }
             TenantGovernanceSnapshot                      = @{
@@ -163,7 +164,7 @@ Describe 'New-EntraOpsWorkloadIdentity provisioning safety' {
         }
 
         { New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath } |
-            Should -Throw "*Directory.Read.All*consent denied*"
+        Should -Throw "*Directory.Read.All*consent denied*"
     }
 
     It 'fails the setup when the requested federated credential cannot be created' {
@@ -173,7 +174,33 @@ Describe 'New-EntraOpsWorkloadIdentity provisioning safety' {
 
         { New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath -ExistingSpObjectId 'workload-sp-object-id' -CreateFederatedCredential `
                 -GitHubOrg 'Contoso' -GitHubRepo 'EntraOps-Prod' -FederatedEntityType Branch -FederatedEntityName main } |
-            Should -Throw "*Federated Credential*EntraOps-Prod-Branch-main*federation denied*"
+        Should -Throw "*Federated Credential*EntraOps-Prod-Branch-main*federation denied*"
+    }
+
+    It 'requires the exact Azure DevOps issuer before provisioning federation' {
+        $ConfigPath = Join-Path $TestDrive 'ado-missing-issuer.json'
+        New-WorkloadIdentityTestConfig -Path $ConfigPath -RbacSystems @('EntraID') -DevOpsPlatform AzureDevOps
+
+        { New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath -CreateFederatedCredential `
+                -AdoOrgName 'Contoso' -AdoProjectName 'Identity' -AdoServiceConnectionName 'EntraOps-WIF' } |
+        Should -Throw '*exact AdoFederatedCredentialIssuer*'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'creates an Azure DevOps federated credential from exact service connection metadata' {
+        $ConfigPath = Join-Path $TestDrive 'ado-federation.json'
+        New-WorkloadIdentityTestConfig -Path $ConfigPath -RbacSystems @('EntraID') -DevOpsPlatform AzureDevOps
+        $Issuer = 'https://vstoken.dev.azure.com/11111111-2222-3333-4444-555555555555'
+
+        { New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath -ExistingSpObjectId 'workload-sp-object-id' -CreateFederatedCredential `
+                -AdoOrgName 'Contoso' -AdoProjectName 'Identity' -AdoServiceConnectionName 'EntraOps-WIF' -AdoFederatedCredentialIssuer $Issuer } |
+        Should -Not -Throw
+
+        Should -Invoke New-MgApplicationFederatedIdentityCredential -Times 1 -ParameterFilter {
+            $BodyParameter.issuer -ceq $Issuer -and
+            $BodyParameter.subject -ceq 'sc://Contoso/Identity/EntraOps-WIF' -and
+            @($BodyParameter.audiences) -contains 'api://AzureADTokenExchange'
+        }
     }
 
     It 'skips application permissions and a federated credential that already exist' {
@@ -195,7 +222,7 @@ Describe 'New-EntraOpsWorkloadIdentity provisioning safety' {
 
         { New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath -ExistingSpObjectId 'workload-sp-object-id' -CreateFederatedCredential `
                 -GitHubOrg 'Contoso' -GitHubRepo 'EntraOps-Prod' -FederatedEntityType Branch -FederatedEntityName main } |
-            Should -Not -Throw
+        Should -Not -Throw
 
         Should -Invoke New-MgApplication -Times 0
         Should -Invoke New-MgServicePrincipalAppRoleAssignment -Times 0
@@ -216,7 +243,7 @@ Describe 'New-EntraOpsWorkloadIdentity provisioning safety' {
 
         { New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath -ExistingSpObjectId 'workload-sp-object-id' -CreateFederatedCredential `
                 -GitHubOrg 'Contoso' -GitHubRepo 'EntraOps-Prod' -FederatedEntityType Branch -FederatedEntityName main } |
-            Should -Throw '*issuer, subject, or audience does not match*'
+        Should -Throw '*issuer, subject, or audience does not match*'
 
         Should -Invoke New-MgApplicationFederatedIdentityCredential -Times 0
     }
