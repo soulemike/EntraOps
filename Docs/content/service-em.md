@@ -1168,7 +1168,7 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 
 > **Note on PIM Staging Groups:** The `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` group is created as a staging group for PIM elevation workflows. This group is not documented in the original table above but is consistently created during deployment. It enables the PIM elevation path from Members to ManagementPlane-Admins.
 
-**Rg Scope (Default - without -Smb):**
+**Rg Scope:**
 | Group                                    | Type           | Purpose                    |
 | ---------------------------------------- | -------------- | -------------------------- |
 | `Rg-{Prefix} Members`                    | Unified (M365) | Team collaboration group   |
@@ -1176,18 +1176,6 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 | `SG-Rg-{Prefix}-ManagementPlane-Members` | Security       | Management tier membership |
 | `SG-Rg-{Prefix}-WorkloadPlane-Users`     | Security       | End-user data-plane access |
 | `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | Security       | Workload admin elevation   |
-
-**Rg Scope (with -Smb parameter):**
-| Group                                    | Type           | Purpose                    |
-| ---------------------------------------- | -------------- | -------------------------- |
-| `Rg-{Prefix} Members`                    | Unified (M365) | Team collaboration group   |
-| `SG-Rg-{Prefix}-CatalogPlane-Members`    | Security       | Catalog administrators     |
-| `SG-Rg-{Prefix}-ManagementPlane-Members` | Security       | Management tier membership |
-| `SG-Rg-{Prefix}-ManagementPlane-Admins`  | Security       | Management tier elevation  |
-| `SG-Rg-{Prefix}-WorkloadPlane-Users`     | Security       | End-user data-plane access |
-| `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | Security       | Workload admin elevation   |
-
-> **Note:** The `-Smb` parameter shifts ManagementPlane-Admins from Sub scope to Rg scope. By default (without `-Smb`), ManagementPlane-Admins is created in Sub scope only. WorkloadPlane-Members is not created in either scope by default.
 
 ### Subscription-Level Azure RBAC Implementation
 
@@ -1278,17 +1266,6 @@ Access packages are **only created for groups**, not for delegated groups. The n
 | `AP-Rg-{Prefix}-ManagementPlane-Members` | `SG-Rg-{Prefix}-ManagementPlane-Members` | WorkloadPlane-Members | ManagementPlane-Admins | None       |
 | `AP-Rg-{Prefix}-WorkloadPlane-Users`     | `SG-Rg-{Prefix}-WorkloadPlane-Users`     | CatalogPlane-Members  | WorkloadPlane-Admins   | 5 days     |
 | `AP-Rg-{Prefix}-WorkloadPlane-Admins`    | `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | WorkloadPlane-Members | ManagementPlane-Admins | 5 days     |
-
-**Rg Scope (with -Smb parameter - 6 access packages):**
-| Access Package                           | Grants Membership To                     | Requestors              | Approver               | Expiration |
-| ---------------------------------------- | ---------------------------------------- | ----------------------- | ---------------------- | ---------- |
-| `AP-Rg-{Prefix}-CatalogPlane-Members`    | `SG-Rg-{Prefix}-CatalogPlane-Members`    | CatalogPlane-Members    | CatalogPlane-Members   | 5 days     |
-| `AP-Rg-{Prefix}-ManagementPlane-Members` | `SG-Rg-{Prefix}-ManagementPlane-Members` | WorkloadPlane-Members   | ManagementPlane-Admins | None       |
-| `AP-Rg-{Prefix}-ManagementPlane-Admins`  | `SG-Rg-{Prefix}-ManagementPlane-Admins`  | ManagementPlane-Members | ManagementPlane-Admins | 5 days     |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users`     | `SG-Rg-{Prefix}-WorkloadPlane-Users`     | CatalogPlane-Members    | WorkloadPlane-Admins   | 5 days     |
-| `AP-Rg-{Prefix}-WorkloadPlane-Admins`    | `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | WorkloadPlane-Members   | ManagementPlane-Admins | 5 days     |
-
-> **Note:** Access packages are only created for groups that exist. The `-Smb` parameter creates additional access packages by adding ManagementPlane-Admins to Rg scope. WorkloadPlane-Members access package is not created by default as the group is not created.
 
 > **Note**: No access packages are created for ControlPlane-Admins — membership is managed directly by ControlPlane admins.
 
