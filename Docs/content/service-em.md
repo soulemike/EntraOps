@@ -1785,7 +1785,7 @@ After deployment, verify the following:
 
 ### Documentation
 
-- **[ServiceEM Landing Zone Visualization](./ServiceEM-LandingZone-Visualization.md)** - Comprehensive Mermaid diagrams showing:
+- **[ServiceEM Landing Zone Visualization](./service-em-landing-zone-visualization.md)** - Comprehensive Mermaid diagrams showing:
   - Group structure by EAM plane (ControlPlane, ManagementPlane, WorkloadPlane, CatalogPlane)
   - Access package → group resource role scopes
   - Assignment policies with requestor scopes and approvers
