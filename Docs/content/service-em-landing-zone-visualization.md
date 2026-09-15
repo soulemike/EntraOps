@@ -156,7 +156,7 @@ flowchart TD
     G_MP_Mbr  -->|"PIM Eligible: Reader"| AZ_RG
     G_MP_Adm  -->|"PIM Eligible: Contributor"| AZ_RG
     G_Ctrl    -->|"PIM Eligible: User Access Administrator"| AZ_RG
-    G_PIM     -->|"Direct: Owner\n(requires -pimForGroups)"| AZ_RG
+    G_PIM     -->|"Direct: Owner\n(internal PIM proxy)"| AZ_RG
 ```
 
 ---
@@ -317,8 +317,8 @@ flowchart LR
     G_MP_Mbr  -->|"PIM Eligible\nReader"| RG
     G_MP_Adm  -->|"PIM Eligible\nContributor"| RG
     G_Ctrl    -->|"PIM Eligible\nUser Access Administrator"| RG
-    G_MP_Mbr  -->|"Direct assignment\nReader\n(requires rbacModel: Azure or Both)"| RG
-    G_PIM     -->|"Direct assignment\nOwner\n(requires -pimForGroups)"| RG
+    G_MP_Mbr  -->|"Direct assignment\nReader\n(internal: Azure RBAC model)"| RG
+    G_PIM     -->|"Direct assignment\nOwner\n(internal PIM proxy)"| RG
 ```
 
 ---

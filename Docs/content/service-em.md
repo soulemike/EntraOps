@@ -70,7 +70,7 @@ New-EntraOpsSubscriptionLandingZone `
 #### Step 3: Verify Deployment
 
 ```powershell
-# Check created groups (matches both base and PIM staging groups)
+# Check created groups (matches both base and PIM proxy groups)
 Get-MgGroup -Filter "startswith(mailNickname,'MyFirstApp.') or startswith(mailNickname,'PIM.MyFirstApp.')"
 
 # Check access packages scoped to this service only
@@ -109,11 +109,11 @@ ServiceEM automates the creation of **tiered, service-scoped landing zones** fol
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix <string>          # Required: Service name prefix
     -AzureRegion <string>               # Required: Azure region (e.g., "westeurope")
-    -WorkloadPlaneAdmin <string>              # Required: Owner's email
+    -WorkloadPlaneAdmin <string>        # Required: Owner's email
     -ServiceMembers <array>             # Optional: Member emails
     -GovernanceModel <string>           # Optional: "PerService" (default) or "Centralized"
     -SkipAzureResourceGroup             # Optional: Skip Azure RG creation (Entra only)
-    -NoPimEscalation            # Optional: No emergency bypass groups
+    -NoPimEscalation                    # Optional: No emergency bypass groups
     -Verbose                            # Recommended: See what's being created
 ```
 
@@ -254,7 +254,7 @@ New-EntraOpsSubscriptionLandingZone `
 
 **What gets created:**
 - **Sub scope**: Subscription-level groups, catalog, access packages, PIM policies
-- **Rg scope**: Resource group `RG-Rg-MyFirstApp` with tier-specific groups and RBAC
+- **Rg scope**: Resource group `RG-MyFirstApp` with tier-specific groups and RBAC
 - **Governance**: PerService model (creates per-service admin groups automatically)
 
 **Explicit Centralized deployment (requires pre-existing groups):**
@@ -428,7 +428,7 @@ VERBOSE: [New-EntraOpsServicePIMPolicy] Updating PIM Policy ID: Group_baa5996e-1
 
 # 19. Azure Resource Group created with RBAC assignments
 VERBOSE: [New-EntraOpsServiceAZContainer] Azure Resource Group not found, creating
-VERBOSE: Created resource group 'RG-Rg-MyEntraOpsApp' in location 'westeurope'
+VERBOSE: Created resource group 'RG-MyEntraOpsApp' in location 'westeurope'
 
 # 20. Inherited subscription-level permissions detected, RG assignments skipped
 VERBOSE: [New-EntraOpsServiceAZContainer] ManagementPlane-Admins already has Contributor eligible at a higher scope — skipping RG assignment
@@ -521,6 +521,8 @@ This will create `EntraOpsConfig.json` with:
 - Authentication context is **disabled** by default (`EnableAuthenticationContext: false`)
 - When disabled, PIM policies enforce **MFA + Business Justification only**
 - Constrained delegation is configured with sensible defaults for ManagementPlane and WorkloadPlane tiers
+
+> **Governance model default:** New-EntraOpsSubscriptionLandingZone defaults to PerService at runtime, but New-EntraOpsConfigFile generates config with GovernanceModel = "Centralized".
 
 ### Basic Settings
 
@@ -776,7 +778,7 @@ Constrained delegations limit which roles can be assigned and to which principal
 
 **Permissions:** Can assign **any** Azure role **EXCEPT** the high-privileged roles listed in `ExcludedRoleDefinitionIds`
 
-**Target:** Can only assign roles to the group matching `AllowedTargetGroupFilter` (default: WorkloadPlane-Admins)
+**Target:** Can only assign roles to the group matching `AllowedTargetGroupFilter` (default: WorkloadPlane-Admins) [VALIDATED: hard-coded in current implementation]
 
 **Default Excluded Roles:**
 - `8e3af657-a8ff-443c-a75c-2fe8c4bcb635` - Owner
@@ -791,7 +793,7 @@ Constrained delegations limit which roles can be assigned and to which principal
 
 **Permissions:** Can assign **only** the data-plane roles listed in `AllowedRoleDefinitionIds`
 
-**Target:** Can only assign roles to the group matching `AllowedTargetGroupFilter` (default: WorkloadPlane-Users)
+**Target:** Can only assign roles to the group matching `AllowedTargetGroupFilter` (default: WorkloadPlane-Users) [VALIDATED: hard-coded in current implementation]
 
 **Default Allowed Roles:**
 - **Key Vault roles:**
@@ -849,6 +851,8 @@ Authentication context enforcement requires users to meet additional Conditional
 **EnableAuthenticationContext:** `true` or `false`
 - When `true`, PIM policies will require authentication context for role activation
 - When `false` or not defined, PIM policies enforce **MFA + Business Justification only** (default behavior)
+
+> **Implementation note:** New-EntraOpsServicePIMPolicy adds the authentication context step-up only when EnableAuthenticationContext is `true` and an AuthenticationContextClassReferenceId is configured for the relevant tier. Otherwise it enforces MFA + Business Justification only.
 
 **Default Enforcement (when authentication context is disabled):**
 The following requirements are always enforced for PIM role activation:
@@ -1019,24 +1023,24 @@ When disabled, PIM policies will still require MFA and Justification (as defined
 
 ### NoPimEscalation Parameter
 
-By default, ServiceEM creates **PIM staging groups** (`*-PIM-Staging`) that allow emergency direct member additions for break-glass scenarios. When you want to enforce **strict PIM-only access** with no bypass mechanism, use the `-NoPimEscalation` parameter:
+By default, ServiceEM creates **PIM proxy groups** (`SG-PIM-*`) that serve as intermediate targets for PIM eligibility assignments. When you want to enforce **strict PIM-only access** with no proxy mechanism, use the `-NoPimEscalation` parameter:
 
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "ProdCritical" `
     -WorkloadPlaneAdmin "owner@contoso.com" `
-    -NoPimEscalation `  # No PIM staging groups = no emergency bypass
+    -NoPimEscalation `  # No PIM proxy groups = strict PIM-only
     -Verbose
 ```
 
 **What changes:**
 - **Without** `-NoPimEscalation`:
-  - Creates groups like `SG-Rg-MyApp-ManagementPlane-Admins-PIM-Staging`
-  - Admins can be added directly to staging groups for emergency access
+  - Creates groups like `SG-PIM-Rg-MyApp-ManagementPlane-Admins`
+  - Admins can be added directly to PIM proxy groups for eligibility assignments
   - PIM policies still enforce MFA + Justification for eligible activations
   
 - **With** `-NoPimEscalation`:
-  - No staging groups created
+  - No PIM proxy groups created
   - **Only** PIM-eligible assignments allowed
   - No mechanism for emergency bypass (stricter, but requires functioning PIM service)
 
@@ -1052,6 +1056,8 @@ New-EntraOpsSubscriptionLandingZone `
 **Owner vs. Members:**
 - **WorkloadPlaneAdmin**: Assigned to ManagementPlane-Admins access package (or WorkloadPlane-Admins in Centralized Rg scope)
 - **ServiceMembers**: Assigned to WorkloadPlane-Members access package (or WorkloadPlane-Users in Centralized Rg scope)
+
+WorkloadPlaneAdmin is only used when -AssignOwner is passed to New-EntraOpsServiceBootstrap.
 
 By default, the owner is also added to the members list. Use `-OwnerIsNotMember` to exclude:
 
@@ -1077,7 +1083,9 @@ New-EntraOpsSubscriptionLandingZone `
 
 ### Cmdlet Inventory
 
-ServiceEM provides 17 cmdlets for automated landing zone provisioning and management:
+ServiceEM provides 16 exported cmdlets for automated landing zone provisioning and management:
+
+> **Legacy note:** The docs previously listed 17 cmdlets, but EntraOps.psd1 exports 16. Two legacy variants exist in EntraOps/Public/ServiceEM/Legacy/ but are not exported.
 
 | #   | Cmdlet                                                 | Purpose                                                                                                                                                                                             |
 | --- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1144,7 +1152,7 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 - ❌ ManagementPlane-Members (replaced by delegation group)
 - ❌ CatalogPlane-Members (delegated from `EntraOpsConfig.AdministratorGroupId`)
 - ❌ WorkloadPlane-Members (not used in Centralized model; WorkloadPlane-Users replaces it)
-- ❌ PIM staging groups for delegated groups
+- ❌ PIM proxy groups for delegated groups
 
 #### PerService Governance Model
 
@@ -1156,11 +1164,11 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 | `SG-Sub-{Prefix}-ManagementPlane-Members`    | Security            | Management tier membership                                                               |
 | `SG-Sub-{Prefix}-ManagementPlane-Admins`     | Security            | Management tier elevation; PIM eligible for Contributor + constrained RBAC Administrator |
 | `SG-Sub-{Prefix}-ControlPlane-Admins`        | Security            | Catalog owner; PIM eligible for User Access Administrator                                |
-| `SG-Sub-{Prefix}-PIM-ManagementPlane-Admins` | Security (optional) | PIM proxy group (created unless `-NoPimEscalation` used)                                 |
+| `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` | Security (optional) | PIM proxy group (created unless `-NoPimEscalation` used)                                 |
 
-> **Note on PIM Staging Groups:** The `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` group is created as a staging group for PIM elevation workflows. This group is not documented in the original table above but is consistently created during deployment. It enables the PIM elevation path from Members to ManagementPlane-Admins.
+> **Note on PIM Proxy Groups:** The `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` group is created as a proxy group for PIM elevation workflows. This group is not documented in the original table above but is consistently created during deployment. It enables the PIM elevation path from Members to ManagementPlane-Admins.
 
-**Rg Scope (Default - without -Smb):**
+**Rg Scope:**
 | Group                                    | Type           | Purpose                    |
 | ---------------------------------------- | -------------- | -------------------------- |
 | `Rg-{Prefix} Members`                    | Unified (M365) | Team collaboration group   |
@@ -1168,18 +1176,6 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 | `SG-Rg-{Prefix}-ManagementPlane-Members` | Security       | Management tier membership |
 | `SG-Rg-{Prefix}-WorkloadPlane-Users`     | Security       | End-user data-plane access |
 | `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | Security       | Workload admin elevation   |
-
-**Rg Scope (with -Smb parameter):**
-| Group                                    | Type           | Purpose                    |
-| ---------------------------------------- | -------------- | -------------------------- |
-| `Rg-{Prefix} Members`                    | Unified (M365) | Team collaboration group   |
-| `SG-Rg-{Prefix}-CatalogPlane-Members`    | Security       | Catalog administrators     |
-| `SG-Rg-{Prefix}-ManagementPlane-Members` | Security       | Management tier membership |
-| `SG-Rg-{Prefix}-ManagementPlane-Admins`  | Security       | Management tier elevation  |
-| `SG-Rg-{Prefix}-WorkloadPlane-Users`     | Security       | End-user data-plane access |
-| `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | Security       | Workload admin elevation   |
-
-> **Note:** The `-Smb` parameter shifts ManagementPlane-Admins from Sub scope to Rg scope. By default (without `-Smb`), ManagementPlane-Admins is created in Sub scope only. WorkloadPlane-Members is not created in either scope by default.
 
 ### Subscription-Level Azure RBAC Implementation
 
@@ -1270,17 +1266,6 @@ Access packages are **only created for groups**, not for delegated groups. The n
 | `AP-Rg-{Prefix}-ManagementPlane-Members` | `SG-Rg-{Prefix}-ManagementPlane-Members` | WorkloadPlane-Members | ManagementPlane-Admins | None       |
 | `AP-Rg-{Prefix}-WorkloadPlane-Users`     | `SG-Rg-{Prefix}-WorkloadPlane-Users`     | CatalogPlane-Members  | WorkloadPlane-Admins   | 5 days     |
 | `AP-Rg-{Prefix}-WorkloadPlane-Admins`    | `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | WorkloadPlane-Members | ManagementPlane-Admins | 5 days     |
-
-**Rg Scope (with -Smb parameter - 6 access packages):**
-| Access Package                           | Grants Membership To                     | Requestors              | Approver               | Expiration |
-| ---------------------------------------- | ---------------------------------------- | ----------------------- | ---------------------- | ---------- |
-| `AP-Rg-{Prefix}-CatalogPlane-Members`    | `SG-Rg-{Prefix}-CatalogPlane-Members`    | CatalogPlane-Members    | CatalogPlane-Members   | 5 days     |
-| `AP-Rg-{Prefix}-ManagementPlane-Members` | `SG-Rg-{Prefix}-ManagementPlane-Members` | WorkloadPlane-Members   | ManagementPlane-Admins | None       |
-| `AP-Rg-{Prefix}-ManagementPlane-Admins`  | `SG-Rg-{Prefix}-ManagementPlane-Admins`  | ManagementPlane-Members | ManagementPlane-Admins | 5 days     |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users`     | `SG-Rg-{Prefix}-WorkloadPlane-Users`     | CatalogPlane-Members    | WorkloadPlane-Admins   | 5 days     |
-| `AP-Rg-{Prefix}-WorkloadPlane-Admins`    | `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | WorkloadPlane-Members   | ManagementPlane-Admins | 5 days     |
-
-> **Note:** Access packages are only created for groups that exist. The `-Smb` parameter creates additional access packages by adding ManagementPlane-Admins to Rg scope. WorkloadPlane-Members access package is not created by default as the group is not created.
 
 > **Note**: No access packages are created for ControlPlane-Admins — membership is managed directly by ControlPlane admins.
 
@@ -1456,7 +1441,7 @@ This matrix shows how each parameter affects the objects created during deployme
 | ------------------------------ | ---------------------------- | ---------------------------- | --------------- | --------------- | ------------------- |
 | **None (defaults)**            | ✅ 6 created                  | ✅ 7 created                  | ✅ RG + RBAC     | ✅ 9 created     | ✅ Created           |
 | `-SkipAzureResourceGroup`      | ✅ 6 created                  | ⚠️ 5 created*                 | ❌ Skipped       | ⚠️ 7 created*    | ⚠️ Partial*          |
-| `-NoPimEscalation`             | ✅ 6 created (no PIM staging) | ✅ 7 created (no PIM staging) | ✅ RG + RBAC     | ✅ 9 created     | ✅ Created           |
+| `-NoPimEscalation`             | ✅ 6 created (no PIM proxy) | ✅ 7 created (no PIM proxy) | ✅ RG + RBAC     | ✅ 9 created     | ✅ Created           |
 | `-GovernanceModel Centralized` | ⚠️ 1 created                  | ⚠️ 3 created                  | ✅ RG + RBAC     | ⚠️ 2 created     | ⚠️ Partial           |
 | `-WorkloadPlaneAdmin`          | ✅ Owned                      | ✅ Owned                      | N/A             | ✅ Approver      | ✅ Configured        |
 | `-ServiceMembers`              | ✅ Assigned                   | ✅ Assigned                   | N/A             | ✅ Requestors    | ✅ Configured        |
@@ -1517,7 +1502,7 @@ When using Centralized governance:
 When this parameter is used:
 
 **Impact:**
-- PIM staging groups (SG-PIM-*) are NOT created
+- PIM proxy groups (SG-PIM-*) are NOT created
 - Direct elevation paths are disabled
 - Members must use alternative elevation methods
 
@@ -1777,7 +1762,7 @@ After deployment, verify the following:
 
 ### Documentation
 
-- **[ServiceEM Landing Zone Visualization](./EntraOps/Public/ServiceEM/ServiceEM-LandingZone-Visualization.md)** - Comprehensive Mermaid diagrams showing:
+- **[ServiceEM Landing Zone Visualization](../service-em/landing-zone-visualization.html)** - Comprehensive Mermaid diagrams showing:
   - Group structure by EAM plane (ControlPlane, ManagementPlane, WorkloadPlane, CatalogPlane)
   - Access package → group resource role scopes
   - Assignment policies with requestor scopes and approvers
