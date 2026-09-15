@@ -109,11 +109,11 @@ ServiceEM automates the creation of **tiered, service-scoped landing zones** fol
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix <string>          # Required: Service name prefix
     -AzureRegion <string>               # Required: Azure region (e.g., "westeurope")
-    -WorkloadPlaneAdmin <string>              # Required: Owner's email
+    -WorkloadPlaneAdmin <string>        # Required: Owner's email
     -ServiceMembers <array>             # Optional: Member emails
     -GovernanceModel <string>           # Optional: "PerService" (default) or "Centralized"
     -SkipAzureResourceGroup             # Optional: Skip Azure RG creation (Entra only)
-    -NoPimEscalation            # Optional: No emergency bypass groups
+    -NoPimEscalation                    # Optional: No emergency bypass groups
     -Verbose                            # Recommended: See what's being created
 ```
 
