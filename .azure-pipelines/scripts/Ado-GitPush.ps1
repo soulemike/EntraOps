@@ -12,7 +12,7 @@ param (
 
 $ErrorActionPreference = "Continue"
 
-git config user.email "entraops-ado@dev.azure.com"
+git config user.email "entraops-ado@contoso.com"
 git config user.name "Azure DevOps"
 
 git add --all

@@ -3,10 +3,7 @@
 - [EntraOps (Privileged EAM) - Management and Monitoring of Enterprise Access Model](#entraops-privileged-eam---management-and-monitoring-of-enterprise-access-model)
   - [Introduction](#introduction)
   - [Key features](#key-features)
-  - [ServiceEM - Service-scoped Landing Zones](#serviceem---service-scoped-landing-zones)
-    - [Key Capabilities](#key-capabilities)
-    - [Governance Models](#governance-models)
-    - [Documentation](#documentation)
+  - [Service EM - Service-scoped Landing Zones](#service-em---service-scoped-landing-zones)
   - [Videos and demos of EntraOps Privileged EAM](#videos-and-demos-of-entraops-privileged-eam)
   - [Documentation](#documentation)
   - [Quick starts](#quick-starts)
@@ -96,29 +93,9 @@ Currently the following RBAC systems are supported:
 
 The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline, or in any automation/worker environment that supports PowerShell Core. Automated pipeline creation currently supports GitHub only.
 
-## ServiceEM - Service-scoped Landing Zones
+## Service EM - Service-scoped Landing Zones
 
-**ServiceEM** is a submodule of EntraOps (developed in collaboration with **Michael Soule**) that enables automated provisioning and management of tiered, service-scoped landing zones aligned with Microsoft's Enterprise Access Model. ServiceEM provides a complete solution for delegated administration with least-privilege access across Azure and Entra ID.
-
-### Key Capabilities
-
-- **🏗️ Tiered Landing Zones**: Automatically provisions Azure resource groups with ControlPlane, ManagementPlane, and WorkloadPlane security groups following Enterprise Access Model principles
-- **🔐 Constrained Delegation**: ABAC-based role assignment conditions limit which roles can be assigned and to which principals (e.g., ManagementPlane admins cannot assign Owner/UAA roles)
-- **⏱️ PIM Integration**: Configures PIM for Groups policies with optional tier-specific authentication contexts for role activations
-- **📦 Access Packages**: Automates Entra ID Governance access package creation for self-service group membership with approval workflows
-- **🎯 Smart Provisioning**: Detects inherited role assignments to prevent redundant grants; creates role-assignable groups with automated naming conventions
-- **⚙️ Configuration-driven**: All settings including constrained delegation rules, authentication contexts, and role IDs configurable via `EntraOpsConfig.json`
-
-### Governance Models
-
-ServiceEM supports two governance approaches:
-
-- **Centralized**: Tenant-wide delegation groups (e.g., `PRG-Tenant-ControlPlane-IdentityOps`) for ControlPlane and ManagementPlane tiers
-- **Delegated**: Service-specific groups with isolated permissions per service landing zone
-
-### Documentation
-
-For complete setup instructions, configuration options, constrained delegation rules, PIM authentication context setup, and troubleshooting, see **[ServiceEM.md](ServiceEM.md)**.
+**Service EM**, developed in collaboration with **Michael Soule**, provisions service-scoped Azure and Entra ID landing zones aligned with the Enterprise Access Model. It combines tiered groups, PIM for Groups, Entra ID Governance access packages, Azure RBAC, and ABAC-constrained delegation for least-privilege administration. See the [Service EM documentation](./Docs/service-em/index.html) for setup, governance models, configuration, and dependency diagrams.
 
 ## Videos and demos of EntraOps Privileged EAM
 
@@ -128,7 +105,7 @@ For complete setup instructions, configuration options, constrained delegation r
 ## Documentation
 
 Full documentation - including a **Get Started** guide, configuration reference and feature deep-dives for **Core**,
-**Privileged EAM** and **Reportings** - is available in the **[EntraOps Docs](./Docs/index.html)**.
+**Privileged EAM**, **Service EM**, and **Reportings** - is available in the **[EntraOps Docs](./Docs/index.html)**.
 
 - 🚩 [Get Started](./Docs/get-started/index.html) - prerequisites, sign-in options, and deploying EntraOps
   interactively or as an automated GitHub pipeline.
@@ -138,6 +115,8 @@ Full documentation - including a **Get Started** guide, configuration reference 
 - 🛡️ [Privileged EAM](./Docs/privileged-eam/index.html) - collecting and exporting data, filtering examples,
   customizing classification with overwrite files, Identity Governance delegation, and automatic Control Plane scope
   updates.
+- 🏗️ [Service EM](./Docs/service-em/index.html) - service-scoped Azure and Entra ID landing zones with tiered
+  groups, PIM for Groups, access packages, Azure RBAC, and constrained delegation.
 - 📊 [Reportings](./Docs/reportings/index.html) - ten static Reporting apps, including Classification Explorer, EAM
   Dashboard, Access Path Map, Tier Breach Analyzer, Privilege History, Configuration Analyzer, Conditional Access
   Analysis, EIDSCA Findings, PIM Request Flow, and Access Package Flow; plus Microsoft Sentinel/Unified SecOps
@@ -191,7 +170,7 @@ Connect-EntraOps -TenantName $TenantName -AuthenticationType "AlreadyAuthenticat
 Workload with already authenticated Azure PowerShell
 
 ```powershell
-Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "cloudlab.onmicrosoft.com"
+Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso.onmicrosoft.com"
 ```
 
 ### Export and collecting EntraOps data
@@ -362,13 +341,13 @@ If you want to ingest EntraOps classification data into a Microsoft Sentinel or 
 
 ### Overview of Components
 
-| Component | Purpose |
-|---|---|
-| **Log Analytics Workspace (LAW)** | Destination workspace where the custom table resides. |
-| **Custom Table (`PrivilegedEAM_CL`)** | Stores the ingested EntraOps JSON records. |
-| **Data Collection Endpoint (DCE)** | Public endpoint that receives the logs over HTTPS. |
-| **Data Collection Rule (DCR)** | Defines the data flow, schema mapping, and transformation from DCE to the custom table. |
-| **Service Principal / Managed Identity** | Authenticates to the DCE and is authorized via Azure RBAC. |
+| Component                                | Purpose                                                                                 |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Log Analytics Workspace (LAW)**        | Destination workspace where the custom table resides.                                   |
+| **Custom Table (`PrivilegedEAM_CL`)**    | Stores the ingested EntraOps JSON records.                                              |
+| **Data Collection Endpoint (DCE)**       | Public endpoint that receives the logs over HTTPS.                                      |
+| **Data Collection Rule (DCR)**           | Defines the data flow, schema mapping, and transformation from DCE to the custom table. |
+| **Service Principal / Managed Identity** | Authenticates to the DCE and is authorized via Azure RBAC.                              |
 
 ### Step 1: Create the Log Analytics Workspace
 
@@ -451,12 +430,12 @@ Example ARM template snippet for the DCR data flow:
 
 The service principal or managed identity used by EntraOps needs the following Azure RBAC assignments:
 
-| Role | Scope | Why it is needed |
-|---|---|---|
-| **Monitoring Metrics Publisher** | Resource Group containing the DCR | Required by the [Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) to write data to the DCR. |
-| **Reader** | Resource Group containing the DCR | Required to read DCR and DCE metadata (endpoint URI, immutableId) via Azure Resource Manager. |
-| *(Optional)* **Microsoft Sentinel Contributor** | Resource Group containing the Sentinel workspace | Only required if ingesting to Sentinel WatchLists (`IngestToWatchLists`). |
-| *(Optional)* **Reader** | Tenant Root Management Group (`/providers/Microsoft.Management/managementGroups/<TenantId>`) | Only required if using Azure Resource Graph for Control Plane scope updates or certain WatchLists (e.g., High Value Assets, Workload Identity Attack Paths, Managed Identity Assigned Resource Id). |
+| Role                                            | Scope                                                                                        | Why it is needed                                                                                                                                                                                    |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Monitoring Metrics Publisher**                | Resource Group containing the DCR                                                            | Required by the [Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) to write data to the DCR.                                              |
+| **Reader**                                      | Resource Group containing the DCR                                                            | Required to read DCR and DCE metadata (endpoint URI, immutableId) via Azure Resource Manager.                                                                                                       |
+| *(Optional)* **Microsoft Sentinel Contributor** | Resource Group containing the Sentinel workspace                                             | Only required if ingesting to Sentinel WatchLists (`IngestToWatchLists`).                                                                                                                           |
+| *(Optional)* **Reader**                         | Tenant Root Management Group (`/providers/Microsoft.Management/managementGroups/<TenantId>`) | Only required if using Azure Resource Graph for Control Plane scope updates or certain WatchLists (e.g., High Value Assets, Workload Identity Attack Paths, Managed Identity Assigned Resource Id). |
 
 > **Note:** `Log Analytics Contributor` on the resource group is **not sufficient** for the Logs Ingestion API. You must assign `Monitoring Metrics Publisher` directly on the DCR scope (or its resource group).
 
@@ -642,10 +621,10 @@ New-AzResourceGroupDeployment `
 
 #### Available Workbooks
 
-| Workbook | Description | Deploy |
-|---|---|---|
-| **EntraOps Privileged EAM - Overview** | Primary dashboard for classified role assignments across all RBAC systems. | [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json) |
-| **EntraOps Privileged EAM - Agent Identities** | Insights into Agent Identities and inherited permissions through blueprint principals. | [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Agent%20Identities.json) |
+| Workbook                                          | Description                                                                                | Deploy                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **EntraOps Privileged EAM - Overview**            | Primary dashboard for classified role assignments across all RBAC systems.                 | [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json)              |
+| **EntraOps Privileged EAM - Agent Identities**    | Insights into Agent Identities and inherited permissions through blueprint principals.     | [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Agent%20Identities.json)    |
 | **EntraOps Privileged EAM - Workload Identities** | Deep-dive into workload identities, managed identities, attack paths, and recommendations. | [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Workload%20Identities.json) |
 
 #### Post-Deployment Configuration
@@ -692,10 +671,10 @@ Add the following parameters to your `EntraOps.config` file to enable tenant gov
 }
 ```
 
-| Parameter | Description |
-|---|---|
-| `ManagingTenantId` | The tenant ID of the governing (managing) tenant — the one that holds the delegated admin relationships. |
-| `ManagingTenantName` | The display name or `.onmicrosoft.com` domain of the managing tenant. |
+| Parameter            | Description                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| `ManagingTenantId`   | The tenant ID of the governing (managing) tenant — the one that holds the delegated admin relationships. |
+| `ManagingTenantName` | The display name or `.onmicrosoft.com` domain of the managing tenant.                                    |
 
 When configured, EntraOps sets `$Global:ManagingTenantIdContext` at connect time and uses it to scope cross-tenant object resolution during classification runs.
 

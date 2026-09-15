@@ -6,7 +6,7 @@
     Creates one Entra group per entry in the ServiceRoles object. Security groups
     are created for all roles with an empty or set groupType. Microsoft 365
     (Unified) groups are created for roles with groupType = "Unified".
-    When ProhibitDirectElevation is not set, PIM staging groups (*-PIM-*) are
+    When NoPimEscalation is not set, PIM staging groups (*-PIM-*) are
     also created for each non-Members admin group to support PIM for Groups.
 
     Security groups are automatically created as role-assignable (isAssignableToRole = $true)
