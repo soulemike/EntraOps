@@ -11,7 +11,7 @@
     service principal authentication. Designed for CI/CD pipelines.
 
 .PARAMETER TenantId
-    Azure AD tenant ID (e.g., M365x60294116.onmicrosoft.com)
+    Azure AD tenant ID (e.g., contoso.onmicrosoft.com)
 
 .PARAMETER ClientId
     Application (client) ID from app registration
@@ -33,7 +33,7 @@
 
 .EXAMPLE
     .\Test-WithServicePrincipal.ps1 `
-        -TenantId "M365x60294116.onmicrosoft.com" `
+        -TenantId "contoso.onmicrosoft.com" `
         -ClientId "12345678-1234-1234-1234-123456789012" `
         -CertificateThumbprint "A1B2C3D4E5F6..."
 
@@ -166,7 +166,7 @@ try {
     Write-Host "Creating groups for service: $TestId..."
     $groups = New-EntraOpsServiceEntraGroup `
         -ServiceName $TestId `
-        -ServiceOwner "https://graph.microsoft.com/v1.0/users/$ClientId" `
+        -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/$ClientId" `
         -ServiceRoles $ServiceRoles `
         -Verbose
 
@@ -198,7 +198,7 @@ try {
     Write-Host "Running service bootstrap..."
     $result = New-EntraOpsServiceBootstrap `
         -ServiceName "Bootstrap$TestId" `
-        -ServiceOwner "https://graph.microsoft.com/v1.0/users/$ClientId" `
+        -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/$ClientId" `
         -ServiceRoles $bootstrapRoles `
         -SkipAzureResourceGroup `
         -Verbose

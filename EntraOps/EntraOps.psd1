@@ -172,6 +172,7 @@
         'Update-EntraOpsPrivilegedConditionalAccessGroup'
         'Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
         'Update-EntraOpsPrivilegedUnprotectedElmCatalog'
+        'Update-EntraOpsAzureDevOpsSchedules'
         'Update-EntraOpsRequiredWorkflowParameters'
         # ServiceEM Functions
         'Get-EntraOpsServiceEMReport'

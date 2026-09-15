@@ -1,6 +1,10 @@
 #Requires -Modules Pester
 #Requires -Version 7.0
 
+BeforeDiscovery {
+    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+}
+
 <#
 .SYNOPSIS
     Unit tests for New-EntraOpsServiceEntraGroup function.
@@ -15,8 +19,9 @@
 #>
 
 BeforeAll {
+    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
     # Import the module
-    $ModulePath = Join-Path $PSScriptRoot ".." ".." "EntraOps" "EntraOps.psd1"
+    $ModulePath = Join-Path $script:TestRepositoryRoot "EntraOps" "EntraOps.psd1"
     Import-Module $ModulePath -Force -ErrorAction Stop
     
     # Script-scoped storage for mock groups (simulates Graph API state)
@@ -49,17 +54,18 @@ BeforeAll {
             # Simulate successful group creation and store in mock
             $bodyObj = $Body | ConvertFrom-Json
             $newGroup = [pscustomobject]@{
-                Id = [guid]::NewGuid().ToString()
-                DisplayName = $bodyObj.displayName
-                MailNickname = $bodyObj.mailNickname
-                GroupTypes = $bodyObj.groupTypes
+                Id                 = [guid]::NewGuid().ToString()
+                DisplayName        = $bodyObj.displayName
+                MailNickname       = $bodyObj.mailNickname
+                GroupTypes         = $bodyObj.groupTypes
+                IsAssignableToRole = $bodyObj.isAssignableToRole
             }
             $script:MockGroups[$newGroup.Id] = $newGroup
             return $newGroup
         }
     }
     
-    Mock Invoke-EntraOpsMsGraphQuery -MockWith ${function:Mock-InvokeEntraOpsMsGraphQuery}
+    Mock Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -MockWith ${function:Mock-InvokeEntraOpsMsGraphQuery}
 }
 
 Describe "New-EntraOpsServiceEntraGroup" {
@@ -73,15 +79,15 @@ Describe "New-EntraOpsServiceEntraGroup" {
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName "" `
-                    -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                    -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles @() `
                     -ErrorAction Stop
             } | Should -Throw
         }
         
-        It "Should allow no ServiceOwner" {
+        It "Should allow no WorkloadPlaneAdmin" {
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             { 
                 New-EntraOpsServiceEntraGroup `
@@ -91,43 +97,43 @@ Describe "New-EntraOpsServiceEntraGroup" {
             } | Should -Not -Throw
         }
         
-        It "Should accept valid OData URL format for ServiceOwner" {
+        It "Should accept valid OData URL format for WorkloadPlaneAdmin" {
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName "TestService" `
-                    -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                    -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
             } | Should -Not -Throw
         }
         
-        It "Should accept GUID format for ServiceOwner and convert to OData URL" {
+        It "Should accept GUID format for WorkloadPlaneAdmin and convert to OData URL" {
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName "TestService" `
-                    -ServiceOwner "12345678-1234-1234-1234-123456789012" `
+                    -WorkloadPlaneAdmin "12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
             } | Should -Not -Throw
         }
         
-        It "Should throw for invalid ServiceOwner format" {
+        It "Should throw for invalid WorkloadPlaneAdmin format" {
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName "TestService" `
-                    -ServiceOwner "invalid-owner-format" `
+                    -WorkloadPlaneAdmin "invalid-owner-format" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
             } | Should -Throw
@@ -138,13 +144,13 @@ Describe "New-EntraOpsServiceEntraGroup" {
         It "Should throw when DisplayName exceeds 256 characters" {
             $longServiceName = "A" * 250
             $roles = @(
-                [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = ""}
+                [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = "" }
             )
             
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName $longServiceName `
-                    -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                    -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
             } | Should -Throw -ExpectedMessage "*exceeds maximum length of 256 characters*"
@@ -155,13 +161,13 @@ Describe "New-EntraOpsServiceEntraGroup" {
         It "Should throw when MailNickname exceeds 64 characters" {
             $longServiceName = "A" * 70
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName $longServiceName `
-                    -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                    -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
             } | Should -Throw -ExpectedMessage "*exceeds maximum length of 64 characters*"
@@ -171,13 +177,13 @@ Describe "New-EntraOpsServiceEntraGroup" {
     Context "Payload Validation - MailNickname Format" {
         It "Should throw when MailNickname contains invalid characters" {
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName "Test Service!" `
-                    -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                    -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
             } | Should -Throw -ExpectedMessage "*invalid characters*"
@@ -185,13 +191,13 @@ Describe "New-EntraOpsServiceEntraGroup" {
         
         It "Should accept valid MailNickname with dots and underscores" {
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName "Test.Service_01" `
-                    -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                    -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
             } | Should -Not -Throw
@@ -201,12 +207,12 @@ Describe "New-EntraOpsServiceEntraGroup" {
     Context "Group Creation - Unified Groups" {
         It "Should create Unified group with correct properties" {
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             
             $result = New-EntraOpsServiceEntraGroup `
                 -ServiceName "TestService" `
-                -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                 -ServiceRoles $roles
             
             $result | Should -Not -BeNullOrEmpty
@@ -217,64 +223,61 @@ Describe "New-EntraOpsServiceEntraGroup" {
     Context "Group Creation - Security Groups" {
         It "Should create Security group with correct properties" {
             $roles = @(
-                [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = ""}
+                [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = "" }
             )
             
             $result = New-EntraOpsServiceEntraGroup `
                 -ServiceName "TestService" `
-                -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                 -ServiceRoles $roles
             
             $result | Should -Not -BeNullOrEmpty
             $result.MailNickname | Should -Contain "TestService.ControlPlane.Admins"
         }
         
-        It "Should create PIM staging group when ProhibitDirectElevation is not set" {
+        It "Should create PIM staging group when NoPimEscalation is not set" {
             $roles = @(
-                [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = ""}
+                [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" }
             )
             
             $result = New-EntraOpsServiceEntraGroup `
                 -ServiceName "TestService" `
-                -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                 -ServiceRoles $roles
             
             $result | Should -Not -BeNullOrEmpty
             $result.MailNickname | Should -Contain "PIM.TestService.ManagementPlane.Admins"
         }
         
-        It "Should NOT create PIM staging group when ProhibitDirectElevation is set" {
+        It "Should NOT create PIM staging group when NoPimEscalation is set" {
             $roles = @(
-                [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = ""}
+                [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" }
             )
             
             $result = New-EntraOpsServiceEntraGroup `
                 -ServiceName "TestService" `
-                -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                 -ServiceRoles $roles `
-                -ProhibitDirectElevation
+                -NoPimEscalation
             
             $result | Should -Not -BeNullOrEmpty
             $result.MailNickname | Should -Not -Contain "PIM.TestService.ManagementPlane.Admins"
         }
     }
     
-    Context "IsAssignableToRole Parameter" {
-        It "Should set IsAssignableToRole when switch is provided" {
+    Context "IsAssignableToRole behavior" {
+        It "Should set IsAssignableToRole for security groups" {
             $roles = @(
-                [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = ""}
+                [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = "" }
             )
             
-            # This would require inspecting the actual API call
-            # For now, just verify it doesn't throw
-            { 
-                New-EntraOpsServiceEntraGroup `
-                    -ServiceName "TestService" `
-                    -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
-                    -ServiceRoles $roles `
-                    -IsAssignableToRole `
-                    -ErrorAction Stop
-            } | Should -Not -Throw
+            $result = New-EntraOpsServiceEntraGroup `
+                -ServiceName "TestService" `
+                -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                -ServiceRoles $roles `
+                -ErrorAction Stop
+
+            $result.IsAssignableToRole | Should -Contain $true
         }
     }
 }
@@ -282,20 +285,20 @@ Describe "New-EntraOpsServiceEntraGroup" {
 Describe "New-EntraOpsServiceEntraGroup - Error Handling" {
     Context "API Error Simulation" {
         BeforeEach {
-            Mock Invoke-EntraOpsMsGraphQuery -MockWith {
+            Mock Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -MockWith {
                 throw "Graph API Error: Group already exists"
             }
         }
         
         It "Should handle API errors gracefully" {
             $roles = @(
-                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"}
+                [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" }
             )
             
             { 
                 New-EntraOpsServiceEntraGroup `
                     -ServiceName "TestService" `
-                    -ServiceOwner "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
+                    -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
             } | Should -Throw
@@ -307,3 +310,4 @@ AfterAll {
     # Cleanup
     Remove-Module EntraOps -Force -ErrorAction SilentlyContinue
 }
+

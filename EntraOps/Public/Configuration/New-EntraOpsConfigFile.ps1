@@ -389,6 +389,17 @@ function New-EntraOpsConfigFile {
     #endregion
 
     #region Create configuration file schema with default values
+    $DefaultUpdateTargets = if ($DevOpsPlatform -eq 'AzureDevOps') {
+        @("./.azure-pipelines", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
+    } else {
+        @("./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
+    }
+    $DefaultUpdatePublicationMode = if ($DevOpsPlatform -eq 'AzureDevOps' -and -not $PSBoundParameters.ContainsKey('UpdatePublicationMode')) {
+        'DirectPush'
+    } else {
+        $UpdatePublicationMode
+    }
+
     $EnvConfigSchema = [ordered]@{
         TenantId                                      = $($TenantId)
         TenantName                                    = $($TenantDetails.Domains[0])
@@ -431,7 +442,7 @@ function New-EntraOpsConfigFile {
         GeneratedArtifactValidation                   = [ordered]@{
             # Contradictory tier pairs come from Custom Security Attribute drift on the source object,
             # so they are reported as warnings by default instead of blocking the whole collection run.
-            FailOnContradictoryTierPair = $FailOnContradictoryTierPair
+            FailOnContradictoryTierPair                     = $FailOnContradictoryTierPair
             FailOnPrivilegedAssignmentWithoutClassification = $FailOnPrivilegedAssignmentWithoutClassification
         }
         AutomatedEntraOpsUpdate                       = [ordered]@{
@@ -447,11 +458,10 @@ function New-EntraOpsConfigFile {
             Repository                   = $UpdateRepository
             # Track main by default so enabled automated updates require no release-ref maintenance.
             Branch                       = "main"
-            # Workflow definitions are intentionally opt-in: the built-in GITHUB_TOKEN cannot push
-            # changes below .github/workflows. Add the target explicitly only for an interactive
-            # update or after configuring the dedicated publisher GitHub App documented in core.md.
-            TargetUpdateFolders          = @("./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
-            PublicationMode              = $UpdatePublicationMode
+            # GitHub workflow definitions are intentionally opt-in because GITHUB_TOKEN cannot push
+            # them. Azure DevOps configurations instead include their pipeline templates by default.
+            TargetUpdateFolders          = $DefaultUpdateTargets
+            PublicationMode              = $DefaultUpdatePublicationMode
         }
         LogAnalytics                                  = [ordered]@{
             IngestToLogAnalytics             = $IngestToLogAnalytics
@@ -508,12 +518,12 @@ function New-EntraOpsConfigFile {
             ClassificationExplorerRepository  = "Cloud-Architekt/AzurePrivilegedIAM"
         }
         ConfigurationAnalyzer                         = [ordered]@{
-            ResolveGroupMembersForPrivilegedAssets = $ResolveGroupMembersForPrivilegedAssets
-            AllowPartialTenantGovernanceSnapshot    = $AllowPartialTenantGovernanceSnapshot
-            PimRequestFlowExcludedRiskFlags         = @($PimRequestFlowExcludedRiskFlags)
-            AccessPackageFlowExcludedRiskFlags       = @($AccessPackageFlowExcludedRiskFlags)
+            ResolveGroupMembersForPrivilegedAssets    = $ResolveGroupMembersForPrivilegedAssets
+            AllowPartialTenantGovernanceSnapshot      = $AllowPartialTenantGovernanceSnapshot
+            PimRequestFlowExcludedRiskFlags           = @($PimRequestFlowExcludedRiskFlags)
+            AccessPackageFlowExcludedRiskFlags        = @($AccessPackageFlowExcludedRiskFlags)
             ConditionalAccessAnalysisExcludedFindings = @($ConditionalAccessAnalysisExcludedFindings)
-            EidscaExcludedFindings                   = @($EidscaExcludedFindings)
+            EidscaExcludedFindings                    = @($EidscaExcludedFindings)
         }
         AutomatedElmCatalogProtection                 = [ordered]@{
             ApplyPrivilegedElmCatalogProtection = $ApplyPrivilegedElmCatalogProtection
@@ -521,13 +531,13 @@ function New-EntraOpsConfigFile {
             RemovalSafetyThreshold              = $RemovalSafetyThreshold
         }
         CustomSecurityAttributes                      = [ordered]@{
-            PrivilegedUserAttribute             = "privilegedUser"
-            PrivilegedUserPawAttribute          = "associatedSecureAdminWorkstation"
-            PrivilegedServicePrincipalAttribute = "privilegedWorkloadIdentity"
-            UserWorkAccountAttribute            = "associatedWorkAccount"
-            PrivilegedUserAdminTierLevelAttribute = "adminTierLevel"
-            PrivilegedUserAdminTierLevelNameAttribute = "adminTierLevelName"
-            PrivilegedServicePrincipalAdminTierLevelAttribute = "adminTierLevel"
+            PrivilegedUserAttribute                               = "privilegedUser"
+            PrivilegedUserPawAttribute                            = "associatedSecureAdminWorkstation"
+            PrivilegedServicePrincipalAttribute                   = "privilegedWorkloadIdentity"
+            UserWorkAccountAttribute                              = "associatedWorkAccount"
+            PrivilegedUserAdminTierLevelAttribute                 = "adminTierLevel"
+            PrivilegedUserAdminTierLevelNameAttribute             = "adminTierLevelName"
+            PrivilegedServicePrincipalAdminTierLevelAttribute     = "adminTierLevel"
             PrivilegedServicePrincipalAdminTierLevelNameAttribute = "adminTierLevelName"
         }
         AlternateObjectTierLevelAttributes            = [ordered]@{
@@ -558,13 +568,13 @@ function New-EntraOpsConfigFile {
             GenerateChangeHistory = $ClassificationExplorerGenerateChangeHistory
         }
         TenantGovernanceSnapshot                      = [ordered]@{
-            EnableTenantGovernanceSnapshot = $EnableTenantGovernanceSnapshot
-            ResourcesToInclude             = if ($TenantGovernanceResourcesToInclude) { $TenantGovernanceResourcesToInclude } else { (Get-EntraOpsTenantGovernanceResourceDefinition).DefaultResources }
-            SnapshotDisplayNamePrefix      = "EntraOps TG"
-            SnapshotResourceFileNaming     = $TenantGovernanceSnapshotResourceFileNaming
-            SnapshotScheduledTrigger       = $EnableTenantGovernanceSnapshot
-            SnapshotScheduledCron          = $TenantGovernanceSnapshotScheduledCron
-            SnapshotScheduledCronComplete  = $TenantGovernanceSnapshotScheduledCronComplete
+            EnableTenantGovernanceSnapshot      = $EnableTenantGovernanceSnapshot
+            ResourcesToInclude                  = if ($TenantGovernanceResourcesToInclude) { $TenantGovernanceResourcesToInclude } else { (Get-EntraOpsTenantGovernanceResourceDefinition).DefaultResources }
+            SnapshotDisplayNamePrefix           = "EntraOps TG"
+            SnapshotResourceFileNaming          = $TenantGovernanceSnapshotResourceFileNaming
+            SnapshotScheduledTrigger            = $EnableTenantGovernanceSnapshot
+            SnapshotScheduledCron               = $TenantGovernanceSnapshotScheduledCron
+            SnapshotScheduledCronComplete       = $TenantGovernanceSnapshotScheduledCronComplete
             SnapshotScheduledCronCompleteRetry1 = $TenantGovernanceSnapshotScheduledCronCompleteRetry1
             SnapshotScheduledCronCompleteRetry2 = $TenantGovernanceSnapshotScheduledCronCompleteRetry2
         }
@@ -577,15 +587,15 @@ function New-EntraOpsConfigFile {
             AdministratorGroupId             = ""
             ConstrainedDelegation            = [ordered]@{
                 ManagementPlane = [ordered]@{
-                    ExcludedRoleDefinitionIds   = @(
+                    ExcludedRoleDefinitionIds = @(
                         "8e3af657-a8ff-443c-a75c-2fe8c4bcb635"  # Owner
                         "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9"  # User Access Administrator
                         "f58310d9-a9f6-439a-9e8d-f62e7b41a168"  # Role Based Access Control Administrator
                     )
-                    AllowedTargetGroupFilter    = "WorkloadPlane-Admins"
+                    AllowedTargetGroupFilter  = "WorkloadPlane-Admins"
                 }
                 WorkloadPlane   = [ordered]@{
-                    AllowedRoleDefinitionIds    = @(
+                    AllowedRoleDefinitionIds = @(
                         # Key Vault roles
                         "00482a5a-887f-4fb3-b363-3b7fe8e74483"  # Key Vault Administrator
                         "a4417e6f-fecd-4de8-b567-7b0420556985"  # Key Vault Certificates Officer
@@ -605,7 +615,7 @@ function New-EntraOpsConfigFile {
                         "8a0f0c08-91a1-4084-bc3d-661d67233fed"  # Storage Queue Data Message Processor
                         "c6a89b2d-59bc-44d0-9896-0f6e12d7b80a"  # Storage Queue Data Message Sender
                     )
-                    AllowedTargetGroupFilter    = "WorkloadPlane-Users"
+                    AllowedTargetGroupFilter = "WorkloadPlane-Users"
                 }
             }
             PIMAuthenticationContext         = [ordered]@{

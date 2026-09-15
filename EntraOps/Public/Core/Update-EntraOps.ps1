@@ -199,7 +199,7 @@ function Update-EntraOps {
             }
             Write-Output "Using prepared update candidate at '$TemporaryUpdateFolder'."
         } elseif ($UsePersonalAccessToken) {
-            $ChannelLabel = if ($null -ne $Source) { "$($Source.Channel) channel" } else "custom upstream"
+            $ChannelLabel = if ($null -ne $Source) { "$($Source.Channel) channel" } else { "custom upstream" }
             Write-Output "Cloning repository '$SourceRepository' ($ChannelLabel, ref: $Branch) using Personal Access Token..."
             # Pass credentials via environment-based HTTP header to avoid exposing the PAT in process listings, logs, or error messages
             $PreviousConfigCount = $env:GIT_CONFIG_COUNT
@@ -218,7 +218,7 @@ function Update-EntraOps {
                 if ($null -eq $PreviousConfigValue0) { Remove-Item env:GIT_CONFIG_VALUE_0 -ErrorAction SilentlyContinue } else { $env:GIT_CONFIG_VALUE_0 = $PreviousConfigValue0 }
             }
         } else {
-            $ChannelLabel = if ($null -ne $Source) { "$($Source.Channel) channel" } else "custom upstream"
+            $ChannelLabel = if ($null -ne $Source) { "$($Source.Channel) channel" } else { "custom upstream" }
             Write-Output "Cloning repository '$SourceRepository' ($ChannelLabel, ref: $Branch) without authentication..."
             & $CloneUpdateCandidate $RepositoryUrl
         }
@@ -307,16 +307,16 @@ function Update-EntraOps {
         }
 
         $UpdateManifest = [ordered]@{
-            SchemaVersion       = 1
-            Repository          = $SourceRepository
-            Channel             = $Source.Channel
-            RequestedRef        = $Branch
-            SourceCommit        = $SourceCommit
+            SchemaVersion        = 1
+            Repository           = $SourceRepository
+            Channel              = $Source.Channel
+            RequestedRef         = $Branch
+            SourceCommit         = $SourceCommit
             ValidatedBeforeApply = [bool]($ValidatedSourceCommit -or -not $SkipCandidateValidation)
             ValidationIsolation  = if ($ValidatedSourceCommit) { 'SeparateJob' } elseif ($SkipCandidateValidation) { 'Skipped' } else { 'SanitizedChildProcess' }
-            BrowserTestsRun     = [bool]($RunBrowserTests -or $BrowserTestsValidated)
-            AppliedDateTime     = (Get-Date).ToUniversalTime().ToString('o')
-            TargetUpdateFolders = @($TargetUpdateFolders)
+            BrowserTestsRun      = [bool]($RunBrowserTests -or $BrowserTestsValidated)
+            AppliedDateTime      = (Get-Date).ToUniversalTime().ToString('o')
+            TargetUpdateFolders  = @($TargetUpdateFolders)
         }
         $UpdateManifestPath = Join-Path $EntraOpsBaseFolder '.EntraOpsUpdateManifest.json'
         $UpdateManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $UpdateManifestPath -Encoding utf8

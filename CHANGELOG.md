@@ -1,12 +1,10 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
-## [Unreleased]
-
 ## [1.1.0] - 2026-09-13
 
 ### Added
-- **ServiceEM - Service-scoped Landing Zones for Enterprise Access Model**: New submodule (developed in collaboration with **Michael Soule**) for creating and managing tiered, service-scoped landing zones aligned with Microsoft's Enterprise Access Model. ServiceEM automates the provisioning of Azure resource groups, Entra ID security groups (role-assignable), PIM for Groups policies, Entra Identity Governance access packages, and Azure RBAC assignments with constrained delegation at ControlPlane, ManagementPlane, and WorkloadPlane tiers. Enables delegated administration with least-privilege access through ABAC conditions, automated group lifecycle management, and optional PIM authentication context enforcement. See [ServiceEM.md](ServiceEM.md) for complete documentation, configuration options, and examples.
+- **Service EM - Service-scoped Landing Zones for Enterprise Access Model**: New submodule (developed in collaboration with **Michael Soule**) for creating and managing tiered, service-scoped landing zones aligned with Microsoft's Enterprise Access Model. Service EM automates the provisioning of Azure resource groups, Entra ID security groups (role-assignable), PIM for Groups policies, Entra Identity Governance access packages, and Azure RBAC assignments with constrained delegation at ControlPlane, ManagementPlane, and WorkloadPlane tiers. Enables delegated administration with least-privilege access through ABAC conditions, automated group lifecycle management, and optional PIM authentication context enforcement. See the [Service EM documentation](Docs/service-em/index.html) for setup, configuration options, and examples.
   - **Constrained Delegation**: Configurable role-based access controls with ABAC conditions limiting which roles can be assigned and to which principals (e.g., ManagementPlane can assign any role except Owner/UAA to WorkloadPlane-Admins; WorkloadPlane can assign only Key Vault/Storage data-plane roles to WorkloadPlane-Users)
   - **PIM Authentication Context**: Optional tier-specific Conditional Access authentication contexts for PIM role activations (disabled by default; when disabled, enforces MFA + Business Justification)
   - **Automated Group Provisioning**: Creates and manages role-assignable groups for each service and tier with automated naming conventions
