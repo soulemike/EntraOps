@@ -70,7 +70,7 @@ New-EntraOpsSubscriptionLandingZone `
 #### Step 3: Verify Deployment
 
 ```powershell
-# Check created groups (matches both base and PIM staging groups)
+# Check created groups (matches both base and PIM proxy groups)
 Get-MgGroup -Filter "startswith(mailNickname,'MyFirstApp.') or startswith(mailNickname,'PIM.MyFirstApp.')"
 
 # Check access packages scoped to this service only
@@ -1023,24 +1023,24 @@ When disabled, PIM policies will still require MFA and Justification (as defined
 
 ### NoPimEscalation Parameter
 
-By default, ServiceEM creates **PIM staging groups** (`*-PIM-Staging`) that allow emergency direct member additions for break-glass scenarios. When you want to enforce **strict PIM-only access** with no bypass mechanism, use the `-NoPimEscalation` parameter:
+By default, ServiceEM creates **PIM proxy groups** (`SG-PIM-*`) that serve as intermediate targets for PIM eligibility assignments. When you want to enforce **strict PIM-only access** with no proxy mechanism, use the `-NoPimEscalation` parameter:
 
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "ProdCritical" `
     -WorkloadPlaneAdmin "owner@contoso.com" `
-    -NoPimEscalation `  # No PIM staging groups = no emergency bypass
+    -NoPimEscalation `  # No PIM proxy groups = strict PIM-only
     -Verbose
 ```
 
 **What changes:**
 - **Without** `-NoPimEscalation`:
-  - Creates groups like `SG-Rg-MyApp-ManagementPlane-Admins-PIM-Staging`
-  - Admins can be added directly to staging groups for emergency access
+  - Creates groups like `SG-PIM-Rg-MyApp-ManagementPlane-Admins`
+  - Admins can be added directly to PIM proxy groups for eligibility assignments
   - PIM policies still enforce MFA + Justification for eligible activations
   
 - **With** `-NoPimEscalation`:
-  - No staging groups created
+  - No PIM proxy groups created
   - **Only** PIM-eligible assignments allowed
   - No mechanism for emergency bypass (stricter, but requires functioning PIM service)
 
@@ -1152,7 +1152,7 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 - ❌ ManagementPlane-Members (replaced by delegation group)
 - ❌ CatalogPlane-Members (delegated from `EntraOpsConfig.AdministratorGroupId`)
 - ❌ WorkloadPlane-Members (not used in Centralized model; WorkloadPlane-Users replaces it)
-- ❌ PIM staging groups for delegated groups
+- ❌ PIM proxy groups for delegated groups
 
 #### PerService Governance Model
 
@@ -1164,9 +1164,9 @@ Groups created depend on the **governance model** and **scope**. Below shows wha
 | `SG-Sub-{Prefix}-ManagementPlane-Members`    | Security            | Management tier membership                                                               |
 | `SG-Sub-{Prefix}-ManagementPlane-Admins`     | Security            | Management tier elevation; PIM eligible for Contributor + constrained RBAC Administrator |
 | `SG-Sub-{Prefix}-ControlPlane-Admins`        | Security            | Catalog owner; PIM eligible for User Access Administrator                                |
-| `SG-Sub-{Prefix}-PIM-ManagementPlane-Admins` | Security (optional) | PIM proxy group (created unless `-NoPimEscalation` used)                                 |
+| `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` | Security (optional) | PIM proxy group (created unless `-NoPimEscalation` used)                                 |
 
-> **Note on PIM Staging Groups:** The `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` group is created as a staging group for PIM elevation workflows. This group is not documented in the original table above but is consistently created during deployment. It enables the PIM elevation path from Members to ManagementPlane-Admins.
+> **Note on PIM Proxy Groups:** The `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` group is created as a proxy group for PIM elevation workflows. This group is not documented in the original table above but is consistently created during deployment. It enables the PIM elevation path from Members to ManagementPlane-Admins.
 
 **Rg Scope:**
 | Group                                    | Type           | Purpose                    |
@@ -1441,7 +1441,7 @@ This matrix shows how each parameter affects the objects created during deployme
 | ------------------------------ | ---------------------------- | ---------------------------- | --------------- | --------------- | ------------------- |
 | **None (defaults)**            | ✅ 6 created                  | ✅ 7 created                  | ✅ RG + RBAC     | ✅ 9 created     | ✅ Created           |
 | `-SkipAzureResourceGroup`      | ✅ 6 created                  | ⚠️ 5 created*                 | ❌ Skipped       | ⚠️ 7 created*    | ⚠️ Partial*          |
-| `-NoPimEscalation`             | ✅ 6 created (no PIM staging) | ✅ 7 created (no PIM staging) | ✅ RG + RBAC     | ✅ 9 created     | ✅ Created           |
+| `-NoPimEscalation`             | ✅ 6 created (no PIM proxy) | ✅ 7 created (no PIM proxy) | ✅ RG + RBAC     | ✅ 9 created     | ✅ Created           |
 | `-GovernanceModel Centralized` | ⚠️ 1 created                  | ⚠️ 3 created                  | ✅ RG + RBAC     | ⚠️ 2 created     | ⚠️ Partial           |
 | `-WorkloadPlaneAdmin`          | ✅ Owned                      | ✅ Owned                      | N/A             | ✅ Approver      | ✅ Configured        |
 | `-ServiceMembers`              | ✅ Assigned                   | ✅ Assigned                   | N/A             | ✅ Requestors    | ✅ Configured        |
@@ -1502,7 +1502,7 @@ When using Centralized governance:
 When this parameter is used:
 
 **Impact:**
-- PIM staging groups (SG-PIM-*) are NOT created
+- PIM proxy groups (SG-PIM-*) are NOT created
 - Direct elevation paths are disabled
 - Members must use alternative elevation methods
 
