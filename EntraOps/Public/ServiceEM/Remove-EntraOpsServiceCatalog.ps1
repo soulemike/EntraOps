@@ -82,12 +82,13 @@ function Remove-EntraOpsServiceCatalog {
     )
 
     process {
-        if(-not $force){
+        if (-not $force) {
             Write-Warning "$logPrefix Catalog and all associated assignments will be deleted, please use -Force switch to proceed"
             return @{}
         }
-        $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$ServiceCatalogName'&`$expand=accessPackages,resources" -OutputType PSObject -DisableCache
-        if(($catalog|Measure-Object).Count -eq 0){
+        $encodedServiceCatalogName = ConvertTo-EntraOpsODataStringLiteral -Value $ServiceCatalogName
+        $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedServiceCatalogName'&`$expand=accessPackages,resources" -OutputType PSObject -DisableCache
+        if (($catalog | Measure-Object).Count -eq 0) {
             Write-Warning "$logPrefix Unable to obtain catalog by name"
             return @{}
         }
@@ -95,18 +96,18 @@ function Remove-EntraOpsServiceCatalog {
 
         # Terminal states for assignment requests — any of these means processing is done (success or failure).
         # Graph EM uses camelCase; comparisons are case-insensitive via -iin/-inotin equivalents.
-        $terminalStates = @("fulfilled","delivered","canceled","deliveryfailed","denied","completed","partiallydelivered","dropped")
+        $terminalStates = @("fulfilled", "delivered", "canceled", "deliveryfailed", "denied", "completed", "partiallydelivered", "dropped")
 
         # Step 1: Submit ALL adminRemove requests across all packages at once.
         $allRemoveRequestIds = [System.Collections.Generic.List[string]]::new()
-        foreach($accessPackage in $catalog.accessPackages){
+        foreach ($accessPackage in $catalog.accessPackages) {
             # Filtering by navigation path 'accessPackage/id' requires ConsistencyLevel:eventual + $count=true.
             $assignments = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignments?`$count=true&`$filter=accessPackage/id eq '$($accessPackage.Id)'&`$expand=target" -OutputType PSObject -DisableCache -ConsistencyLevel "eventual"
-            foreach($assignment in @($assignments) | Where-Object { $_ -and ($_.state -ine "expired") }){
+            foreach ($assignment in @($assignments) | Where-Object { $_ -and ($_.state -ine "expired") }) {
                 Write-Verbose "$logPrefix Queuing adminRemove for $($assignment.target.displayName) [$($assignment.target.email)] in $($accessPackage.displayName)"
-                $params = @{ requestType = "adminRemove"; assignment = @{id = $assignment.id} }
+                $params = @{ requestType = "adminRemove"; assignment = @{id = $assignment.id } }
                 $req = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests" -Body ($params | ConvertTo-Json -Depth 10) -OutputType PSObject
-                if($req -and $req.id){
+                if ($req -and $req.id) {
                     $allRemoveRequestIds.Add($req.id)
                 } else {
                     Write-Warning "$logPrefix adminRemove POST returned null for assignment '$($assignment.id)' — skipping"
@@ -115,21 +116,21 @@ function Remove-EntraOpsServiceCatalog {
         }
 
         # Step 2: Wait for ALL removal requests to reach a terminal state (single polling loop).
-        if($allRemoveRequestIds.Count -gt 0){
+        if ($allRemoveRequestIds.Count -gt 0) {
             Write-Verbose "$logPrefix Waiting for $($allRemoveRequestIds.Count) assignment removal request(s) to complete"
             $i = 0
             $confirmed = $false
-            while(-not $confirmed){
+            while (-not $confirmed) {
                 Start-Sleep -Seconds ([Math]::Pow(2, $i))
                 $pending = @($allRemoveRequestIds | ForEach-Object {
-                    Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests/$_" -OutputType PSObject -DisableCache
-                } | Where-Object { $_ -and ($terminalStates -notcontains $_.status.ToLower()) })
-                if($pending.Count -eq 0){
+                        Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests/$_" -OutputType PSObject -DisableCache
+                    } | Where-Object { $_ -and ($terminalStates -notcontains $_.status.ToLower()) })
+                if ($pending.Count -eq 0) {
                     Write-Verbose "$logPrefix All assignment removals reached terminal state"
                     $confirmed = $true
                 } else {
                     $i++
-                    if($i -gt 9){
+                    if ($i -gt 9) {
                         Write-Warning "$logPrefix $($pending.Count) assignment removal(s) still pending after max retries — proceeding anyway"
                         break
                     }
@@ -139,7 +140,7 @@ function Remove-EntraOpsServiceCatalog {
         }
 
         # Step 3: Delete each access package (remove resource role scopes first — Graph 400s otherwise).
-        foreach($accessPackage in $catalog.accessPackages){
+        foreach ($accessPackage in $catalog.accessPackages) {
             $resourceRoleScopes = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($accessPackage.Id)/resourceRoleScopes" -OutputType PSObject -DisableCache
             foreach ($rrs in @($resourceRoleScopes) | Where-Object { $_ -and $_.Id }) {
                 Write-Verbose "$logPrefix Removing resource role scope $($rrs.Id) from $($accessPackage.displayName)"

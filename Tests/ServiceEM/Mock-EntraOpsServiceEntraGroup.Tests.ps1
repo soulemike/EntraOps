@@ -319,11 +319,11 @@ Describe "New-EntraOpsSubscriptionLandingZone - Unit Tests" {
     }
     
     Context "Config Loading" {
-        It "Should auto-load config from $PWD when global is null" {
+        It "Should report no config when the probed locations contain none" {
             $Global:EntraOpsConfig = $null
             
             # Simulate finding config
-            $configPaths = @("$PWD/EntraOpsConfig.json", "$PSScriptRoot/EntraOpsConfig.json")
+            $configPaths = @((Join-Path $TestDrive 'config-probe/EntraOpsConfig.json'))
             $configLoaded = $false
             
             foreach ($path in $configPaths) {
@@ -334,7 +334,7 @@ Describe "New-EntraOpsSubscriptionLandingZone - Unit Tests" {
             }
             
             # In real scenario, this would load the file
-            $configLoaded | Should -Be $false # No config exists in test environment
+            $configLoaded | Should -Be $false
         }
     }
     

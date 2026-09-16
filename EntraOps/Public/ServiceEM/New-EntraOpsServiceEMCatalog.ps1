@@ -34,10 +34,12 @@ function New-EntraOpsServiceEMCatalog {
     )
 
     begin {
-        try{
+        $catalogDisplayName = "Catalog-$ServiceName"
+        $encodedCatalogDisplayName = ConvertTo-EntraOpsODataStringLiteral -Value $catalogDisplayName
+        try {
             Write-Verbose "$logPrefix Looking up Catalog"
-            $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq 'Catalog-$ServiceName'&`$expand=accessPackages,resources" -OutputType PSObject
-        }catch{
+            $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject
+        } catch {
             Write-Verbose "$logPrefix Failed to find Catalog — will attempt create and handle DuplicateCatalog"
             Write-Error $_
         }
@@ -46,20 +48,20 @@ function New-EntraOpsServiceEMCatalog {
     process {
         Write-Host "$logPrefix Beginning EM Catalog"
 
-        try{
-            if(-not $catalog){
+        try {
+            if (-not $catalog) {
                 Write-Verbose "$logPrefix Creating Catalog"
-                $catalog = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs" -Body (@{displayName = "Catalog-$ServiceName"} | ConvertTo-Json) -OutputType PSObject
+                $catalog = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs" -Body (@{displayName = $catalogDisplayName } | ConvertTo-Json) -OutputType PSObject
             }
-        }catch{
+        } catch {
             # DuplicateCatalog (400) means the catalog exists but the initial lookup failed
             # (e.g. due to a transient GatewayTimeout). Retry the lookup before giving up.
-            if($_.FullyQualifiedErrorId -like "DuplicateCatalog*" -or $_.Exception.Message -like "*DuplicateCatalog*"){
+            if ($_.FullyQualifiedErrorId -like "DuplicateCatalog*" -or $_.Exception.Message -like "*DuplicateCatalog*") {
                 Write-Verbose "$logPrefix DuplicateCatalog — retrying lookup"
-                try{
-                    $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq 'Catalog-$ServiceName'&`$expand=accessPackages,resources" -OutputType PSObject
+                try {
+                    $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject
                     Write-Verbose "$logPrefix Recovered catalog via retry lookup: $($catalog.Id)"
-                }catch{
+                } catch {
                     Write-Verbose "$logPrefix Retry lookup also failed"
                     Write-Error $_
                 }
@@ -73,16 +75,16 @@ function New-EntraOpsServiceEMCatalog {
     end {
         $confirmed = $false
         $i = 0
-        while(-not $confirmed){
-            Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
-            $checkCatalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq 'Catalog-$ServiceName'&`$expand=accessPackages,resources" -OutputType PSObject
-            if($checkCatalog -and $catalog -and $checkCatalog.Id -eq $catalog.Id){
+        while (-not $confirmed) {
+            Start-Sleep -Seconds ([Math]::Pow(2, $i) - 1)
+            $checkCatalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject
+            if ($checkCatalog -and $catalog -and $checkCatalog.Id -eq $catalog.Id) {
                 Write-Verbose "$logPrefix Graph consistency found confirming"
                 $confirmed = $true
                 continue
             }
             $i++
-            if($i -gt 10){
+            if ($i -gt 10) {
                 throw "Catalog object consistency with Entra not achieved"
             }
             Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"

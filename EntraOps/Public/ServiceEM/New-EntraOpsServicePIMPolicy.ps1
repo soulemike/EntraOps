@@ -13,8 +13,8 @@
 
     When EntraOpsConfig.ServiceEM.PIMAuthenticationContext.EnableAuthenticationContext
     is true and an AuthenticationContextClassReferenceId is configured for the
-    group's access level (ControlPlane / ManagementPlane / WorkloadPlane), an
-    authentication context step-up is added to the enablement rules.
+    group's access level (ControlPlane / ManagementPlane / WorkloadPlane), a
+    dedicated authentication context rule enforces Conditional Access step-up.
 
     Access level is determined from the group DisplayName (ControlPlane,
     ManagementPlane, or WorkloadPlane).
@@ -60,6 +60,7 @@ function New-EntraOpsServicePIMPolicy {
     begin {
         $groupPolicies = @()
         $groupPolicyAssignments = @()
+        $policyUpdateFailures = [System.Collections.Generic.List[string]]::new()
         
         # Load PIM Authentication Context configuration from global config
         $pimAuthContextConfig = $null
@@ -74,7 +75,7 @@ function New-EntraOpsServicePIMPolicy {
     process {
         Write-Host "$logPrefix Beginning PIM Policy"
 
-        foreach($group in $ServiceGroups|Where-Object{$_.DisplayName -notlike "*Members*"}){
+        foreach ($group in $ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" }) {
             # Determine access level from group DisplayName
             $accessLevel = $null
             if ($group.DisplayName -match 'ControlPlane') {
@@ -89,25 +90,25 @@ function New-EntraOpsServicePIMPolicy {
             $currentGroupPolicyParams = @{
                 rules = @(
                     @{
-                        "@odata.type" = "#microsoft.graph.unifiedRoleManagementPolicyExpirationRule"
-                        id = "Expiration_Admin_Eligibility"
+                        "@odata.type"        = "#microsoft.graph.unifiedRoleManagementPolicyExpirationRule"
+                        id                   = "Expiration_Admin_Eligibility"
                         isExpirationRequired = $false
                     },
                     @{
-                        "@odata.type" = "#microsoft.graph.unifiedRoleManagementPolicyExpirationRule"
-                        id = "Expiration_Admin_Assignment"
+                        "@odata.type"        = "#microsoft.graph.unifiedRoleManagementPolicyExpirationRule"
+                        id                   = "Expiration_Admin_Assignment"
                         isExpirationRequired = $true
-                        maximumDuration = "P15D"
+                        maximumDuration      = "P15D"
                     },
                     @{
-                        "@odata.type" = "#microsoft.graph.unifiedRoleManagementPolicyExpirationRule"
-                        id = "Expiration_EndUser_Assignment"
+                        "@odata.type"   = "#microsoft.graph.unifiedRoleManagementPolicyExpirationRule"
+                        id              = "Expiration_EndUser_Assignment"
                         maximumDuration = "PT10H"
                     },
                     @{
                         "@odata.type" = "#microsoft.graph.unifiedRoleManagementPolicyEnablementRule"
-                        id = "Enablement_EndUser_Assignment"
-                        enabledRules = @(
+                        id            = "Enablement_EndUser_Assignment"
+                        enabledRules  = @(
                             "MultiFactorAuthentication",
                             "Justification"
                         )
@@ -115,21 +116,26 @@ function New-EntraOpsServicePIMPolicy {
                 )
             }
 
-            # Add authentication context to enablement rules if explicitly enabled and configured for this access level
+            $accessLevelConfig = if ($accessLevel -and $pimAuthContextConfig -is [System.Collections.IDictionary]) {
+                $pimAuthContextConfig[$accessLevel]
+            } elseif ($accessLevel -and $pimAuthContextConfig) {
+                $pimAuthContextConfig.PSObject.Properties[$accessLevel].Value
+            }
+
+            # Add authentication context if explicitly enabled and configured for this access level
             if ($pimAuthContextConfig -and 
                 $pimAuthContextConfig.EnableAuthenticationContext -eq $true -and
-                $accessLevel -and 
-                $pimAuthContextConfig[$accessLevel]) {
+                $accessLevelConfig) {
                 
-                $authContextId = $pimAuthContextConfig[$accessLevel].AuthenticationContextClassReferenceId
+                $authContextId = $accessLevelConfig.AuthenticationContextClassReferenceId
                 if (-not [string]::IsNullOrWhiteSpace($authContextId)) {
                     Write-Verbose "$logPrefix Enabling authentication context '$authContextId' for $accessLevel group: $($group.DisplayName)"
-                    
-                    # Add authentication context to the enablement rule
-                    $enablementRule = $currentGroupPolicyParams.rules | Where-Object { $_.id -eq "Enablement_EndUser_Assignment" }
-                    if ($enablementRule) {
-                        # Add AuthenticationContext to enabled rules
-                        $enablementRule.enabledRules += "AuthenticationContext"
+
+                    $currentGroupPolicyParams.rules += @{
+                        "@odata.type" = "#microsoft.graph.unifiedRoleManagementPolicyAuthenticationContextRule"
+                        id            = "AuthenticationContext_EndUser_Assignment"
+                        isEnabled     = $true
+                        claimValue    = $authContextId
                     }
                 } else {
                     Write-Verbose "$logPrefix Authentication context enabled but no ID configured for $accessLevel - using MFA + Justification only"
@@ -155,14 +161,19 @@ function New-EntraOpsServicePIMPolicy {
 
             try {
                 Write-Verbose "$logPrefix Updating PIM Policy ID: $($memberPolicy.policyId)"
-                Invoke-EntraOpsMsGraphQuery -Method PATCH -Uri "/v1.0/policies/roleManagementPolicies/$($memberPolicy.policyId)" -Body ($currentGroupPolicyParams | ConvertTo-Json -Depth 10) | Out-Null
+                Invoke-EntraOpsMsGraphQuery -Method PATCH -Uri "/v1.0/policies/roleManagementPolicies/$($memberPolicy.policyId)" -Body ($currentGroupPolicyParams | ConvertTo-Json -Depth 10) -ThrowOnFailure | Out-Null
             } catch {
                 Write-Warning "$logPrefix Failed to update PIM Policy for group $($group.Id). Error: $_"
+                $policyUpdateFailures.Add("$($group.Id): $($_.Exception.Message)")
             }
         }
     }
 
     end {
+        if ($policyUpdateFailures.Count -gt 0) {
+            throw "$logPrefix Failed to update PIM policy for $($policyUpdateFailures.Count) group(s): $($policyUpdateFailures -join '; ')"
+        }
+
         # When no non-Members groups exist (e.g., all admin groups delegated), nothing to return.
         if (($ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" } | Measure-Object).Count -eq 0) {
             return [psobject[]]@()

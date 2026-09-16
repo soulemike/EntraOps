@@ -65,7 +65,8 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
     # 2. Search by default display name.
     Write-Verbose "$logPrefix Searching for existing $Plane group by name: '$DefaultGroupName'"
     try {
-        $found = Get-MgGroup -Filter "displayName eq '$DefaultGroupName'" -ConsistencyLevel eventual -ErrorAction Stop
+        $escapedDefaultGroupName = $DefaultGroupName.Replace("'", "''")
+        $found = Get-MgGroup -Filter "displayName eq '$escapedDefaultGroupName'" -ConsistencyLevel eventual -ErrorAction Stop
     } catch {
         Write-Verbose "$logPrefix Name-based lookup failed: $_"
         $found = $null
@@ -124,12 +125,12 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
         $ownerUser = Get-MgUser -UserId $mgContext.Account -ErrorAction Stop
 
         $newGroupParams = @{
-            DisplayName        = $DefaultGroupName
-            Description        = "Tenant-wide $Plane delegation group for ServiceEM landing zones (role-assignable)"
-            MailNickname       = ($DefaultGroupName -replace '[^a-zA-Z0-9]', '')
-            SecurityEnabled    = $true
-            MailEnabled        = $false
-            IsAssignableToRole = $true
+            DisplayName         = $DefaultGroupName
+            Description         = "Tenant-wide $Plane delegation group for ServiceEM landing zones (role-assignable)"
+            MailNickname        = ($DefaultGroupName -replace '[^a-zA-Z0-9]', '')
+            SecurityEnabled     = $true
+            MailEnabled         = $false
+            IsAssignableToRole  = $true
             "owners@odata.bind" = @("https://graph.microsoft.com/v1.0/users/$($ownerUser.Id)")
         }
         $newGroup = New-MgGroup -BodyParameter $newGroupParams -ErrorAction Stop
