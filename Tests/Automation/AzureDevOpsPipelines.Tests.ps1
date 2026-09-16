@@ -63,6 +63,19 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not [bool](Get-Module -ListAv
         $GitPushScript | Should -Match "git add --force --all -- '\./PrivilegedEAM'"
     }
 
+    It 'scopes the OAuth header and restores temporary git configuration' {
+        $GitPushScript = Get-Content -LiteralPath (Join-Path $PipelineRoot 'scripts/Ado-GitPush.ps1') -Raw
+
+        $GitPushScript | Should -Match '\$CollectionUri\s*=\s*\$env:SYSTEM_COLLECTIONURI'
+        $GitPushScript | Should -Match '\$ExtraHeaderKey\s*=\s*"http\.\$\(\$CollectionUri\.TrimEnd'
+        $GitPushScript | Should -Match "GIT_CONFIG_COUNT\s*=\s*'2'"
+        $GitPushScript | Should -Match 'GIT_CONFIG_KEY_0\s*=\s*\$ExtraHeaderKey'
+        $GitPushScript | Should -Match 'GIT_CONFIG_VALUE_0\s*=\s*'''
+        $GitPushScript | Should -Match 'GIT_CONFIG_KEY_1\s*=\s*\$ExtraHeaderKey'
+        $GitPushScript | Should -Not -Match "GIT_CONFIG_KEY_[01]\s*=\s*'http\.extraHeader'"
+        $GitPushScript | Should -Match '(?s)finally\s*\{.*SetEnvironmentVariable\(\$Name, \$PreviousEnvironment\[\$Name\]\)'
+    }
+
     It 'uses the documented service connection by default and allows an override' {
         foreach ($PipelineName in @('azure-pipelines-pull.yml', 'azure-pipelines-push.yml', 'azure-pipelines-push-reporting.yml', 'azure-pipelines-pull-tenant-governance.yml', 'azure-pipelines-update.yml')) {
             $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw

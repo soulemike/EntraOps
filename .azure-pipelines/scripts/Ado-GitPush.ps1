@@ -43,13 +43,62 @@ if ($LASTEXITCODE -ne 0) {
     exit 0
 }
 
-$env:GIT_CONFIG_COUNT = '2'
-$env:GIT_CONFIG_KEY_0 = 'http.extraHeader'
-$env:GIT_CONFIG_VALUE_0 = ''
-$env:GIT_CONFIG_KEY_1 = 'http.extraHeader'
-$env:GIT_CONFIG_VALUE_1 = "AUTHORIZATION: bearer $AccessToken"
-git push origin HEAD:$BranchName
-if ($LASTEXITCODE -ne 0) {
+if ([string]::IsNullOrWhiteSpace($AccessToken)) {
+    Write-Error "Azure DevOps access token is required for git push."
+    exit 1
+}
+
+$CollectionUri = $env:SYSTEM_COLLECTIONURI
+if ([string]::IsNullOrWhiteSpace($CollectionUri)) {
+    $OriginUrl = [string](git remote get-url origin)
+    $OriginUrl = $OriginUrl.Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($OriginUrl)) {
+        Write-Error "Unable to determine the origin URL for credential scoping."
+        exit 1
+    }
+    try {
+        $OriginUri = [uri]$OriginUrl
+        $CollectionUri = $OriginUri.GetLeftPart([System.UriPartial]::Authority)
+    } catch {
+        Write-Error "Unable to parse the origin URL for credential scoping: $_"
+        exit 1
+    }
+}
+
+try {
+    $CredentialScopeUri = [uri]$CollectionUri
+    if (-not $CredentialScopeUri.IsAbsoluteUri -or $CredentialScopeUri.Scheme -ne 'https') {
+        throw "Credential scope must be an absolute HTTPS URI."
+    }
+    $CollectionUri = $CredentialScopeUri.AbsoluteUri
+} catch {
+    Write-Error "Invalid credential scope URI: $_"
+    exit 1
+}
+
+$ExtraHeaderKey = "http.$($CollectionUri.TrimEnd('/'))/.extraHeader"
+$ManagedEnvironment = @('GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_KEY_1', 'GIT_CONFIG_VALUE_1')
+$PreviousEnvironment = @{}
+foreach ($Name in $ManagedEnvironment) {
+    $PreviousEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name)
+}
+
+$PushExitCode = 1
+try {
+    $env:GIT_CONFIG_COUNT = '2'
+    $env:GIT_CONFIG_KEY_0 = $ExtraHeaderKey
+    $env:GIT_CONFIG_VALUE_0 = ''
+    $env:GIT_CONFIG_KEY_1 = $ExtraHeaderKey
+    $env:GIT_CONFIG_VALUE_1 = "AUTHORIZATION: bearer $AccessToken"
+    git push origin HEAD:$BranchName
+    $PushExitCode = $LASTEXITCODE
+} finally {
+    foreach ($Name in $ManagedEnvironment) {
+        [Environment]::SetEnvironmentVariable($Name, $PreviousEnvironment[$Name])
+    }
+}
+
+if ($PushExitCode -ne 0) {
     Write-Error "git push failed."
     exit 1
 }

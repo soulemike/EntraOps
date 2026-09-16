@@ -88,7 +88,18 @@ Describe 'Portable automation entry points' {
         Mock Connect-EntraOps -ModuleName EntraOps { throw 'Connection should not be opened.' }
         Mock New-EntraOpsReportingData -ModuleName EntraOps { @() }
 
-        $Result = Invoke-EntraOpsReportingGeneration -ConfigFilePath $ConfigPath
+        # A configured deployment repository commits a real snapshot manifest under the module base
+        # folder, which EntraOps.psm1 also defines module-scoped, shadowing the global for the
+        # cmdlet's unqualified read. Point it at an empty folder to exercise the missing-manifest path.
+        $SnapshotRoot = Join-Path $TestDrive 'no-snapshot'
+        New-Item -Path $SnapshotRoot -ItemType Directory -Force | Out-Null
+        $PreviousBaseFolder = InModuleScope EntraOps { $EntraOpsBaseFolder }
+        try {
+            InModuleScope EntraOps -Parameters @{ Path = $SnapshotRoot } { param($Path) Set-Variable -Name EntraOpsBaseFolder -Value $Path -Scope Script -Force }
+            $Result = Invoke-EntraOpsReportingGeneration -ConfigFilePath $ConfigPath
+        } finally {
+            InModuleScope EntraOps -Parameters @{ Path = $PreviousBaseFolder } { param($Path) Set-Variable -Name EntraOpsBaseFolder -Value $Path -Scope Script -Force }
+        }
 
         $Result.Status | Should -Be 'Generated'
         Should -Invoke Connect-EntraOps -ModuleName EntraOps -Times 0
