@@ -409,7 +409,7 @@ Administrator when Azure role assignments are configured.
 3. Run `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-ADO" -ConfigFile "./EntraOpsConfig.json"` to create the app registration and configured permissions.
 4. Create an **Azure Resource Manager -> Workload Identity Federation (manual)** service connection. Add the exact issuer and subject shown by Azure DevOps as a federated credential on the app registration; use `api://AzureADTokenExchange` as the audience.
 5. Import the five production YAML pipelines from `.azure-pipelines/`: pull, push, reporting, Tenant Governance, and update. Name the pull pipeline `azure-pipelines-pull` so its completion triggers resolve without modification. Optionally import `azure-pipelines-test.yml` for repository, cross-platform Pester, and browser validation; configure it as a build-validation policy for Azure Repos pull requests.
-6. Define `EntraOpsAzureServiceConnection` with the exact service connection name. Add the secret `EntraOpsUpdatePat` only for a private update source.
+6. Name the service connection `EntraOps-ServiceConnection` to use the built-in default; in that case, do not create an `EntraOpsAzureServiceConnection` variable. Create `EntraOpsAzureServiceConnection` only when using a different service connection name. Add the secret `EntraOpsUpdatePat` only for a private update source.
 7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, and authorize the service connection for the imported pipelines.
 8. Apply config-driven schedules and commit the result:
 
@@ -482,9 +482,11 @@ open the service connection's **Pipeline permissions** and add each imported Ent
 | `azure-pipelines-update.yml`                 | Updates EntraOps from the configured upstream                                              | Configured schedule or manual                                     |
 | `azure-pipelines-test.yml`                   | Validates the repository on Linux, Windows, and macOS and runs browser tests               | Pushes to `main`; pull requests through a build-validation policy |
 
-Set `EntraOpsAzureServiceConnection` to the exact service connection name on every production
-pipeline, or provide it through a linked Variable Group. Define secret `EntraOpsUpdatePat` only for
-a private update source. In **Project Settings -> Repositories -> Security**, grant
+The production pipelines use `EntraOps-ServiceConnection` by default. Do not create
+`EntraOpsAzureServiceConnection` when the service connection has that name. Create the variable
+with a different exact service connection name only when needed, or provide that override through a
+linked Variable Group. Define secret `EntraOpsUpdatePat` only for a private update source. In
+**Project Settings -> Repositories -> Security**, grant
 `<Project> Build Service (<Organization>)` **Contribute**; also grant branch-policy bypass when the
 pull, Tenant Governance, or update pipeline must write to a protected branch.
 
@@ -503,7 +505,7 @@ that reporting guide.
 
 ### Azure DevOps troubleshooting {#azure-devops-troubleshooting}
 
-- **Service connection unavailable:** verify `EntraOpsAzureServiceConnection` exactly matches the connection name and authorize it for the pipeline.
+- **Service connection unavailable:** verify that the service connection is named `EntraOps-ServiceConnection` when no override variable exists, or verify the exact custom name in `EntraOpsAzureServiceConnection`, then authorize it for the pipeline.
 - **Federated sign-in fails:** compare the exact issuer, case-sensitive subject, and `api://AzureADTokenExchange` audience shown by Azure DevOps with the app registration credential.
 - **Git push returns HTTP 403:** grant `<Project> Build Service (<Organization>)` **Contribute** and any required branch-policy bypass.
 - **Schedule is missing:** run `Update-EntraOpsAzureDevOpsSchedules`, commit the YAML changes, and verify `BranchName` matches the pipeline branch.

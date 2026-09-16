@@ -17,7 +17,7 @@ pr: none
 
 variables:
   ConfigFile: ./EntraOpsConfig.json
-  AzureServiceConnection: $(EntraOpsAzureServiceConnection)
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
@@ -41,6 +41,7 @@ steps:
         }
         Update-EntraOps -ConfigFile '$(ConfigFile)'
       pwsh: true
+      azurePowerShellVersion: LatestVersion
     env:
       # Optional: Personal Access Token for private upstream repos
       ENTRAOPS_PAT: $(EntraOpsUpdatePat)

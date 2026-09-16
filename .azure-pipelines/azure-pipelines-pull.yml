@@ -26,7 +26,7 @@ schedules:
 variables:
   ConfigFile: ./EntraOpsConfig.json
   # ADO Service Connection name (configured in Project Settings -> Service Connections)
-  AzureServiceConnection: $(EntraOpsAzureServiceConnection)
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
@@ -56,7 +56,8 @@ steps:
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps
-        Connect-EntraOps -AuthenticationType FederatedCredentials -ConfigFilePath '$(ConfigFile)'
+        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+        Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $Config.TenantName -ConfigFilePath '$(ConfigFile)'
         try {
           $ClassificationUpdateParams = $EntraOpsConfig.AutomatedClassificationUpdate
           Update-EntraOpsClassificationFiles @ClassificationUpdateParams
@@ -64,7 +65,7 @@ steps:
           Disconnect-EntraOps
         }
       pwsh: true
-      preferredAzurePowerShellVersion: "12.3.0"
+      azurePowerShellVersion: LatestVersion
 
   - task: AzurePowerShell@5
     displayName: "Get updated scope for definition of Control Plane in Entra ID"
@@ -74,7 +75,8 @@ steps:
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps
-        Connect-EntraOps -AuthenticationType FederatedCredentials -ConfigFilePath '$(ConfigFile)'
+        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+        Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $Config.TenantName -ConfigFilePath '$(ConfigFile)'
         try {
           $ControlPlaneUpdateParams = $EntraOpsConfig.AutomatedControlPlaneScopeUpdate
           Update-EntraOpsClassificationControlPlaneScope @ControlPlaneUpdateParams
@@ -82,7 +84,7 @@ steps:
           Disconnect-EntraOps
         }
       pwsh: true
-      preferredAzurePowerShellVersion: "12.3.0"
+      azurePowerShellVersion: LatestVersion
 
   - task: AzurePowerShell@5
     displayName: "Run Save-EntraOpsPrivilegedEAMJson"
@@ -91,14 +93,15 @@ steps:
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps
-        Connect-EntraOps -AuthenticationType FederatedCredentials -ConfigFilePath '$(ConfigFile)'
+        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+        Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $Config.TenantName -ConfigFilePath '$(ConfigFile)'
         try {
           Save-EntraOpsPrivilegedEAMJson -RbacSystems $EntraOpsConfig.RbacSystems
         } finally {
           Disconnect-EntraOps
         }
       pwsh: true
-      preferredAzurePowerShellVersion: "12.3.0"
+      azurePowerShellVersion: LatestVersion
 
   - task: PowerShell@2
     displayName: "Validate generated Privileged EAM artifacts"

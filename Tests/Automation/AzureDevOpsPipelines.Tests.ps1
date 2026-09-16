@@ -58,6 +58,34 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not [bool](Get-Module -ListAv
         }
     }
 
+    It 'force-stages generated PrivilegedEAM output for Azure DevOps commits' {
+        $GitPushScript = Get-Content -LiteralPath (Join-Path $PipelineRoot 'scripts/Ado-GitPush.ps1') -Raw
+        $GitPushScript | Should -Match "git add --force --all -- '\./PrivilegedEAM'"
+    }
+
+    It 'uses the documented service connection by default and allows an override' {
+        foreach ($PipelineName in @('azure-pipelines-pull.yml', 'azure-pipelines-push.yml', 'azure-pipelines-push-reporting.yml', 'azure-pipelines-pull-tenant-governance.yml', 'azure-pipelines-update.yml')) {
+            $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
+            $Content | Should -Match "AzureServiceConnection: \$\[ coalesce\(variables\['EntraOpsAzureServiceConnection'\], 'EntraOps-ServiceConnection'\) \]"
+        }
+    }
+
+    It 'passes the configured tenant explicitly to EntraOps connections' {
+        foreach ($PipelineName in @('azure-pipelines-pull.yml', 'azure-pipelines-push.yml')) {
+            $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
+            $Content | Should -Match 'Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName \$Config\.TenantName -ConfigFilePath'
+        }
+    }
+
+    It 'uses the latest Az version for every Azure PowerShell task' {
+        foreach ($PipelineName in $PipelineNames) {
+            $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw | ConvertFrom-Yaml
+            foreach ($Step in @($Pipeline.steps | Where-Object task -Like 'AzurePowerShell@*')) {
+                $Step.inputs.azurePowerShellVersion | Should -Be 'LatestVersion' -Because "$PipelineName should use the latest Az module version"
+            }
+        }
+    }
+
     It 'covers GitHub push operations and Tenant Governance snapshots' {
         $PushContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-push.yml') -Raw
         foreach ($Command in @(
@@ -114,6 +142,8 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not [bool](Get-Module -ListAv
 
     It 'tests reports and gates artifacts on private project visibility' {
         $ReportingContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-push-reporting.yml') -Raw
+        $ReportingContent | Should -Match 'task: UseNode@1'
+        $ReportingContent | Should -Not -Match 'NodeTool@0'
         $ReportingContent | Should -Match 'Invoke-EntraOpsReportingGeneration'
         $ReportingContent | Should -Match 'npm run test:reports'
         $ReportingContent | Should -Match 'PublishPipelineArtifact@1'

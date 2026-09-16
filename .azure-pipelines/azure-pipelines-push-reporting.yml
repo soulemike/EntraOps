@@ -24,7 +24,7 @@ resources:
 
 variables:
   ConfigFile: ./EntraOpsConfig.json
-  AzureServiceConnection: $(EntraOpsAzureServiceConnection)
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
@@ -63,9 +63,9 @@ steps:
           -AllowPartialTenantGovernanceSnapshot:([bool]::Parse('${{ parameters.allowPartialTenantGovernance }}')) `
           -RemoveClassificationRepositoryAfterRun | Out-Host
       pwsh: true
-      preferredAzurePowerShellVersion: "12.3.0"
+      azurePowerShellVersion: LatestVersion
 
-  - task: NodeTool@0
+  - task: UseNode@1
     displayName: "Use Node.js 22"
     condition: eq(variables.ReportingEnabled, 'true')
     inputs:

@@ -31,7 +31,7 @@ variables:
   # Path to the environment-specific config file (committed in ado/main)
   ConfigFile: ./EntraOpsConfig.json
   # ADO Service Connection name targeting the target tenant (Workload Identity Federation)
-  AzureServiceConnection: $(EntraOpsAzureServiceConnection)
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
@@ -71,7 +71,7 @@ steps:
           exit 0
         }
 
-        Connect-EntraOps -AuthenticationType FederatedCredentials -ConfigFilePath '$(ConfigFile)'
+        Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $Config.TenantName -ConfigFilePath '$(ConfigFile)'
         try {
           if ($Config.LogAnalytics.IngestToLogAnalytics -eq $true) {
             $LogAnalyticsParams = $Config.LogAnalytics
@@ -104,4 +104,4 @@ steps:
           Disconnect-EntraOps
         }
       pwsh: true
-      preferredAzurePowerShellVersion: "12.3.0"
+      azurePowerShellVersion: LatestVersion

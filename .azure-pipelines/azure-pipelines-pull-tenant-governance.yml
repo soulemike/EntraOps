@@ -22,7 +22,7 @@ parameters:
 
 variables:
   ConfigFile: ./EntraOpsConfig.json
-  AzureServiceConnection: $(EntraOpsAzureServiceConnection)
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
@@ -51,7 +51,7 @@ steps:
         }
         Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath '$(ConfigFile)' -AuthenticationType FederatedCredentials -Operation $Operation -TimeoutInSeconds ${{ parameters.timeoutInSeconds }} -Force | Out-Host
       pwsh: true
-      preferredAzurePowerShellVersion: "12.3.0"
+      azurePowerShellVersion: LatestVersion
 
   - task: PowerShell@2
     displayName: "Git Commit & Push"

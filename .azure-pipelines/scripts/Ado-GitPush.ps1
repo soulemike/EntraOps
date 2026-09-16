@@ -21,6 +21,16 @@ if ($LASTEXITCODE -ne 0) {
     exit 0
 }
 
+# PrivilegedEAM is ignored for local safety because it contains tenant data, but
+# the automation pipelines explicitly publish this generated output to private repositories.
+if (Test-Path -LiteralPath './PrivilegedEAM' -PathType Container) {
+    git add --force --all -- './PrivilegedEAM'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "git add failed for generated PrivilegedEAM output."
+        exit 0
+    }
+}
+
 git diff-index --quiet HEAD
 if ($LASTEXITCODE -eq 0) {
     Write-Host "No changes to commit."
